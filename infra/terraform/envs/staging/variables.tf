@@ -6,7 +6,7 @@ variable "linode_token" {
 
 variable "region" {
   type    = string
-  default = "us-east"
+  default = "us-southeast"  # Atlanta — supports VPC + LKE
 }
 
 variable "environment" {
@@ -14,8 +14,3 @@ variable "environment" {
   default = "staging"
 }
 
-variable "db_password" {
-  type      = string
-  sensitive = true
-  default   = "CHANGE_ME"
-}

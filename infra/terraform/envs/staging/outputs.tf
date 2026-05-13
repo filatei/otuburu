@@ -14,12 +14,7 @@ output "lke_api_endpoint" {
 }
 
 output "kubeconfig" {
-  description = "Staging kubeconfig (base64-encoded)"
+  description = "Staging kubeconfig (base64-encoded) — use to set STAGING_KUBECONFIG secret"
   value       = module.lke.kubeconfig
   sensitive   = true
-}
-
-output "storage_buckets" {
-  description = "Object Storage bucket names"
-  value       = module.storage.bucket_names
 }

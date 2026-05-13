@@ -1,0 +1,39 @@
+services:
+
+  engine:
+    image: ghcr.io/filatei/otuburu-engine:staging
+    restart: always
+    environment:
+      ENGINE_GRPC_ADDR: "0.0.0.0:9090"
+      RUST_LOG: "otuburu_engine=info,warn"
+    expose:
+      - "9090"          # internal only — gateway reaches it on the Docker network
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c 'cat /dev/null > /dev/tcp/localhost/9090' && echo ok || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  gateway:
+    image: ghcr.io/filatei/otuburu-gateway:staging
+    restart: always
+    environment:
+      PORT: "8082"
+      ENGINE_ADDR: "engine:9090"
+    ports:
+      - "8082:8082"     # exposed to nginx on host
+    networks:
+      - internal
+    depends_on:
+      - engine
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  internal:
+    driver: bridge

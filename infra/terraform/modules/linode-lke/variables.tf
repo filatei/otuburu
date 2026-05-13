@@ -12,7 +12,7 @@ variable "environment" {
 
 variable "k8s_version" {
   type    = string
-  default = "1.31"
+  default = "1.30"  # 1.31 not yet available in all Linode regions
 }
 
 variable "node_type" {

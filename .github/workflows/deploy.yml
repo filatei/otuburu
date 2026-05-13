@@ -3,25 +3,20 @@ name: Deploy staging
 on:
   push:
     branches: [main]
-  workflow_dispatch:      # allow manual trigger
+  workflow_dispatch:
 
 env:
-  REGISTRY: ghcr.io
   ENGINE_IMAGE:  ghcr.io/filatei/otuburu-engine
   GATEWAY_IMAGE: ghcr.io/filatei/otuburu-gateway
 
 jobs:
-  # ── Build + push Docker images ───────────────────────────────────────────────
+  # ── Build + push Docker images to GHCR ──────────────────────────────────────
   build:
     name: Build & push images
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write   # needed to push to ghcr.io
-
-    outputs:
-      engine_tag:  ${{ steps.meta-engine.outputs.version }}
-      gateway_tag: ${{ steps.meta-gateway.outputs.version }}
+      packages: write
 
     steps:
       - uses: actions/checkout@v4
@@ -39,35 +34,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Rust engine ──────────────────────────────────────────────────────────
-      - name: Docker metadata (engine)
-        id: meta-engine
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.ENGINE_IMAGE }}
-          tags: |
-            type=sha,prefix=,suffix=,format=short
-            type=raw,value=staging
-
       - name: Build & push engine
         uses: docker/build-push-action@v6
         with:
           context: rust-engine
           file:    rust-engine/Dockerfile
           push:    true
-          tags:    ${{ steps.meta-engine.outputs.tags }}
+          tags:    ${{ env.ENGINE_IMAGE }}:staging,${{ env.ENGINE_IMAGE }}:${{ github.sha }}
           cache-from: type=gha,scope=engine
           cache-to:   type=gha,mode=max,scope=engine
-
-      # ── Go gateway ───────────────────────────────────────────────────────────
-      - name: Docker metadata (gateway)
-        id: meta-gateway
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.GATEWAY_IMAGE }}
-          tags: |
-            type=sha,prefix=,suffix=,format=short
-            type=raw,value=staging
 
       - name: Build & push gateway
         uses: docker/build-push-action@v6
@@ -75,54 +50,28 @@ jobs:
           context: .
           file:    Dockerfile.gateway
           push:    true
-          tags:    ${{ steps.meta-gateway.outputs.tags }}
+          tags:    ${{ env.GATEWAY_IMAGE }}:staging,${{ env.GATEWAY_IMAGE }}:${{ github.sha }}
           cache-from: type=gha,scope=gateway
           cache-to:   type=gha,mode=max,scope=gateway
 
-  # ── Deploy to LKE staging ────────────────────────────────────────────────────
+  # ── SSH deploy: pull + restart on Linode VPS ────────────────────────────────
   deploy:
-    name: Deploy to LKE staging
+    name: Deploy to Linode VPS
     needs: build
     runs-on: ubuntu-latest
-    environment: staging   # requires STAGING_KUBECONFIG secret
+    environment: staging
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          version: "v1.31.0"
-
-      - name: Configure kubeconfig
-        run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.STAGING_KUBECONFIG }}" | base64 -d > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
-
-      - name: Apply namespace
-        run: kubectl apply -f infra/k8s/staging/namespace.yaml
-
-      - name: Deploy engine
-        env:
-          ENGINE_IMAGE: ${{ env.ENGINE_IMAGE }}:${{ needs.build.outputs.engine_tag }}
-          ENGINE_SHA:   ${{ needs.build.outputs.engine_tag }}
-        run: |
-          envsubst < infra/k8s/staging/engine-deploy.yaml | kubectl apply -f -
-          kubectl rollout status deployment/otuburu-engine \
-            -n otuburu-staging --timeout=120s
-
-      - name: Deploy gateway
-        env:
-          GATEWAY_IMAGE: ${{ env.GATEWAY_IMAGE }}:${{ needs.build.outputs.gateway_tag }}
-          GATEWAY_SHA:   ${{ needs.build.outputs.gateway_tag }}
-        run: |
-          envsubst < infra/k8s/staging/gateway-deploy.yaml | kubectl apply -f -
-          kubectl rollout status deployment/otuburu-gateway \
-            -n otuburu-staging --timeout=120s
-
-      - name: Print gateway external IP
-        run: |
-          echo "Waiting for LoadBalancer IP …"
-          kubectl get svc otuburu-gateway -n otuburu-staging \
-            -o jsonpath='{.status.loadBalancer.ingress[0].ip}' || true
+          host:       ${{ secrets.LINODE_HOST }}
+          username:   otuburu
+          key:        ${{ secrets.LINODE_SSH_KEY }}
+          port:       22
+          script: |
+            cd /home/otuburu/app
+            # Log into GHCR (token injected at deploy time)
+            echo "${{ secrets.GHCR_TOKEN }}" | \
+              docker login ghcr.io -u filatei --password-stdin
+            bash /home/otuburu/app/deploy.sh
