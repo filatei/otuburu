@@ -1,5 +1,25 @@
 services:
 
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-otuburu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-otuburu}
+      POSTGRES_DB:       ${POSTGRES_DB:-otuburu}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./go-services/wallet/internal/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    expose:
+      - "5432"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U otuburu"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   engine:
     image: ghcr.io/filatei/otuburu-engine:staging
     restart: always
@@ -7,7 +27,7 @@ services:
       ENGINE_GRPC_ADDR: "0.0.0.0:9090"
       RUST_LOG: "otuburu_engine=info,warn"
     expose:
-      - "9090"          # internal only — gateway reaches it on the Docker network
+      - "9090"
     networks:
       - internal
     healthcheck:
@@ -20,10 +40,10 @@ services:
     image: ghcr.io/filatei/otuburu-gateway:staging
     restart: always
     environment:
-      PORT: "8082"
+      PORT:        "8082"
       ENGINE_ADDR: "engine:9090"
     ports:
-      - "8082:8082"     # exposed to nginx on host
+      - "127.0.0.1:8082:8082"
     networks:
       - internal
     depends_on:
@@ -34,6 +54,34 @@ services:
       timeout: 5s
       retries: 3
 
+  wallet:
+    image: ghcr.io/filatei/otuburu-wallet:staging
+    restart: always
+    environment:
+      PORT:              "8083"
+      POSTGRES_HOST:     "postgres"
+      POSTGRES_USER:     ${POSTGRES_USER:-otuburu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-otuburu}
+      POSTGRES_DB:       ${POSTGRES_DB:-otuburu}
+      JWT_SECRET:        ${JWT_SECRET:-change-me-in-production}
+      WALLET_MNEMONIC:   ${WALLET_MNEMONIC:-}
+      TRONGRID_API_KEY:  ${TRONGRID_API_KEY:-}
+    ports:
+      - "127.0.0.1:8083:8083"
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
 networks:
   internal:
     driver: bridge
+
+volumes:
+  pgdata:

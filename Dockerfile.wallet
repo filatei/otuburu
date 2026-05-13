@@ -1,0 +1,17 @@
+FROM golang:1.23-bookworm AS builder
+
+WORKDIR /build
+COPY go-services/wallet/ go-services/wallet/
+
+WORKDIR /build/go-services/wallet
+RUN go mod download \
+ && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /otuburu-wallet ./cmd
+
+FROM gcr.io/distroless/static-debian12
+COPY --from=builder /otuburu-wallet /otuburu-wallet
+
+ENV PORT=8083 \
+    GIN_MODE=release
+
+EXPOSE 8083
+ENTRYPOINT ["/otuburu-wallet"]

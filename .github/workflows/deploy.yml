@@ -8,6 +8,7 @@ on:
 env:
   ENGINE_IMAGE:  ghcr.io/filatei/otuburu-engine
   GATEWAY_IMAGE: ghcr.io/filatei/otuburu-gateway
+  WALLET_IMAGE:  ghcr.io/filatei/otuburu-wallet
 
 jobs:
   # ── Build + push Docker images to GHCR ──────────────────────────────────────
@@ -53,6 +54,16 @@ jobs:
           tags:    ${{ env.GATEWAY_IMAGE }}:staging,${{ env.GATEWAY_IMAGE }}:${{ github.sha }}
           cache-from: type=gha,scope=gateway
           cache-to:   type=gha,mode=max,scope=gateway
+
+      - name: Build & push wallet
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file:    Dockerfile.wallet
+          push:    true
+          tags:    ${{ env.WALLET_IMAGE }}:staging,${{ env.WALLET_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=wallet
+          cache-to:   type=gha,mode=max,scope=wallet
 
   # ── Build Next.js frontend → static export ──────────────────────────────────
   frontend:
