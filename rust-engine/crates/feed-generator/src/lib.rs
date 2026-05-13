@@ -277,7 +277,8 @@ impl Generator for CryptoGenerator {
             Regime::Storm => self.cfg.high_vol,
         };
         let z = gaussian(&mut self.rng);
-        self.s *= ((self.cfg.mu - 0.5 * sigma * sigma) * self.cfg.dt + sigma * self.cfg.dt.sqrt() * z)
+        self.s *= ((self.cfg.mu - 0.5 * sigma * sigma) * self.cfg.dt
+            + sigma * self.cfg.dt.sqrt() * z)
             .exp();
         self.s += 0.00001 * (self.cfg.anchor - self.s);
 
