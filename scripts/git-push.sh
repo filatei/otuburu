@@ -6,9 +6,7 @@ set -euo pipefail
 MSG="${1:-chore: update}"
 GH_TOKEN="${GH_TOKEN:?Set GH_TOKEN=ghp_... before running}"
 
-# Update remote URL with fresh token (tokens expire)
 git remote set-url origin "https://filatei:${GH_TOKEN}@github.com/filatei/otuburu.git"
-
 git add -A
 if git diff --cached --quiet; then
   echo "Nothing to commit."

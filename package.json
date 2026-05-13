@@ -10,7 +10,10 @@
   },
   "dependencies": {
     "express": "^4.21.0",
+    "tweetsodium": "^0.0.4",
     "ws": "^8.18.0"
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  }
 }
