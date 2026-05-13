@@ -47,6 +47,12 @@ infra/terraform/**/terraform.tfstate.backup
 infra/terraform/**/terraform.tfvars
 infra/terraform/**/*.tfplan
 
+# Kubernetes kubeconfigs (sensitive — never commit)
+infra/*-kubeconfig.yaml
+
+# Generated Go proto stubs (rebuilt by CI / gen-proto-go.sh)
+go-services/gateway/internal/enginepb/*.go
+
 # Local artefacts not for the repo
 *.docx
 *.pdf

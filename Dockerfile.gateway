@@ -1,0 +1,41 @@
+# Build context: repo root  (docker build -f Dockerfile.gateway .)
+#
+# ── Stage 1: generate proto + build binary ───────────────────────────────────
+FROM golang:1.23-bookworm AS builder
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends protobuf-compiler \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install protoc plugins
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2 \
+ && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+
+WORKDIR /build
+
+# Copy proto source + generation script
+COPY rust-engine/proto/  rust-engine/proto/
+COPY scripts/gen-proto-go.sh scripts/
+
+# Copy gateway module
+COPY go-services/gateway/ go-services/gateway/
+
+# Generate Go stubs from proto (writes into go-services/gateway/internal/enginepb/)
+RUN bash scripts/gen-proto-go.sh
+
+# Resolve deps + compile
+WORKDIR /build/go-services/gateway
+RUN go mod tidy \
+ && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /otuburu-gateway ./cmd
+
+# ── Stage 2: minimal runtime ──────────────────────────────────────────────────
+FROM gcr.io/distroless/static-debian12
+
+COPY --from=builder /otuburu-gateway /otuburu-gateway
+
+ENV PORT=8082 \
+    ENGINE_ADDR=otuburu-engine:9090
+
+EXPOSE 8082
+
+ENTRYPOINT ["/otuburu-gateway"]
