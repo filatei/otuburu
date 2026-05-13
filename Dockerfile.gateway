@@ -2,6 +2,7 @@
 #
 # ── Stage 1: generate proto + build binary ───────────────────────────────────
 FROM golang:1.23-bookworm AS builder
+# Note: build context must be repo root (docker build -f Dockerfile.gateway .)
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends protobuf-compiler \

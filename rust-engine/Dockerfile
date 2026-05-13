@@ -1,5 +1,5 @@
 # ── Stage 1: build ───────────────────────────────────────────────────────────
-FROM rust:1.78-slim-bookworm AS builder
+FROM rust:1.85-slim-bookworm AS builder
 
 # protoc is required by tonic-build at compile time
 RUN apt-get update \
