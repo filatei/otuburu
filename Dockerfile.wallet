@@ -4,7 +4,7 @@ WORKDIR /build
 COPY go-services/wallet/ go-services/wallet/
 
 WORKDIR /build/go-services/wallet
-RUN go mod download \
+RUN go mod tidy \
  && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /otuburu-wallet ./cmd
 
 FROM gcr.io/distroless/static-debian12
