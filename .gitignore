@@ -1,0 +1,53 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Build artefacts
+dist/
+build/
+*.tsbuildinfo
+.cache/
+
+# Runtime
+logs/
+*.log
+*.pid
+*.seed
+*.tgz
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Rust
+rust-engine/target/
+**/*.rs.bk
+
+# Go
+go-services/**/vendor/
+go-services/**/*.test
+
+# Terraform — never commit secrets
+infra/terraform/**/.terraform/
+infra/terraform/**/.terraform.lock.hcl
+infra/terraform/**/terraform.tfstate
+infra/terraform/**/terraform.tfstate.backup
+infra/terraform/**/terraform.tfvars
+infra/terraform/**/*.tfplan
+
+# Local artefacts not for the repo
+*.docx
+*.pdf
+build/

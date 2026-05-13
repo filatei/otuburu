@@ -1,0 +1,18 @@
+[package]
+name        = "order-book"
+description = "In-memory position book and binary-options book with mark-to-market and stop-out logic"
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+license.workspace    = true
+
+[dependencies]
+feed-generator = { path = "../feed-generator" }
+tokio.workspace      = true
+serde.workspace      = true
+serde_json.workspace = true
+anyhow.workspace     = true
+thiserror.workspace  = true
+tracing.workspace    = true
+uuid.workspace       = true
+chrono.workspace     = true

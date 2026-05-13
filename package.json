@@ -1,0 +1,16 @@
+{
+  "name": "otuburu-demo",
+  "version": "0.1.0",
+  "description": "Otuburu synthetic brokerage — local demo (feeds + engine + dashboard)",
+  "main": "engine/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node engine/server.js",
+    "dev": "node engine/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "ws": "^8.18.0"
+  },
+  "engines": { "node": ">=18" }
+}

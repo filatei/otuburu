@@ -1,0 +1,17 @@
+[package]
+name        = "risk-engine"
+description = "Pre-trade and post-trade risk checks — exposure caps, client P&L limits, drawdown circuit-breakers"
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+license.workspace    = true
+
+[dependencies]
+order-book.path      = "../order-book"
+feed-generator.path  = "../feed-generator"
+serde.workspace      = true
+serde_json.workspace = true
+anyhow.workspace     = true
+thiserror.workspace  = true
+tracing.workspace    = true
+uuid.workspace       = true

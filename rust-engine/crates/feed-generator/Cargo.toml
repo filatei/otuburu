@@ -1,0 +1,21 @@
+[package]
+name        = "feed-generator"
+description = "Deterministic synthetic price-feed generators (Boom/Crash, FX Heston-lite, Crypto GBM)"
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+license.workspace    = true
+
+[dependencies]
+tokio.workspace      = true
+serde.workspace      = true
+serde_json.workspace = true
+rand.workspace       = true
+rand_chacha.workspace = true
+statrs.workspace     = true
+anyhow.workspace     = true
+thiserror.workspace  = true
+tracing.workspace    = true
+uuid.workspace       = true
+chrono.workspace     = true
+tokio-stream.workspace = true

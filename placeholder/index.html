@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Otuburu — torama.money</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --bg-2: #0f1a30;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --brand: #1f3a5f;
+      --gold: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: radial-gradient(1200px 600px at 50% 0%, #1a2b4d 0%, var(--bg) 60%, #050a18 100%);
+      color: var(--text);
+      font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      display: flex; flex-direction: column;
+      min-height: 100vh;
+    }
+    .wrap {
+      flex: 1;
+      display: flex; align-items: center; justify-content: center;
+      padding: 32px 20px;
+    }
+    .card {
+      max-width: 560px;
+      text-align: center;
+    }
+    .logo {
+      letter-spacing: 8px;
+      font-weight: 800;
+      font-size: 56px;
+      color: #fff;
+      margin: 0 0 6px;
+    }
+    .tag {
+      color: var(--accent);
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      font-size: 12px;
+      margin: 0 0 32px;
+    }
+    .rule {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #2a3b5c, transparent);
+      margin: 24px auto;
+      width: 220px;
+    }
+    h2 {
+      font-size: 22px;
+      font-weight: 600;
+      margin: 0 0 10px;
+    }
+    p {
+      color: var(--muted);
+      margin: 0 0 14px;
+    }
+    .pill {
+      display: inline-block;
+      padding: 6px 12px;
+      border: 1px solid #2a3b5c;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--gold);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin-top: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-top: 28px;
+    }
+    .grid div {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid #1f2a44;
+      border-radius: 10px;
+      padding: 14px 10px;
+    }
+    .grid b {
+      display: block;
+      color: var(--text);
+      font-size: 13px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .grid span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 18px 20px;
+      border-top: 1px solid #18233d;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+    @media (max-width: 500px) {
+      .logo { font-size: 38px; letter-spacing: 6px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1 class="logo">OTUBURU</h1>
+      <p class="tag">torama.money</p>
+
+      <h2>A synthetic brokerage, in build.</h2>
+      <p>Otuburu is the synthetic-products venue from the Torama group — boom and crash indices, digital options, and synthetic FX and crypto. We are currently in private build.</p>
+
+      <span class="pill">Pre-launch · Coming soon</span>
+
+      <div class="rule"></div>
+
+      <div class="grid">
+        <div><b>Synthetic Indices</b><span>Boom · Crash · Volatility</span></div>
+        <div><b>Digital Options</b><span>Rise · Fall · Touch</span></div>
+        <div><b>Synthetic FX &amp; Crypto</b><span>EUR/USD · BTC/USD</span></div>
+      </div>
+    </div>
+  </div>
+  <footer>
+    © Torama · <a href="https://torama.money">torama.money</a> · this page intentionally not indexed
+  </footer>
+</body>
+</html>

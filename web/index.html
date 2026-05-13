@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Otuburu — Synthetic Brokerage Demo</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-2: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #38bdf8;
+      --brand: #1f3a5f;
+      --green: #22c55e;
+      --red: #ef4444;
+      --gold: #f59e0b;
+      --border: #1f2a3a;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
+    header {
+      background: linear-gradient(90deg, #1f3a5f, #0b2545);
+      padding: 14px 20px; display: flex; align-items: center; gap: 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    header h1 { margin: 0; font-size: 20px; letter-spacing: 2px; }
+    header .sub { color: var(--muted); font-size: 13px; }
+    header .badge {
+      margin-left: auto;
+      padding: 4px 10px; border: 1px solid var(--accent); color: var(--accent);
+      border-radius: 999px; font-size: 12px;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 14px;
+      padding: 14px;
+    }
+    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px;
+    }
+    .card h2 { margin: 0 0 6px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+    .price { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .price .small { font-size: 12px; color: var(--muted); margin-left: 8px; }
+    .bidask { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    canvas { width: 100% !important; height: 130px !important; }
+
+    .side { display: flex; flex-direction: column; gap: 14px; }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
+    select, input, button {
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: 8px 10px; font: inherit;
+    }
+    button { cursor: pointer; }
+    button.buy { background: #14532d; border-color: #166534; }
+    button.sell { background: #7f1d1d; border-color: #991b1b; }
+    button.up { background: #14532d; border-color: #166534; }
+    button.down { background: #7f1d1d; border-color: #991b1b; }
+    button.flat { background: var(--panel-2); }
+    label { font-size: 12px; color: var(--muted); }
+
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { padding: 6px 6px; border-bottom: 1px solid var(--border); font-size: 12px; }
+    th { text-align: left; color: var(--muted); font-weight: 500; }
+    td.green { color: var(--green); }
+    td.red { color: var(--red); }
+    .stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+    .stat b { font-variant-numeric: tabular-nums; }
+    .house-net.pos { color: var(--green); }
+    .house-net.neg { color: var(--red); }
+    .pill { display: inline-block; padding: 1px 6px; border-radius: 4px; background: var(--panel-2); font-size: 11px; color: var(--muted); }
+    .footer { color: var(--muted); padding: 10px 16px; font-size: 12px; border-top: 1px solid var(--border); }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+<header>
+  <h1>OTUBURU</h1>
+  <div class="sub">synthetic brokerage demo · torama.money</div>
+  <span class="badge" id="conn">connecting…</span>
+</header>
+
+<main>
+  <div>
+    <div class="charts" id="charts"></div>
+  </div>
+  <div class="side">
+    <div class="card">
+      <h2>Account</h2>
+      <div class="stat"><span>Balance</span><b id="bal">—</b></div>
+      <div class="stat"><span>Equity</span><b id="eq">—</b></div>
+      <div class="stat"><span>Used Margin</span><b id="um">—</b></div>
+      <div class="stat"><span>Free Margin</span><b id="fm">—</b></div>
+      <div class="stat"><span>Margin Level</span><b id="ml">—</b></div>
+    </div>
+
+    <div class="card">
+      <h2>Place CFD Order</h2>
+      <div class="row">
+        <select id="cfdSymbol"></select>
+        <input id="cfdLots" type="number" value="0.1" step="0.1" min="0.01" />
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="buy" onclick="placeCfd('BUY')">BUY</button>
+        <button class="sell" onclick="placeCfd('SELL')">SELL</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Place Digital Option</h2>
+      <div class="row">
+        <select id="binSymbol"></select>
+        <input id="binStake" type="number" value="10" min="1" />
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <label style="flex:0 0 auto; align-self:center;">ticks</label>
+        <input id="binTicks" type="number" value="10" min="1" max="200" />
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="up" onclick="placeBin('UP')">RISE</button>
+        <button class="down" onclick="placeBin('DOWN')">FALL</button>
+      </div>
+      <div style="font-size:11px; color:var(--muted); margin-top:6px;">
+        Payout multiplier <span id="multi">—</span> · house edge <span id="edge">—</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>House P&amp;L Monitor</h2>
+      <div class="stat"><span>House net</span><b id="houseNet" class="house-net">—</b></div>
+      <div class="stat"><span>Spread captured</span><b id="spreadCap">—</b></div>
+      <div class="stat"><span>Payout-margin earned</span><b id="payMargin">—</b></div>
+      <div class="stat"><span>Binary win rate</span><b id="winRate">—</b></div>
+      <div class="stat"><span>CFDs placed</span><b id="cfdN">—</b></div>
+      <div class="stat"><span>Binaries placed</span><b id="binN">—</b></div>
+    </div>
+  </div>
+</main>
+
+<div style="padding:0 14px 14px;">
+  <div class="card">
+    <h2>Open Positions</h2>
+    <table id="posTable">
+      <thead><tr><th>ID</th><th>Symbol</th><th>Side</th><th>Lots</th><th>Entry</th><th>Margin</th><th>P&amp;L</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div class="card" style="margin-top:14px;">
+    <h2>Open Digital Options</h2>
+    <table id="binTable">
+      <thead><tr><th>ID</th><th>Symbol</th><th>Dir</th><th>Stake</th><th>Entry</th><th>Ticks left</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="footer">
+  Otuburu demo · Ticks are generated locally by deterministic seeded RNG · Every trade is the house · Spread + payout-margin = edge
+</div>
+
+<script>
+  const charts = {};      // symbol -> chart
+  const datasets = {};    // symbol -> array of {x,y}
+  const MAX_POINTS = 120;
+  const conn = document.getElementById('conn');
+  const cfdSymbol = document.getElementById('cfdSymbol');
+  const binSymbol = document.getElementById('binSymbol');
+
+  function ensureChart(symbol) {
+    if (charts[symbol]) return charts[symbol];
+    const wrap = document.createElement('div');
+    wrap.className = 'card';
+    wrap.innerHTML = `
+      <h2>${symbol}</h2>
+      <div class="price"><span id="px-${symbol}">—</span><span class="small" id="ts-${symbol}"></span></div>
+      <div class="bidask" id="ba-${symbol}">bid — / ask —</div>
+      <canvas id="c-${symbol}"></canvas>`;
+    document.getElementById('charts').appendChild(wrap);
+    const ctx = document.getElementById('c-' + symbol).getContext('2d');
+    datasets[symbol] = [];
+    charts[symbol] = new Chart(ctx, {
+      type: 'line',
+      data: { labels: [], datasets: [{ data: datasets[symbol], borderColor: '#38bdf8', borderWidth: 1.5, pointRadius: 0, tension: 0.15, fill: false }] },
+      options: {
+        animation: false, responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { display: false },
+          y: { ticks: { color: '#9ca3af', font: { size: 10 } }, grid: { color: '#1f2a3a' } },
+        },
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      },
+    });
+    return charts[symbol];
+  }
+
+  function onTick(t) {
+    ensureChart(t.symbol);
+    const arr = datasets[t.symbol];
+    arr.push(t.mid);
+    if (arr.length > MAX_POINTS) arr.shift();
+    const c = charts[t.symbol];
+    c.data.labels = arr.map((_, i) => i);
+    c.update('none');
+    document.getElementById('px-' + t.symbol).textContent = t.mid;
+    document.getElementById('ba-' + t.symbol).textContent = `bid ${t.bid} / ask ${t.ask}`;
+    document.getElementById('ts-' + t.symbol).textContent = new Date(t.ts).toLocaleTimeString();
+  }
+
+  function fillSelect(sel, symbols) {
+    if (sel.options.length) return;
+    for (const s of symbols) {
+      const o = document.createElement('option'); o.value = s; o.textContent = s;
+      sel.appendChild(o);
+    }
+  }
+
+  function onState(s) {
+    document.getElementById('bal').textContent = s.account.balance.toFixed(2);
+    document.getElementById('eq').textContent = s.account.equity.toFixed(2);
+    document.getElementById('um').textContent = s.account.usedMargin.toFixed(2);
+    document.getElementById('fm').textContent = s.account.freeMargin.toFixed(2);
+    const ml = s.account.marginLevel;
+    document.getElementById('ml').textContent = isFinite(ml) ? ml.toFixed(0) + '%' : '∞';
+
+    const houseEl = document.getElementById('houseNet');
+    houseEl.textContent = s.house.houseNet.toFixed(2);
+    houseEl.classList.toggle('pos', s.house.houseNet >= 0);
+    houseEl.classList.toggle('neg', s.house.houseNet < 0);
+    document.getElementById('spreadCap').textContent = s.house.totalSpreadCaptured.toFixed(2);
+    document.getElementById('payMargin').textContent = s.house.totalPayoutMargin.toFixed(2);
+    document.getElementById('winRate').textContent = s.house.binaryWinRate == null ? '—' : (s.house.binaryWinRate * 100).toFixed(1) + '%';
+    document.getElementById('cfdN').textContent = s.house.cfdCount;
+    document.getElementById('binN').textContent = s.house.binaryCount;
+    document.getElementById('multi').textContent = s.house.payoutMultiplier.toFixed(2) + '×';
+    document.getElementById('edge').textContent = (s.house.expectedHouseEdge * 100).toFixed(2) + '%';
+
+    const tb = document.querySelector('#posTable tbody');
+    tb.innerHTML = '';
+    for (const p of s.positions) {
+      const tr = document.createElement('tr');
+      const pnlClass = p.unrealisedPnl >= 0 ? 'green' : 'red';
+      tr.innerHTML = `
+        <td>${p.id}</td><td>${p.symbol}</td><td>${p.side}</td>
+        <td>${p.lots}</td><td>${p.entry}</td><td>${p.margin.toFixed(2)}</td>
+        <td class="${pnlClass}">${p.unrealisedPnl.toFixed(2)}</td>
+        <td><button onclick="closeCfd(${p.id})">close</button></td>`;
+      tb.appendChild(tr);
+    }
+
+    const bb = document.querySelector('#binTable tbody');
+    bb.innerHTML = '';
+    for (const b of s.binaries) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${b.id}</td><td>${b.symbol}</td><td>${b.direction}</td>
+                      <td>${b.stake}</td><td>${b.entry}</td><td>${b.ticksLeft}/${b.ticksTotal}</td>`;
+      bb.appendChild(tr);
+    }
+  }
+
+  // ---- WebSocket ----
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(proto + '//' + location.host + '/ws');
+    ws.onopen = () => { conn.textContent = 'live'; conn.style.borderColor = '#22c55e'; conn.style.color = '#22c55e'; };
+    ws.onclose = () => { conn.textContent = 'reconnecting…'; conn.style.borderColor = '#f59e0b'; conn.style.color = '#f59e0b'; setTimeout(connect, 1500); };
+    ws.onmessage = (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.type === 'tick') onTick(m.tick);
+      else if (m.type === 'state') onState(m.state);
+      else if (m.type === 'hello') {
+        fillSelect(cfdSymbol, m.symbols);
+        fillSelect(binSymbol, m.symbols);
+      }
+    };
+  }
+  connect();
+
+  async function api(path, body) {
+    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) alert(j.error || 'error');
+    return j;
+  }
+  window.placeCfd = (side) => api('/api/order', {
+    symbol: cfdSymbol.value, side, lots: parseFloat(document.getElementById('cfdLots').value),
+  });
+  window.closeCfd = (id) => api('/api/close', { id });
+  window.placeBin = (direction) => api('/api/binary', {
+    symbol: binSymbol.value, direction,
+    stake: parseFloat(document.getElementById('binStake').value),
+    ticks: parseInt(document.getElementById('binTicks').value, 10),
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+name: Deploy demo
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Pull-deploy to Linode
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.LINODE_HOST }}
+          username: ${{ secrets.LINODE_USER }}
+          key:      ${{ secrets.LINODE_SSH_KEY }}
+          port:     ${{ secrets.LINODE_SSH_PORT }}
+          script:   sudo /home/otuburu/app/scripts/deploy.sh

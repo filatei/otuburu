@@ -1,0 +1,15 @@
+[package]
+name        = "binary-options"
+description = "Pricing and payout logic for digital options (Rise/Fall, Touch/No-touch)"
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+license.workspace    = true
+
+[dependencies]
+order-book.path      = "../order-book"
+feed-generator.path  = "../feed-generator"
+serde.workspace      = true
+anyhow.workspace     = true
+thiserror.workspace  = true
+tracing.workspace    = true
