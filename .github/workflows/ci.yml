@@ -60,11 +60,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.23"
           cache-dependency-path: "go-services/**/go.sum"
+
+      - name: Install protoc-gen-go tools
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+
+      - name: Generate proto (gateway)
+        working-directory: .
+        run: bash scripts/gen-proto-go.sh
 
       - name: Vet
         run: |
