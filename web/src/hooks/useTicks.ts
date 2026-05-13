@@ -58,7 +58,10 @@ export function useTicks(symbol: string) {
 
     ws.onmessage = (ev) => {
       try {
-        const tick: Tick = JSON.parse(ev.data)
+        const msg  = JSON.parse(ev.data)
+        // Gateway wraps ticks as {type:"tick", data:{...}}
+        const tick: Tick = msg.type === 'tick' ? msg.data : msg
+        if (!tick.symbol) return
         setAllTicks(prev => ({ ...prev, [tick.symbol]: tick }))
         if (tick.symbol === symbol) {
           setLastTick(tick)
