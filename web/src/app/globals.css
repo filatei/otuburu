@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --color-up:   #4bb4b4;
+  --color-down: #cc2e3d;
+  --color-brand: #ff444f;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  background: #0d0d0d;
+  color: #e0e0e0;
+  font-family: 'Inter', sans-serif;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #141414; }
+::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 2px; }
+
+.num { font-family: 'JetBrains Mono', monospace; }
+
+/* Pulse animation for live tick */
+@keyframes flash-up   { 0%,100% { color: #e0e0e0; } 50% { color: #4bb4b4; } }
+@keyframes flash-down { 0%,100% { color: #e0e0e0; } 50% { color: #cc2e3d; } }
+.flash-up   { animation: flash-up   0.3s ease; }
+.flash-down { animation: flash-down 0.3s ease; }

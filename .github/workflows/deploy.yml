@@ -54,25 +54,79 @@ jobs:
           cache-from: type=gha,scope=gateway
           cache-to:   type=gha,mode=max,scope=gateway
 
+  # ── Build Next.js frontend → static export ──────────────────────────────────
+  frontend:
+    name: Build frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install deps
+        working-directory: web
+        run: npm ci
+
+      - name: Build static export
+        working-directory: web
+        env:
+          NEXT_PUBLIC_API_URL: https://otuburu.torama.money
+        run: npm run build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-out
+          path: web/out/
+          retention-days: 1
+
   # ── SSH deploy: pull + restart on Linode VPS ────────────────────────────────
   deploy:
     name: Deploy to Linode VPS
-    needs: build
+    needs: [build, frontend]
     runs-on: ubuntu-latest
     environment: staging
 
     steps:
-      # Otuburu gateway: http://104.237.157.53:8181  (Apache proxy → :8082)
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-out
+          path: frontend-out/
+
+      - name: Copy frontend to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host:     ${{ secrets.LINODE_HOST }}
+          username: otuburu
+          key:      ${{ secrets.LINODE_SSH_KEY }}
+          port:     22
+          source:   "frontend-out/*"
+          target:   "/tmp/otuburu-frontend"
+          strip_components: 1
+
       - name: SSH deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host:       ${{ secrets.LINODE_HOST }}
-          username:   otuburu
-          key:        ${{ secrets.LINODE_SSH_KEY }}
-          port:       22
+          host:     ${{ secrets.LINODE_HOST }}
+          username: otuburu
+          key:      ${{ secrets.LINODE_SSH_KEY }}
+          port:     22
           script: |
+            # Deploy frontend static files
+            sudo mkdir -p /var/www/otuburu
+            sudo rsync -a --delete /tmp/otuburu-frontend/ /var/www/otuburu/
+            sudo chown -R www-data:www-data /var/www/otuburu
+            rm -rf /tmp/otuburu-frontend
+
+            # Deploy backend containers
             cd /home/otuburu/app
-            # Log into GHCR (token injected at deploy time)
             echo "${{ secrets.GHCR_TOKEN }}" | \
               docker login ghcr.io -u filatei --password-stdin
             bash /home/otuburu/app/deploy.sh
