@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    ".",                        # otuburu-engine binary
     "crates/feed-generator",
     "crates/order-book",
     "crates/risk-engine",
@@ -16,7 +17,7 @@ license     = "UNLICENSED"
 [workspace.dependencies]
 # async runtime
 tokio        = { version = "1", features = ["full"] }
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }   # "sync" needed for BroadcastStream wrapper
 # serialisation
 serde        = { version = "1", features = ["derive"] }
 serde_json   = "1"
@@ -39,3 +40,39 @@ config       = "0.14"
 sqlx         = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono"] }
 uuid         = { version = "1", features = ["v4", "serde"] }
 chrono       = { version = "0.4", features = ["serde"] }
+# build-time proto compilation
+tonic-build  = "0.12"
+
+[package]
+name        = "otuburu-engine"
+description = "Otuburu trading engine — gRPC server wrapping feed-generator, order-book, risk-engine, binary-options"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "otuburu-engine"
+path = "src/main.rs"
+
+[dependencies]
+feed-generator = { path = "crates/feed-generator" }
+order-book     = { path = "crates/order-book" }
+risk-engine    = { path = "crates/risk-engine" }
+binary-options = { path = "crates/binary-options" }
+tokio.workspace             = true
+tokio-stream.workspace      = true
+tonic.workspace             = true
+prost.workspace             = true
+serde.workspace             = true
+serde_json.workspace        = true
+tracing.workspace           = true
+tracing-subscriber.workspace = true
+anyhow.workspace            = true
+thiserror.workspace         = true
+config.workspace            = true
+uuid.workspace              = true
+chrono.workspace            = true
+
+[build-dependencies]
+tonic-build = "0.12"

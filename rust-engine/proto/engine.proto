@@ -1,0 +1,164 @@
+syntax = "proto3";
+package otuburu.engine.v1;
+
+option go_package = "otuburu.money/proto/enginepb";
+
+// ─── Shared types ────────────────────────────────────────────────────────────
+
+message Tick {
+  string symbol     = 1;
+  int64  ts_ms      = 2;   // Unix milliseconds
+  double mid        = 3;
+  double bid        = 4;
+  double ask        = 5;
+  uint64 tick_index = 6;
+}
+
+message Position {
+  string id              = 1;  // UUID
+  string account_id      = 2;
+  string symbol          = 3;
+  string side            = 4;  // "BUY" | "SELL"
+  double lots            = 5;
+  double entry           = 6;
+  double margin          = 7;
+  double notional        = 8;
+  double unrealised_pnl  = 9;
+  int64  opened_at_ms    = 10;
+}
+
+message BinaryOption {
+  string id           = 1;
+  string account_id   = 2;
+  string symbol       = 3;
+  string direction    = 4;  // "UP" | "DOWN"
+  double stake        = 5;
+  uint32 ticks_total  = 6;
+  uint32 ticks_left   = 7;
+  double entry_mid    = 8;
+  int64  opened_at_ms = 9;
+}
+
+message AccountState {
+  string id            = 1;
+  string currency      = 2;
+  double balance       = 3;
+  double equity        = 4;
+  double used_margin   = 5;
+  double free_margin   = 6;
+  double margin_level  = 7;
+  double realised_pnl  = 8;
+}
+
+message HouseStats {
+  double total_spread_captured = 1;
+  double total_payout_margin   = 2;
+  double total_client_pnl      = 3;
+  double house_net             = 4;
+  uint64 binary_count          = 5;
+  uint64 binary_wins           = 6;
+  uint64 cfd_count             = 7;
+  double binary_win_rate       = 8;
+  double payout_multiplier     = 9;
+  double expected_house_edge   = 10;
+}
+
+// ─── EngineService ───────────────────────────────────────────────────────────
+
+service EngineService {
+  // Stream of live ticks for all symbols
+  rpc SubscribeTicks (SubscribeTicksRequest)  returns (stream Tick);
+
+  // Full state snapshot (account + positions + binaries + quotes + house)
+  rpc GetState       (GetStateRequest)        returns (StateSnapshot);
+
+  // CFD order management
+  rpc PlaceOrder     (PlaceOrderRequest)      returns (PlaceOrderResponse);
+  rpc ClosePosition  (ClosePositionRequest)   returns (ClosePositionResponse);
+
+  // Digital options
+  rpc PlaceBinary    (PlaceBinaryRequest)     returns (PlaceBinaryResponse);
+
+  // Symbol catalogue
+  rpc GetSymbols     (GetSymbolsRequest)      returns (GetSymbolsResponse);
+}
+
+// ─── Request / Response messages ─────────────────────────────────────────────
+
+message SubscribeTicksRequest {
+  // Empty = subscribe to all symbols; set symbols to filter
+  repeated string symbols = 1;
+}
+
+message GetStateRequest {
+  string account_id = 1;
+}
+
+message StateSnapshot {
+  AccountState        account   = 1;
+  repeated Position   positions = 2;
+  repeated BinaryOption binaries = 3;
+  map<string, Tick>   quotes    = 4;
+  HouseStats          house     = 5;
+}
+
+message PlaceOrderRequest {
+  string account_id = 1;
+  string symbol     = 2;
+  string side       = 3;  // "BUY" | "SELL"
+  double lots       = 4;
+}
+
+message PlaceOrderResponse {
+  oneof result {
+    Position position = 1;
+    string   error    = 2;
+  }
+}
+
+message ClosePositionRequest {
+  string account_id  = 1;
+  string position_id = 2;
+}
+
+message ClosePositionResponse {
+  oneof result {
+    ClosedPosition closed = 1;
+    string         error  = 2;
+  }
+}
+
+message ClosedPosition {
+  Position position = 1;
+  double   exit     = 2;
+  double   pnl      = 3;
+}
+
+message PlaceBinaryRequest {
+  string account_id = 1;
+  string symbol     = 2;
+  string direction  = 3;  // "UP" | "DOWN"
+  double stake      = 4;
+  uint32 ticks      = 5;
+}
+
+message PlaceBinaryResponse {
+  oneof result {
+    BinaryOption binary = 1;
+    string       error  = 2;
+  }
+}
+
+message GetSymbolsRequest {}
+
+message GetSymbolsResponse {
+  repeated SymbolInfo symbols = 1;
+}
+
+message SymbolInfo {
+  string symbol        = 1;
+  string type          = 2;  // "BOOM_CRASH" | "FX" | "CRYPTO"
+  uint32 leverage      = 3;
+  double contract_size = 4;
+  uint32 cadence_ms    = 5;  // tick interval
+}

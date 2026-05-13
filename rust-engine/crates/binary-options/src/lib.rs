@@ -33,11 +33,25 @@ pub struct RiseFall {
 }
 
 impl ContractType for RiseFall {
-    fn name(&self) -> &str { if self.is_rise { "RISE" } else { "FALL" } }
-    fn fair_multiplier(&self) -> f64  { 2.0  }
-    fn house_multiplier(&self) -> f64 { 1.85 } // 7.5% edge
+    fn name(&self) -> &str {
+        if self.is_rise {
+            "RISE"
+        } else {
+            "FALL"
+        }
+    }
+    fn fair_multiplier(&self) -> f64 {
+        2.0
+    }
+    fn house_multiplier(&self) -> f64 {
+        1.85
+    } // 7.5% edge
     fn is_win(&self, entry: f64, exit: f64, _: Option<f64>) -> bool {
-        if self.is_rise { exit > entry } else { exit < entry }
+        if self.is_rise {
+            exit > entry
+        } else {
+            exit < entry
+        }
     }
 }
 
@@ -50,12 +64,26 @@ pub struct HigherLower {
 }
 
 impl ContractType for HigherLower {
-    fn name(&self) -> &str { if self.is_higher { "HIGHER" } else { "LOWER" } }
-    fn fair_multiplier(&self) -> f64  { 2.0  }
-    fn house_multiplier(&self) -> f64 { 1.85 }
+    fn name(&self) -> &str {
+        if self.is_higher {
+            "HIGHER"
+        } else {
+            "LOWER"
+        }
+    }
+    fn fair_multiplier(&self) -> f64 {
+        2.0
+    }
+    fn house_multiplier(&self) -> f64 {
+        1.85
+    }
     fn is_win(&self, _entry: f64, exit: f64, barrier: Option<f64>) -> bool {
         let b = barrier.unwrap_or(0.0);
-        if self.is_higher { exit > b } else { exit < b }
+        if self.is_higher {
+            exit > b
+        } else {
+            exit < b
+        }
     }
 }
 
@@ -73,16 +101,29 @@ pub struct TouchNoTouch {
 }
 
 impl ContractType for TouchNoTouch {
-    fn name(&self) -> &str { if self.is_touch { "TOUCH" } else { "NO_TOUCH" } }
+    fn name(&self) -> &str {
+        if self.is_touch {
+            "TOUCH"
+        } else {
+            "NO_TOUCH"
+        }
+    }
     // Touch contracts pay slightly less due to early-settlement optionality
-    fn fair_multiplier(&self) -> f64  { 2.0  }
-    fn house_multiplier(&self) -> f64 { 1.80 } // 10% edge — wider spread for exotic
+    fn fair_multiplier(&self) -> f64 {
+        2.0
+    }
+    fn house_multiplier(&self) -> f64 {
+        1.80
+    } // 10% edge — wider spread for exotic
     fn is_win(&self, _entry: f64, exit: f64, barrier: Option<f64>) -> bool {
         // For Touch: win if current price == or crossed barrier.
         // This is called per-tick, so crossing is checked at each tick.
         let b = barrier.unwrap_or(f64::NAN);
-        if self.is_touch { (exit - b).abs() < 1e-8 || exit >= b }
-        else { exit < b } // simplified; full impl should track whether barrier was ever hit
+        if self.is_touch {
+            (exit - b).abs() < 1e-8 || exit >= b
+        } else {
+            exit < b
+        } // simplified; full impl should track whether barrier was ever hit
     }
 }
 
@@ -103,12 +144,12 @@ pub enum ContractKind {
 impl ContractKind {
     pub fn instantiate(&self) -> Box<dyn ContractType> {
         match self {
-            ContractKind::Rise    => Box::new(RiseFall      { is_rise:    true  }),
-            ContractKind::Fall    => Box::new(RiseFall      { is_rise:    false }),
-            ContractKind::Higher  => Box::new(HigherLower   { is_higher:  true  }),
-            ContractKind::Lower   => Box::new(HigherLower   { is_higher:  false }),
-            ContractKind::Touch   => Box::new(TouchNoTouch  { is_touch:   true  }),
-            ContractKind::NoTouch => Box::new(TouchNoTouch  { is_touch:   false }),
+            ContractKind::Rise => Box::new(RiseFall { is_rise: true }),
+            ContractKind::Fall => Box::new(RiseFall { is_rise: false }),
+            ContractKind::Higher => Box::new(HigherLower { is_higher: true }),
+            ContractKind::Lower => Box::new(HigherLower { is_higher: false }),
+            ContractKind::Touch => Box::new(TouchNoTouch { is_touch: true }),
+            ContractKind::NoTouch => Box::new(TouchNoTouch { is_touch: false }),
         }
     }
 
@@ -128,7 +169,10 @@ mod tests {
     fn rise_fall_edge() {
         let rise = RiseFall { is_rise: true };
         let edge = rise.house_edge();
-        assert!((edge - 0.075).abs() < 1e-9, "expected 7.5% edge, got {edge}");
+        assert!(
+            (edge - 0.075).abs() < 1e-9,
+            "expected 7.5% edge, got {edge}"
+        );
     }
 
     #[test]
