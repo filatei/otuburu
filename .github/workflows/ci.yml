@@ -64,10 +64,18 @@ jobs:
           cache-dependency-path: "go-services/**/go.sum"
 
       - name: Vet
-        run: go vet ./...
+        run: |
+          for mod in account gateway risk-monitor; do
+            echo "--- go vet $mod ---"
+            (cd $mod && go vet ./...)
+          done
 
       - name: Test
-        run: go test ./... -race -timeout 60s
+        run: |
+          for mod in account gateway risk-monitor; do
+            echo "--- go test $mod ---"
+            (cd $mod && go test ./... -race -timeout 60s)
+          done
 
   # ── Node demo ───────────────────────────────────────────────
   node-demo:
