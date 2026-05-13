@@ -7,10 +7,11 @@ interface Props {
   positions: Position[]
   binaries:  BinaryOption[]
   ticks:     Record<string, Tick>
+  accountId: string
   onRefresh: () => void
 }
 
-export default function Positions({ positions, binaries, ticks, onRefresh }: Props) {
+export default function Positions({ positions, binaries, ticks, accountId, onRefresh }: Props) {
   const hasData = positions.length > 0 || binaries.length > 0
 
   return (
@@ -57,7 +58,7 @@ export default function Positions({ positions, binaries, ticks, onRefresh }: Pro
                     </td>
                     <td className="px-3 py-1.5">
                       <button
-                        onClick={async () => { await closePosition(p.id); onRefresh() }}
+                        onClick={async () => { await closePosition(accountId, p.id); onRefresh() }}
                         className="px-2 py-0.5 text-[10px] rounded border border-down/30 text-down hover:bg-down/10"
                       >
                         Close

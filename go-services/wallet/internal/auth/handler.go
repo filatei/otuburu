@@ -1,35 +1,81 @@
 package auth
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type Handler struct{ db *pgxpool.Pool }
 
 func NewHandler(db *pgxpool.Pool) *Handler { return &Handler{db: db} }
 
-func (h *Handler) Register(c *gin.Context) {
-	var req struct {
-		Email    string `json:"email"    binding:"required,email"`
-		Password string `json:"password" binding:"required,min=8"`
+// googleTokenInfo calls Google's tokeninfo endpoint to verify an ID token.
+type googleTokenInfo struct {
+	Sub           string `json:"sub"`   // Google user ID
+	Email         string `json:"email"`
+	EmailVerified string `json:"email_verified"`
+	Name          string `json:"name"`
+	Picture       string `json:"picture"`
+	Aud           string `json:"aud"`  // must match our client ID
+}
+
+func verifyGoogleToken(ctx context.Context, idToken string) (*googleTokenInfo, error) {
+	url := "https://oauth2.googleapis.com/tokeninfo?id_token=" + idToken
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("google: invalid token (%d)", resp.StatusCode)
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "hash failed"})
+	var info googleTokenInfo
+	if err := json.Unmarshal(body, &info); err != nil {
+		return nil, err
+	}
+
+	// Verify audience matches our client ID
+	clientID := os.Getenv("GOOGLE_CLIENT_ID")
+	if clientID != "" && info.Aud != clientID {
+		return nil, fmt.Errorf("google: audience mismatch")
+	}
+	if info.EmailVerified != "true" {
+		return nil, fmt.Errorf("google: email not verified")
+	}
+	return &info, nil
+}
+
+// POST /auth/google — verify Google ID token, create/find user, return JWT
+func (h *Handler) GoogleAuth(c *gin.Context) {
+	var req struct {
+		Credential string `json:"credential" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "credential required"})
 		return
 	}
 
 	ctx := c.Request.Context()
+	info, err := verifyGoogleToken(ctx, req.Credential)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
 	tx, err := h.db.Begin(ctx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
@@ -37,100 +83,45 @@ func (h *Handler) Register(c *gin.Context) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	// Upsert user by google_id
 	var userID string
-	err = tx.QueryRow(ctx,
-		`INSERT INTO users (email, password_hash) VALUES ($1,$2) RETURNING id`,
-		req.Email, string(hash),
+	err = tx.QueryRow(ctx, `
+		INSERT INTO users (email, google_id, name, picture)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (google_id) DO UPDATE
+		  SET email   = EXCLUDED.email,
+		      name    = EXCLUDED.name,
+		      picture = EXCLUDED.picture
+		RETURNING id`,
+		info.Email, info.Sub, info.Name, info.Picture,
 	).Scan(&userID)
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "email already registered"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "upsert failed: " + err.Error()})
 		return
 	}
 
-	// Create demo account with $10,000 starting balance
-	var demoID string
-	err = tx.QueryRow(ctx,
-		`INSERT INTO accounts (user_id, type, balance) VALUES ($1,'demo',10000) RETURNING id`,
-		userID,
-	).Scan(&demoID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "account error"})
-		return
-	}
+	// Ensure accounts exist (idempotent)
+	var demoID, realID string
+	tx.QueryRow(ctx, `
+		INSERT INTO accounts (user_id, type, balance)
+		VALUES ($1, 'demo', 10000)
+		ON CONFLICT (user_id, type) DO UPDATE SET user_id = EXCLUDED.user_id
+		RETURNING id`, userID,
+	).Scan(&demoID) //nolint:errcheck
 
-	// Create real account (zero balance)
-	var realID string
-	err = tx.QueryRow(ctx,
-		`INSERT INTO accounts (user_id, type, balance) VALUES ($1,'real',0) RETURNING id`,
-		userID,
-	).Scan(&realID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "account error"})
-		return
-	}
+	tx.QueryRow(ctx, `
+		INSERT INTO accounts (user_id, type, balance)
+		VALUES ($1, 'real', 0)
+		ON CONFLICT (user_id, type) DO UPDATE SET user_id = EXCLUDED.user_id
+		RETURNING id`, userID,
+	).Scan(&realID) //nolint:errcheck
 
 	if err := tx.Commit(ctx); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "commit failed"})
 		return
 	}
 
-	token, err := Sign(userID, realID, demoID, req.Email)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "token error"})
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"token":      token,
-		"user_id":    userID,
-		"account_id": realID,
-		"demo_id":    demoID,
-		"email":      req.Email,
-	})
-}
-
-func (h *Handler) Login(c *gin.Context) {
-	var req struct {
-		Email    string `json:"email"    binding:"required"`
-		Password string `json:"password" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	ctx := c.Request.Context()
-
-	var userID, hash string
-	err := h.db.QueryRow(ctx,
-		`SELECT id, password_hash FROM users WHERE email=$1`, req.Email,
-	).Scan(&userID, &hash)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
-		return
-	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
-		return
-	}
-
-	var realID, demoID string
-	rows, _ := h.db.Query(ctx,
-		`SELECT id, type FROM accounts WHERE user_id=$1`, userID,
-	)
-	defer rows.Close()
-	for rows.Next() {
-		var id, typ string
-		rows.Scan(&id, &typ) //nolint:errcheck
-		if typ == "real" {
-			realID = id
-		} else {
-			demoID = id
-		}
-	}
-
-	token, err := Sign(userID, realID, demoID, req.Email)
+	token, err := Sign(userID, realID, demoID, info.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "token error"})
 		return
@@ -141,7 +132,9 @@ func (h *Handler) Login(c *gin.Context) {
 		"user_id":    userID,
 		"account_id": realID,
 		"demo_id":    demoID,
-		"email":      req.Email,
+		"email":      info.Email,
+		"name":       info.Name,
+		"picture":    info.Picture,
 	})
 }
 
@@ -153,9 +146,14 @@ func (h *Handler) Me(c *gin.Context) {
 	h.db.QueryRow(ctx, `SELECT balance FROM accounts WHERE id=$1`, claims.AccountID).Scan(&realBal) //nolint:errcheck
 	h.db.QueryRow(ctx, `SELECT balance FROM accounts WHERE id=$1`, claims.DemoID).Scan(&demoBal)   //nolint:errcheck
 
+	var name, picture string
+	h.db.QueryRow(ctx, `SELECT COALESCE(name,''), COALESCE(picture,'') FROM users WHERE id=$1`, claims.UserID).Scan(&name, &picture) //nolint:errcheck
+
 	c.JSON(http.StatusOK, gin.H{
 		"user_id":      claims.UserID,
 		"email":        claims.Email,
+		"name":         name,
+		"picture":      picture,
 		"real_balance": realBal,
 		"demo_balance": demoBal,
 		"account_id":   claims.AccountID,
@@ -177,12 +175,9 @@ func JWTMiddleware() gin.HandlerFunc {
 			return
 		}
 		c.Set("claims", claims)
-		// Expose account_id as query param for downstream compatibility
 		if c.Query("account_id") == "" {
 			c.Request.URL.RawQuery += "&account_id=" + claims.AccountID
 		}
-		// Expose user_id for downstream
-		_ = uuid.MustParse(claims.UserID) // validates UUID
 		c.Next()
 	}
 }

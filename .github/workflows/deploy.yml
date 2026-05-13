@@ -87,7 +87,8 @@ jobs:
       - name: Build static export
         working-directory: web
         env:
-          NEXT_PUBLIC_API_URL: https://otuburu.torama.money
+          NEXT_PUBLIC_API_URL:           https://otuburu.torama.money
+          NEXT_PUBLIC_GOOGLE_CLIENT_ID:  ${{ secrets.GOOGLE_CLIENT_ID }}
         run: npm run build
 
       - name: Upload artifact

@@ -2,8 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import type { AccountState, Position, BinaryOption } from '@/types'
 
-const API_BASE   = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
-const ACCOUNT_ID = 'demo'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 
 export interface GameState {
   account:   AccountState | null
@@ -13,7 +12,7 @@ export interface GameState {
   refresh:   () => void
 }
 
-export function useAccount(): GameState {
+export function useAccount(accountId: string): GameState {
   const [account,   setAccount]   = useState<AccountState | null>(null)
   const [positions, setPositions] = useState<Position[]>([])
   const [binaries,  setBinaries]  = useState<BinaryOption[]>([])
@@ -21,7 +20,7 @@ export function useAccount(): GameState {
 
   const refresh = useCallback(async () => {
     try {
-      const res  = await fetch(`${API_BASE}/api/state?account_id=${ACCOUNT_ID}`)
+      const res  = await fetch(`${API_BASE}/api/state?account_id=${accountId}`)
       const data = await res.json()
       setAccount(data.account   ?? null)
       setPositions(data.positions ?? [])
@@ -29,7 +28,7 @@ export function useAccount(): GameState {
     } catch { /* silent */ } finally {
       setLoading(false)
     }
-  }, [])
+  }, [accountId])
 
   useEffect(() => {
     refresh()
@@ -42,29 +41,29 @@ export function useAccount(): GameState {
 
 // ─── Trade actions ────────────────────────────────────────────────────────────
 
-export async function placeCFD(symbol: string, side: 'BUY' | 'SELL', lots: number) {
+export async function placeCFD(accountId: string, symbol: string, side: 'BUY' | 'SELL', lots: number) {
   const res = await fetch(`${API_BASE}/api/order`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ account_id: ACCOUNT_ID, symbol, side, lots }),
+    body: JSON.stringify({ account_id: accountId, symbol, side, lots }),
   })
   return res.json()
 }
 
-export async function closePosition(positionId: string) {
+export async function closePosition(accountId: string, positionId: string) {
   const res = await fetch(`${API_BASE}/api/position/${positionId}`, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ account_id: ACCOUNT_ID }),
+    body: JSON.stringify({ account_id: accountId }),
   })
   return res.json()
 }
 
-export async function placeBinary(symbol: string, direction: 'UP' | 'DOWN', stake: number, ticks: number) {
+export async function placeBinary(accountId: string, symbol: string, direction: 'UP' | 'DOWN', stake: number, ticks: number) {
   const res = await fetch(`${API_BASE}/api/binary`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ account_id: ACCOUNT_ID, symbol, direction, stake, ticks }),
+    body: JSON.stringify({ account_id: accountId, symbol, direction, stake, ticks }),
   })
   return res.json()
 }

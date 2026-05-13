@@ -55,10 +55,9 @@ func main() {
 
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
 
-	// Auth
+	// Auth — Google Sign-In only
 	authH := auth.NewHandler(pool)
-	r.POST("/auth/register", authH.Register)
-	r.POST("/auth/login", authH.Login)
+	r.POST("/auth/google", authH.GoogleAuth)
 
 	// Protected
 	protected := r.Group("/", auth.JWTMiddleware())

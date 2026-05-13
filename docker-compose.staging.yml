@@ -66,6 +66,7 @@ services:
       JWT_SECRET:        ${JWT_SECRET:-change-me-in-production}
       WALLET_MNEMONIC:   ${WALLET_MNEMONIC:-}
       TRONGRID_API_KEY:  ${TRONGRID_API_KEY:-}
+      GOOGLE_CLIENT_ID:  ${GOOGLE_CLIENT_ID:-}
     ports:
       - "127.0.0.1:8083:8083"
     networks:

@@ -8,6 +8,7 @@ interface Props {
   symbol:    string
   info:      SymbolInfo | null
   lastTick:  Tick | null
+  accountId: string
   onTraded:  () => void
 }
 
@@ -15,7 +16,7 @@ type Mode = 'binary' | 'cfd'
 
 const PAYOUT = 0.85  // house pays 85 % on binary wins
 
-export default function TradePanel({ symbol, info, lastTick, onTraded }: Props) {
+export default function TradePanel({ symbol, info, lastTick, accountId, onTraded }: Props) {
   const [mode,      setMode]      = useState<Mode>('binary')
   const [stake,     setStake]     = useState('10')
   const [lots,      setLots]      = useState('0.01')
@@ -34,9 +35,9 @@ export default function TradePanel({ symbol, info, lastTick, onTraded }: Props) 
     try {
       let res: { error?: string }
       if (mode === 'binary') {
-        res = await placeBinary(symbol, dir as 'UP' | 'DOWN', parseFloat(stake) || 10, ticks)
+        res = await placeBinary(accountId, symbol, dir as 'UP' | 'DOWN', parseFloat(stake) || 10, ticks)
       } else {
-        res = await placeCFD(symbol, dir as 'BUY' | 'SELL', parseFloat(lots) || 0.01)
+        res = await placeCFD(accountId, symbol, dir as 'BUY' | 'SELL', parseFloat(lots) || 0.01)
       }
       if (res.error) notify(res.error, false)
       else { notify('Trade placed ✓', true); onTraded() }

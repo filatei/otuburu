@@ -12,3 +12,5 @@ require (
 	github.com/tyler-smith/go-bip39 v1.1.0
 	golang.org/x/crypto v0.24.0
 )
+
+// Note: bcrypt removed — Google OAuth only, no passwords stored
