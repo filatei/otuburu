@@ -1,20 +1,17 @@
 #!/usr/bin/env bash
 # Deploy Otuburu alongside existing apps on a Linode server.
-# Safe to run on a server already running other services — only ADDS new config.
-#
-# Usage (from your Mac):
-#   scp scripts/setup-server.sh root@104.237.157.53:/tmp/
-#   ssh root@104.237.157.53 bash /tmp/setup-server.sh
+# Run with sudo as a non-root user:
+#   sudo bash /tmp/setup-server.sh
 set -euo pipefail
 
 DEPLOY_USER="otuburu"
 APP_DIR="/home/$DEPLOY_USER/app"
 
-echo "=== Otuburu server setup (safe for existing apps) ==="
+echo "=== Otuburu server setup (Apache, safe for existing apps) ==="
 
-# ── Docker (install only if missing) ─────────────────────────────────────────
+# ── Docker (already installed — skip) ────────────────────────────────────────
 if command -v docker &>/dev/null; then
-  echo "✓  Docker already installed: $(docker --version)"
+  echo "✓  Docker: $(docker --version)"
 else
   echo "==> Installing Docker …"
   apt-get update -q
@@ -32,26 +29,35 @@ https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_C
   echo "✓  Docker installed"
 fi
 
-# ── Install gettext (for envsubst) if needed ─────────────────────────────────
-command -v envsubst &>/dev/null || apt-get install -y --no-install-recommends gettext-base
-
-# ── App user ──────────────────────────────────────────────────────────────────
-if id "$DEPLOY_USER" &>/dev/null; then
-  echo "✓  User $DEPLOY_USER already exists"
-else
-  useradd -m -s /bin/bash "$DEPLOY_USER"
-  echo "✓  Created user $DEPLOY_USER"
-fi
+# ── App user + docker group ───────────────────────────────────────────────────
+id "$DEPLOY_USER" &>/dev/null && echo "✓  User $DEPLOY_USER exists" \
+  || { useradd -m -s /bin/bash "$DEPLOY_USER"; echo "✓  Created $DEPLOY_USER"; }
 usermod -aG docker "$DEPLOY_USER"
 
-# Passwordless docker for deploy (no sudo needed for other commands)
+# Passwordless docker only — no blanket sudo
 cat > /etc/sudoers.d/otuburu <<'SUDOERS'
 otuburu ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/docker compose
 SUDOERS
 chmod 440 /etc/sudoers.d/otuburu
-echo "✓  Passwordless docker configured for $DEPLOY_USER"
+echo "✓  Passwordless docker for $DEPLOY_USER"
 
-# ── App directory + files ─────────────────────────────────────────────────────
+# ── SSH key for CI (generates a deploy keypair if one doesn't exist) ──────────
+SSH_DIR="/home/$DEPLOY_USER/.ssh"
+mkdir -p "$SSH_DIR"
+chmod 700 "$SSH_DIR"
+
+if [[ ! -f "$SSH_DIR/id_ed25519" ]]; then
+  ssh-keygen -t ed25519 -C "otuburu-deploy" -N "" -f "$SSH_DIR/id_ed25519"
+  echo "✓  Generated deploy keypair"
+fi
+# Authorise the public key for SSH login
+cat "$SSH_DIR/id_ed25519.pub" >> "$SSH_DIR/authorized_keys"
+sort -u "$SSH_DIR/authorized_keys" -o "$SSH_DIR/authorized_keys"
+chmod 600 "$SSH_DIR/authorized_keys"
+chown -R "$DEPLOY_USER:$DEPLOY_USER" "$SSH_DIR"
+echo "✓  SSH authorized_keys configured"
+
+# ── App files ─────────────────────────────────────────────────────────────────
 mkdir -p "$APP_DIR"
 
 cat > "$APP_DIR/docker-compose.yml" <<'COMPOSE'
@@ -103,55 +109,59 @@ chmod +x "$APP_DIR/deploy.sh"
 chown -R "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR"
 echo "✓  App files written to $APP_DIR"
 
-# ── nginx — add Otuburu site only (don't touch existing sites) ────────────────
-if ! command -v nginx &>/dev/null; then
-  apt-get install -y --no-install-recommends nginx
-fi
+# ── Apache reverse proxy ──────────────────────────────────────────────────────
+apt-get install -y --no-install-recommends apache2
 
-cat > /etc/nginx/sites-available/otuburu-staging <<'NGINX'
-server {
-    listen 8080;          # separate port so existing sites are untouched
-    server_name _;        # update to staging.torama.money once DNS is set
+# Enable required modules
+a2enmod proxy proxy_http proxy_wstunnel rewrite headers
+
+# Add port 8080 if not already listening
+grep -q "^Listen 8080" /etc/apache2/ports.conf \
+  || echo "Listen 8080" >> /etc/apache2/ports.conf
+
+cat > /etc/apache2/sites-available/otuburu-staging.conf <<'APACHE'
+<VirtualHost *:8080>
+    ServerName otuburu-staging
+
+    ProxyPreserveHost On
+    RewriteEngine On
 
     # WebSocket upgrade for /ws
-    location /ws {
-        proxy_pass         http://127.0.0.1:8082;
-        proxy_http_version 1.1;
-        proxy_set_header   Upgrade $http_upgrade;
-        proxy_set_header   Connection "upgrade";
-        proxy_set_header   Host $host;
-        proxy_read_timeout 86400s;
-    }
+    RewriteCond %{HTTP:Upgrade} websocket [NC]
+    RewriteRule ^/ws$  ws://127.0.0.1:8082/ws  [P,L]
 
-    location / {
-        proxy_pass       http://127.0.0.1:8082;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-NGINX
+    ProxyPass        /ws  ws://127.0.0.1:8082/ws
+    ProxyPassReverse /ws  ws://127.0.0.1:8082/ws
 
-ln -sf /etc/nginx/sites-available/otuburu-staging \
-       /etc/nginx/sites-enabled/otuburu-staging
-nginx -t && systemctl reload nginx
-echo "✓  nginx site added on port 8080 (existing sites untouched)"
+    ProxyPass        /   http://127.0.0.1:8082/
+    ProxyPassReverse /   http://127.0.0.1:8082/
 
+    ErrorLog  ${APACHE_LOG_DIR}/otuburu-error.log
+    CustomLog ${APACHE_LOG_DIR}/otuburu-access.log combined
+</VirtualHost>
+APACHE
+
+a2ensite otuburu-staging
+apache2ctl configtest && systemctl reload apache2
+echo "✓  Apache site enabled on port 8080"
+
+# ── Print the deploy private key for GitHub secret ────────────────────────────
 echo ""
 echo "══════════════════════════════════════════════════════"
-echo "  Server setup complete!"
+echo "  Setup complete!"
 echo ""
-echo "  Otuburu staging API will be at:"
-echo "  http://104.237.157.53:8080/api/symbols"
-echo "  ws://104.237.157.53:8080/ws"
-echo ""
-echo "  Next — add these 3 secrets to GitHub:"
-echo "  Settings → Secrets → Actions"
+echo "  Add these secrets to GitHub:"
+echo "  repo → Settings → Secrets → Actions"
 echo ""
 echo "  LINODE_HOST    = 104.237.157.53"
-echo "  LINODE_SSH_KEY = (your private SSH key)"
-echo "  GHCR_TOKEN     = (GitHub PAT with read:packages)"
+echo "  LINODE_SSH_KEY = (private key below — copy ALL lines including header)"
 echo ""
-echo "  Generate GHCR_TOKEN at:"
+cat "$SSH_DIR/id_ed25519"
+echo ""
+echo "  GHCR_TOKEN = GitHub PAT with read:packages"
 echo "  https://github.com/settings/tokens/new"
-echo "  → Scopes: read:packages"
+echo ""
+echo "  Otuburu will be live at:"
+echo "  http://104.237.157.53:8080/api/symbols"
+echo "  ws://104.237.157.53:8080/ws"
 echo "══════════════════════════════════════════════════════"
