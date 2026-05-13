@@ -62,6 +62,7 @@ jobs:
     environment: staging
 
     steps:
+      # Otuburu gateway: http://104.237.157.53:8181  (Apache proxy → :8082)
       - name: SSH deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
