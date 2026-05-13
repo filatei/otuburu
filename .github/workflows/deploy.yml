@@ -68,7 +68,7 @@ jobs:
           host:       ${{ secrets.LINODE_HOST }}
           username:   otuburu
           key:        ${{ secrets.LINODE_SSH_KEY }}
-          port:       22
+          port:       2525
           script: |
             cd /home/otuburu/app
             # Log into GHCR (token injected at deploy time)

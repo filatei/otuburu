@@ -1,102 +1,119 @@
 #!/usr/bin/env bash
-# Run once on a fresh Ubuntu 22.04 Linode VPS (as root).
-# Sets up Docker, nginx, the otuburu app user, and passwordless deploy.
+# Deploy Otuburu alongside existing apps on a Linode server.
+# Safe to run on a server already running other services — only ADDS new config.
 #
 # Usage (from your Mac):
-#   scp scripts/setup-server.sh root@<LINODE_IP>:/tmp/
-#   ssh root@<LINODE_IP> bash /tmp/setup-server.sh
+#   scp scripts/setup-server.sh root@104.237.157.53:/tmp/
+#   ssh root@104.237.157.53 bash /tmp/setup-server.sh
 set -euo pipefail
 
 DEPLOY_USER="otuburu"
 APP_DIR="/home/$DEPLOY_USER/app"
 
-echo "=== Otuburu server setup ==="
+echo "=== Otuburu server setup (safe for existing apps) ==="
 
-# ── System packages ───────────────────────────────────────────────────────────
-apt-get update -q
-apt-get install -y --no-install-recommends \
-  curl ca-certificates gnupg ufw nginx gettext-base
-
-# ── Docker ────────────────────────────────────────────────────────────────────
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-  | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-chmod a+r /etc/apt/keyrings/docker.gpg
-
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+# ── Docker (install only if missing) ─────────────────────────────────────────
+if command -v docker &>/dev/null; then
+  echo "✓  Docker already installed: $(docker --version)"
+else
+  echo "==> Installing Docker …"
+  apt-get update -q
+  apt-get install -y --no-install-recommends ca-certificates curl gnupg
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+    | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  chmod a+r /etc/apt/keyrings/docker.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
 https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
-  > /etc/apt/sources.list.d/docker.list
+    > /etc/apt/sources.list.d/docker.list
+  apt-get update -q
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  systemctl enable --now docker
+  echo "✓  Docker installed"
+fi
 
-apt-get update -q
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-
-systemctl enable --now docker
-echo "✓  Docker installed"
+# ── Install gettext (for envsubst) if needed ─────────────────────────────────
+command -v envsubst &>/dev/null || apt-get install -y --no-install-recommends gettext-base
 
 # ── App user ──────────────────────────────────────────────────────────────────
-id "$DEPLOY_USER" &>/dev/null || useradd -m -s /bin/bash "$DEPLOY_USER"
+if id "$DEPLOY_USER" &>/dev/null; then
+  echo "✓  User $DEPLOY_USER already exists"
+else
+  useradd -m -s /bin/bash "$DEPLOY_USER"
+  echo "✓  Created user $DEPLOY_USER"
+fi
 usermod -aG docker "$DEPLOY_USER"
 
-# Passwordless sudo for deploy script only
-echo "$DEPLOY_USER ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/docker compose" \
-  > /etc/sudoers.d/otuburu
+# Passwordless docker for deploy (no sudo needed for other commands)
+cat > /etc/sudoers.d/otuburu <<'SUDOERS'
+otuburu ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/docker compose
+SUDOERS
 chmod 440 /etc/sudoers.d/otuburu
+echo "✓  Passwordless docker configured for $DEPLOY_USER"
 
+# ── App directory + files ─────────────────────────────────────────────────────
 mkdir -p "$APP_DIR"
-chown "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR"
-echo "✓  User $DEPLOY_USER configured"
 
-# ── App files ─────────────────────────────────────────────────────────────────
-# The CI deploy step will copy these; bootstrap them so nginx can start.
 cat > "$APP_DIR/docker-compose.yml" <<'COMPOSE'
 services:
-  engine:
+  otuburu-engine:
     image: ghcr.io/filatei/otuburu-engine:staging
     restart: always
+    container_name: otuburu-engine
     environment:
       ENGINE_GRPC_ADDR: "0.0.0.0:9090"
       RUST_LOG: "otuburu_engine=info,warn"
-    expose: ["9090"]
-    networks: [internal]
+    expose:
+      - "9090"
+    networks:
+      - otuburu-net
 
-  gateway:
+  otuburu-gateway:
     image: ghcr.io/filatei/otuburu-gateway:staging
     restart: always
+    container_name: otuburu-gateway
     environment:
       PORT: "8082"
-      ENGINE_ADDR: "engine:9090"
-    ports: ["8082:8082"]
-    networks: [internal]
-    depends_on: [engine]
+      ENGINE_ADDR: "otuburu-engine:9090"
+    ports:
+      - "127.0.0.1:8082:8082"
+    networks:
+      - otuburu-net
+    depends_on:
+      - otuburu-engine
 
 networks:
-  internal:
+  otuburu-net:
     driver: bridge
 COMPOSE
-chown "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR/docker-compose.yml"
 
-# Deploy script (called by CI)
 cat > "$APP_DIR/deploy.sh" <<'DEPLOY'
 #!/usr/bin/env bash
 set -e
 cd /home/otuburu/app
-echo "[deploy] pulling images …"
+echo "[otuburu-deploy] pulling images …"
 docker compose pull
-echo "[deploy] restarting services …"
+echo "[otuburu-deploy] restarting …"
 docker compose up -d --remove-orphans
 docker compose ps
-echo "[deploy] done"
+echo "[otuburu-deploy] done ✓"
 DEPLOY
+
 chmod +x "$APP_DIR/deploy.sh"
-chown "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR/deploy.sh"
+chown -R "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR"
+echo "✓  App files written to $APP_DIR"
 
-# ── nginx reverse proxy ───────────────────────────────────────────────────────
-cat > /etc/nginx/sites-available/otuburu <<'NGINX'
+# ── nginx — add Otuburu site only (don't touch existing sites) ────────────────
+if ! command -v nginx &>/dev/null; then
+  apt-get install -y --no-install-recommends nginx
+fi
+
+cat > /etc/nginx/sites-available/otuburu-staging <<'NGINX'
 server {
-    listen 80;
-    server_name _;          # replace with staging.torama.money later
+    listen 8080;          # separate port so existing sites are untouched
+    server_name _;        # update to staging.torama.money once DNS is set
 
-    # WebSocket upgrade
+    # WebSocket upgrade for /ws
     location /ws {
         proxy_pass         http://127.0.0.1:8082;
         proxy_http_version 1.1;
@@ -114,27 +131,27 @@ server {
 }
 NGINX
 
-ln -sf /etc/nginx/sites-available/otuburu /etc/nginx/sites-enabled/otuburu
-rm -f /etc/nginx/sites-enabled/default
-nginx -t && systemctl restart nginx
-echo "✓  nginx configured"
+ln -sf /etc/nginx/sites-available/otuburu-staging \
+       /etc/nginx/sites-enabled/otuburu-staging
+nginx -t && systemctl reload nginx
+echo "✓  nginx site added on port 8080 (existing sites untouched)"
 
-# ── Firewall ──────────────────────────────────────────────────────────────────
-ufw allow OpenSSH
-ufw allow 'Nginx Full'
-ufw --force enable
-echo "✓  Firewall enabled"
-
-# ── GitHub Container Registry login ──────────────────────────────────────────
 echo ""
-echo "════════════════════════════════════════════════"
-echo "  Setup complete!"
+echo "══════════════════════════════════════════════════════"
+echo "  Server setup complete!"
 echo ""
-echo "  One manual step — log Docker into GHCR:"
-echo "  (run as user $DEPLOY_USER)"
+echo "  Otuburu staging API will be at:"
+echo "  http://104.237.157.53:8080/api/symbols"
+echo "  ws://104.237.157.53:8080/ws"
 echo ""
-echo "  su - $DEPLOY_USER"
-echo "  echo <GITHUB_PAT> | docker login ghcr.io -u filatei --password-stdin"
+echo "  Next — add these 3 secrets to GitHub:"
+echo "  Settings → Secrets → Actions"
 echo ""
-echo "  Or add GHCR_TOKEN secret to GitHub and CI will handle it."
-echo "════════════════════════════════════════════════"
+echo "  LINODE_HOST    = 104.237.157.53"
+echo "  LINODE_SSH_KEY = (your private SSH key)"
+echo "  GHCR_TOKEN     = (GitHub PAT with read:packages)"
+echo ""
+echo "  Generate GHCR_TOKEN at:"
+echo "  https://github.com/settings/tokens/new"
+echo "  → Scopes: read:packages"
+echo "══════════════════════════════════════════════════════"
