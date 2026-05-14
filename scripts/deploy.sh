@@ -23,14 +23,25 @@ log "Pulling images..."
 cd "${BACKEND}"
 docker compose pull --quiet
 
-# ── 2. Restart containers ────────────────────────────────────────────────────
+# ── 2. Evict any stale containers holding our ports ──────────────────────────
+log "Clearing stale port bindings..."
+for port in 8082 8083; do
+  cid=$(docker ps --filter "publish=${port}" -q 2>/dev/null || true)
+  if [ -n "${cid}" ]; then
+    log "  Stopping container ${cid} (was holding :${port})"
+    docker stop "${cid}" >/dev/null 2>&1 || true
+    docker rm   "${cid}" >/dev/null 2>&1 || true
+  fi
+done
+
+# ── 3. Restart containers ────────────────────────────────────────────────────
 log "Starting services..."
 docker compose up -d --remove-orphans
 
-# ── 3. Prune old images ──────────────────────────────────────────────────────
+# ── 4. Prune old images ──────────────────────────────────────────────────────
 docker image prune -f --filter "until=24h" >/dev/null 2>&1 || true
 
-# ── 4. Reload Apache (picks up any vhost changes) ────────────────────────────
+# ── 5. Reload Apache (picks up any vhost changes) ────────────────────────────
 log "Reloading Apache..."
 if sudo -n systemctl reload apache2 2>/dev/null; then
   ok "Apache reloaded"
@@ -39,7 +50,7 @@ else
   log "  echo 'otuburu ALL=(ALL) NOPASSWD: /bin/systemctl reload apache2' | sudo tee /etc/sudoers.d/otuburu-apache"
 fi
 
-# ── 5. Health checks ─────────────────────────────────────────────────────────
+# ── 6. Health checks ─────────────────────────────────────────────────────────
 log "Waiting for services..."
 sleep 5
 
