@@ -87,8 +87,8 @@ jobs:
       - name: Build static export
         working-directory: web
         env:
-          NEXT_PUBLIC_API_URL:           https://otuburu.torama.money
-          NEXT_PUBLIC_GOOGLE_CLIENT_ID:  ${{ secrets.GOOGLE_CLIENT_ID }}
+          NEXT_PUBLIC_API_URL:          https://otuburu.torama.money
+          NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
         run: npm run build
 
       - name: Upload artifact
@@ -98,7 +98,7 @@ jobs:
           path: web/out/
           retention-days: 1
 
-  # ── SSH deploy: pull + restart on Linode VPS ────────────────────────────────
+  # ── SSH deploy: copy files + restart containers ──────────────────────────────
   deploy:
     name: Deploy to Linode VPS
     needs: [build, frontend]
@@ -106,12 +106,15 @@ jobs:
     environment: staging
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download frontend artifact
         uses: actions/download-artifact@v4
         with:
           name: frontend-out
           path: frontend-out/
 
+      # Deploy frontend → /opt/otuburu/frontend/
       - name: Copy frontend to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -120,9 +123,55 @@ jobs:
           key:      ${{ secrets.LINODE_SSH_KEY }}
           port:     22
           source:   "frontend-out/*"
-          target:   "/var/www/otuburu"
+          target:   "/opt/otuburu/frontend"
           strip_components: 1
 
+      # Deploy docker-compose → /opt/otuburu/backend/
+      - name: Copy docker-compose to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host:     ${{ secrets.LINODE_HOST }}
+          username: otuburu
+          key:      ${{ secrets.LINODE_SSH_KEY }}
+          port:     22
+          source:   "docker-compose.staging.yml"
+          target:   "/opt/otuburu/backend"
+
+      # Copy deploy script
+      - name: Copy deploy script to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host:     ${{ secrets.LINODE_HOST }}
+          username: otuburu
+          key:      ${{ secrets.LINODE_SSH_KEY }}
+          port:     22
+          source:   "scripts/deploy.sh"
+          target:   "/opt/otuburu/backend"
+
+      # Copy DB schema (postgres init — only used on first boot)
+      - name: Copy schema.sql to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host:     ${{ secrets.LINODE_HOST }}
+          username: otuburu
+          key:      ${{ secrets.LINODE_SSH_KEY }}
+          port:     22
+          source:   "go-services/wallet/internal/db/schema.sql"
+          target:   "/opt/otuburu/backend/schema.sql"
+          strip_components: 5
+
+      # Copy Apache vhost config
+      - name: Copy Apache config to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host:     ${{ secrets.LINODE_HOST }}
+          username: otuburu
+          key:      ${{ secrets.LINODE_SSH_KEY }}
+          port:     22
+          source:   "infra/apache/otuburu.torama.money.conf"
+          target:   "/opt/otuburu/backend/infra"
+
+      # Write .env + pull images + restart
       - name: SSH deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -131,8 +180,36 @@ jobs:
           key:      ${{ secrets.LINODE_SSH_KEY }}
           port:     22
           script: |
-            # Deploy backend containers
-            cd /home/otuburu/app
+            set -e
+
+            # Rename docker-compose file to canonical name
+            mv -f /opt/otuburu/backend/docker-compose.staging.yml \
+                  /opt/otuburu/backend/docker-compose.yml 2>/dev/null || true
+
+            # Make deploy script executable
+            chmod +x /opt/otuburu/backend/deploy.sh
+
+            # Install Apache vhost if it changed
+            if ! diff -q /opt/otuburu/backend/infra/otuburu.torama.money.conf \
+                         /etc/apache2/sites-available/otuburu.conf >/dev/null 2>&1; then
+              sudo cp /opt/otuburu/backend/infra/otuburu.torama.money.conf \
+                      /etc/apache2/sites-available/otuburu.conf
+            fi
+
+            # Write .env from GitHub Secrets (fresh on every deploy)
+            cat > /opt/otuburu/backend/.env << 'EOF'
+            POSTGRES_USER=otuburu
+            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            POSTGRES_DB=otuburu
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            WALLET_MNEMONIC=${{ secrets.WALLET_MNEMONIC }}
+            TRONGRID_API_KEY=${{ secrets.TRONGRID_API_KEY }}
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            ADMIN_SECRET=${{ secrets.ADMIN_SECRET }}
+            EOF
+
+            # Login to GHCR and deploy
             echo "${{ secrets.GHCR_TOKEN }}" | \
               docker login ghcr.io -u filatei --password-stdin
-            bash /home/otuburu/app/deploy.sh
+
+            bash /opt/otuburu/backend/deploy.sh

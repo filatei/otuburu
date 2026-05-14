@@ -63,11 +63,24 @@ CREATE TABLE IF NOT EXISTS seen_deposits (
     address    TEXT NOT NULL,
     amount     NUMERIC(20,6) NOT NULL,
     credited   BOOLEAN DEFAULT FALSE,
+    swept_at   TIMESTAMPTZ,             -- NULL = not yet swept to treasury
+    sweep_txid TEXT,                    -- on-chain sweep transaction
+    sweep_err  TEXT,                    -- last sweep error (for retries)
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ── Treasury sweeps log ───────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS treasury_sweeps (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    deposit_txid TEXT NOT NULL REFERENCES seen_deposits(txid),
+    amount     NUMERIC(20,6) NOT NULL,
+    sweep_txid TEXT NOT NULL,
+    swept_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ── Indices ───────────────────────────────────────────────────────────────────
-CREATE INDEX IF NOT EXISTS idx_ledger_account   ON ledger(account_id);
-CREATE INDEX IF NOT EXISTS idx_ledger_created   ON ledger(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_withdrawals_user ON withdrawals(user_id);
-CREATE INDEX IF NOT EXISTS idx_deposit_address  ON deposit_addresses(address);
+CREATE INDEX IF NOT EXISTS idx_ledger_account      ON ledger(account_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_created      ON ledger(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_withdrawals_user    ON withdrawals(user_id);
+CREATE INDEX IF NOT EXISTS idx_deposit_address     ON deposit_addresses(address);
+CREATE INDEX IF NOT EXISTS idx_seen_deposits_swept ON seen_deposits(swept_at) WHERE swept_at IS NULL;
