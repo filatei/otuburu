@@ -32,7 +32,12 @@ docker image prune -f --filter "until=24h" >/dev/null 2>&1 || true
 
 # ── 4. Reload Apache (picks up any vhost changes) ────────────────────────────
 log "Reloading Apache..."
-sudo systemctl reload apache2
+if sudo -n systemctl reload apache2 2>/dev/null; then
+  ok "Apache reloaded"
+else
+  log "WARNING: could not reload Apache (no passwordless sudo). Run once on server:"
+  log "  echo 'otuburu ALL=(ALL) NOPASSWD: /bin/systemctl reload apache2' | sudo tee /etc/sudoers.d/otuburu-apache"
+fi
 
 # ── 5. Health checks ─────────────────────────────────────────────────────────
 log "Waiting for services..."
