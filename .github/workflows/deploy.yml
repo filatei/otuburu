@@ -137,7 +137,7 @@ jobs:
           source:   "docker-compose.staging.yml"
           target:   "/opt/otuburu/backend"
 
-      # Copy deploy script
+      # Copy deploy script (strip_components:1 drops the scripts/ prefix)
       - name: Copy deploy script to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -147,6 +147,7 @@ jobs:
           port:     22
           source:   "scripts/deploy.sh"
           target:   "/opt/otuburu/backend"
+          strip_components: 1
 
       # Copy DB schema (postgres init — only used on first boot)
       - name: Copy schema.sql to server
