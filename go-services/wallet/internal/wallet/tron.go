@@ -216,11 +216,7 @@ func SignTronTx(privKeyBytes []byte, rawDataHex string) (string, error) {
 	}
 	hash := sha256.Sum256(rawData)
 
-	privKey, _ := btcec.ParseDERPrivKey(privKeyBytes)
-	if privKey == nil {
-		// Try as raw scalar
-		privKey, _ = btcec.PrivKeyFromBytes(privKeyBytes)
-	}
+	privKey, _ := btcec.PrivKeyFromBytes(privKeyBytes)
 	if privKey == nil {
 		return "", fmt.Errorf("invalid private key")
 	}
@@ -311,7 +307,7 @@ func base58Decode(s string) []byte {
 	n := big.NewInt(0)
 	base := big.NewInt(58)
 	for _, c := range []byte(s) {
-		idx := strings.IndexByte(base58Alphabet, rune(c))
+		idx := strings.IndexByte(base58Alphabet, c)
 		if idx < 0 {
 			return nil
 		}
