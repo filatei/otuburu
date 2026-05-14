@@ -193,8 +193,9 @@ jobs:
             # Install Apache vhost if it changed
             if ! diff -q /opt/otuburu/backend/infra/otuburu.torama.money.conf \
                          /etc/apache2/sites-available/otuburu.conf >/dev/null 2>&1; then
-              sudo cp /opt/otuburu/backend/infra/otuburu.torama.money.conf \
-                      /etc/apache2/sites-available/otuburu.conf
+              sudo -n cp /opt/otuburu/backend/infra/otuburu.torama.money.conf \
+                         /etc/apache2/sites-available/otuburu.conf \
+                || echo "WARNING: could not update Apache vhost (add sudo perms on server)"
             fi
 
             # Write .env from GitHub Secrets (fresh on every deploy)
