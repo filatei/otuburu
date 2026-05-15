@@ -161,7 +161,7 @@ jobs:
           target:   "/opt/otuburu/backend/schema.sql"
           strip_components: 5
 
-      # Copy Apache vhost config
+      # Copy Apache vhost config (strip infra/apache/ prefix → lands at /opt/otuburu/backend/infra/<file>)
       - name: Copy Apache config to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -171,6 +171,7 @@ jobs:
           port:     22
           source:   "infra/apache/otuburu.torama.money.conf"
           target:   "/opt/otuburu/backend/infra"
+          strip_components: 2
 
       # Write .env + pull images + restart
       - name: SSH deploy
