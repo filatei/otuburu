@@ -13,7 +13,7 @@ const config: Config = {
         dim:     '#888888',
         up:      '#4bb4b4',
         down:    '#cc2e3d',
-        brand:   '#ff444f',
+        brand:   '#D97706',
       },
       fontFamily: {
         mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
