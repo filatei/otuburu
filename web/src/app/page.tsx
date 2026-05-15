@@ -11,6 +11,7 @@ import TradePanel   from '@/components/TradePanel'
 import Positions    from '@/components/Positions'
 import AuthModal    from '@/components/AuthModal'
 import ProfileModal from '@/components/ProfileModal'
+import AppDrawer    from '@/components/AppDrawer'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 
@@ -22,6 +23,7 @@ export default function TradingPage() {
   const [mode,          setMode]          = useState<'demo' | 'real'>('demo')
   const [authOpen,      setAuthOpen]      = useState(false)
   const [profileOpen,   setProfileOpen]   = useState(false)
+  const [drawerOpen,    setDrawerOpen]    = useState(false)
   const [mobileTab,     setMobileTab]     = useState<MobileTab>('chart')
 
   const { user, loading: authLoading, loginWithGoogle, logout, refreshBalances } = useAuth()
@@ -64,17 +66,28 @@ export default function TradingPage() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-surface">
-      {/* Modals */}
+      {/* Modals & drawer */}
       {authOpen    && <AuthModal onSuccess={handleGoogleLogin} />}
       {profileOpen && user && <ProfileModal user={user} onClose={() => setProfileOpen(false)} />}
+      <AppDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        user={user}
+        mode={mode}
+        onModeToggle={() => setMode(m => m === 'demo' ? 'real' : 'demo')}
+        onLogout={logout}
+        onEditProfile={() => setProfileOpen(true)}
+        onDeposit={() => {}}
+        onWithdraw={() => {}}
+        onHistory={() => {}}
+      />
 
       <Header
         user={user}
         connected={connected}
         mode={mode}
         onModeToggle={() => setMode(m => m === 'demo' ? 'real' : 'demo')}
-        onLogout={logout}
-        onEditProfile={() => setProfileOpen(true)}
+        onMenuOpen={() => setDrawerOpen(true)}
       />
 
       <SymbolBar
