@@ -55,14 +55,14 @@ export default function TradePanel({ symbol, info, lastTick, accountId, onTraded
   const notional  = info ? (lotsNum * info.contract_size * (lastTick?.mid ?? 0)).toFixed(2) : '—'
 
   return (
-    <div className={`flex flex-col bg-panel ${mobile ? 'w-full min-h-full' : 'h-full border-l border-border w-64 shrink-0'}`}>
+    <div className={`flex flex-col bg-panel ${mobile ? 'w-full' : 'h-full border-l border-border w-64 shrink-0'}`}>
       {/* Mode tabs */}
-      <div className="flex border-b border-border">
+      <div className="flex border-b border-border shrink-0">
         <Tab label="Rise/Fall" active={mode === 'binary'} onClick={() => setMode('binary')} />
         <Tab label="CFD"       active={mode === 'cfd'}    onClick={() => setMode('cfd')}    />
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+      <div className={`${mobile ? '' : 'flex-1'} overflow-y-auto p-4 flex flex-col gap-4`}>
         {/* Current price */}
         {lastTick && (
           <div className="bg-surface rounded-lg p-3">

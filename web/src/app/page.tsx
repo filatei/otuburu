@@ -115,7 +115,7 @@ export default function TradingPage() {
             <Chart candles={candles} lastTick={lastTick} symbol={selected} />
           )}
           {mobileTab === 'trade' && (
-            <div className="h-full overflow-y-auto">
+            <div className="h-full overflow-y-auto bg-panel">
               <TradePanel
                 symbol={selected}
                 info={selectedInfo}

@@ -19,8 +19,14 @@ export default function ProfileModal({ user, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
-      <div className="bg-panel border border-border rounded-2xl p-6 flex flex-col gap-5 w-full max-w-sm shadow-2xl">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-panel border border-border rounded-2xl p-6 flex flex-col gap-5 w-full max-w-sm shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-center justify-between">
           <h2 className="text-text font-semibold text-base">Edit Profile</h2>
