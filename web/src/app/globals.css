@@ -21,7 +21,14 @@ html, body {
   color: #e0e0e0;
   font-family: 'Inter', sans-serif;
   height: 100%;
+  /* Use dvh on mobile so the bottom nav sits above the browser chrome */
+  height: 100dvh;
   overflow: hidden;
+}
+
+/* Safe area inset for iOS notch / home indicator */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* Scrollbar */

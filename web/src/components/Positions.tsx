@@ -9,13 +9,14 @@ interface Props {
   ticks:     Record<string, Tick>
   accountId: string
   onRefresh: () => void
+  mobile?:   boolean
 }
 
-export default function Positions({ positions, binaries, ticks, accountId, onRefresh }: Props) {
+export default function Positions({ positions, binaries, ticks, accountId, onRefresh, mobile }: Props) {
   const hasData = positions.length > 0 || binaries.length > 0
 
   return (
-    <div className="border-t border-border bg-panel shrink-0" style={{ height: '180px' }}>
+    <div className={`border-t border-border bg-panel ${mobile ? 'min-h-full' : 'shrink-0'}`} style={mobile ? undefined : { height: '180px' }}>
       <div className="flex items-center h-8 px-4 border-b border-border gap-4">
         <span className="text-xs font-semibold text-dim uppercase tracking-wider">Open Positions</span>
         <span className="text-[10px] bg-surface px-1.5 rounded text-dim">
@@ -23,7 +24,7 @@ export default function Positions({ positions, binaries, ticks, accountId, onRef
         </span>
       </div>
 
-      <div className="overflow-y-auto h-[148px]">
+      <div className={mobile ? 'overflow-y-auto' : 'overflow-y-auto h-[148px]'}>
         {!hasData && (
           <div className="flex items-center justify-center h-full text-dim text-sm">
             No open trades

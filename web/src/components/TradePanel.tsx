@@ -10,13 +10,14 @@ interface Props {
   lastTick:  Tick | null
   accountId: string
   onTraded:  () => void
+  mobile?:   boolean
 }
 
 type Mode = 'binary' | 'cfd'
 
 const PAYOUT = 0.85  // house pays 85 % on binary wins
 
-export default function TradePanel({ symbol, info, lastTick, accountId, onTraded }: Props) {
+export default function TradePanel({ symbol, info, lastTick, accountId, onTraded, mobile }: Props) {
   const [mode,      setMode]      = useState<Mode>('binary')
   const [stake,     setStake]     = useState('10')
   const [lots,      setLots]      = useState('0.01')
@@ -54,7 +55,7 @@ export default function TradePanel({ symbol, info, lastTick, accountId, onTraded
   const notional  = info ? (lotsNum * info.contract_size * (lastTick?.mid ?? 0)).toFixed(2) : '—'
 
   return (
-    <div className="flex flex-col h-full bg-panel border-l border-border w-64 shrink-0">
+    <div className={`flex flex-col bg-panel ${mobile ? 'w-full min-h-full' : 'h-full border-l border-border w-64 shrink-0'}`}>
       {/* Mode tabs */}
       <div className="flex border-b border-border">
         <Tab label="Rise/Fall" active={mode === 'binary'} onClick={() => setMode('binary')} />
