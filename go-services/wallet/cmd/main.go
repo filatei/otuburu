@@ -80,17 +80,19 @@ func main() {
 	protected.POST("/wallet/withdraw", walletH.Withdraw)
 
 	// ── Admin: back-office dashboard ──────────────────────────────────────────
-	adminH := admin.New(pool, hd, sw)
-	r.GET("/admin", adminH.UI) // HTML page — no auth (JS handles it)
-
-	adminAPI := r.Group("/admin", admin.Middleware())
-	adminAPI.GET("/dashboard",                adminH.Dashboard)
-	adminAPI.GET("/users",                    adminH.Users)
-	adminAPI.GET("/deposits",                 adminH.Deposits)
-	adminAPI.GET("/withdrawals",              adminH.Withdrawals)
-	adminAPI.POST("/withdrawals/:id/approve", adminH.ApproveWithdrawal)
-	adminAPI.POST("/withdrawals/:id/reject",  adminH.RejectWithdrawal)
-	adminAPI.POST("/sweep",                   adminH.ManualSweep)
+	// Note: avoid r.Group("/admin") alongside r.GET("/admin") — Gin's router
+	// tree treats the group prefix as a node and drops the exact-match handler.
+	// Apply the auth middleware inline per route instead.
+	adminH   := admin.New(pool, hd, sw)
+	adminAuth := admin.Middleware()
+	r.GET("/admin",                        adminH.UI) // HTML — no auth (JS handles it)
+	r.GET("/admin/dashboard",              adminAuth, adminH.Dashboard)
+	r.GET("/admin/users",                  adminAuth, adminH.Users)
+	r.GET("/admin/deposits",               adminAuth, adminH.Deposits)
+	r.GET("/admin/withdrawals",            adminAuth, adminH.Withdrawals)
+	r.POST("/admin/withdrawals/:id/approve", adminAuth, adminH.ApproveWithdrawal)
+	r.POST("/admin/withdrawals/:id/reject",  adminAuth, adminH.RejectWithdrawal)
+	r.POST("/admin/sweep",                 adminAuth, adminH.ManualSweep)
 
 	port := os.Getenv("PORT")
 	if port == "" {
