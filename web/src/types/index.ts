@@ -58,3 +58,15 @@ export interface Candle {
   low:   number
   close: number
 }
+
+export interface SettledTrade {
+  id:          string
+  symbol:      string
+  direction:   'UP' | 'DOWN'
+  stake:       number
+  ticks_total: number
+  entry_mid:   number
+  settled_at:  number        // ms timestamp
+  outcome:     'win' | 'loss'
+  pnl:         number        // net gain/loss (positive = profit, negative = -stake)
+}

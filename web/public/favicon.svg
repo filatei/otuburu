@@ -1,0 +1,10 @@
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dark rounded background -->
+  <rect width="32" height="32" rx="7" fill="#0e0e0e"/>
+  <!-- Gold O ring — the Otuburu mark -->
+  <circle cx="16" cy="16" r="11" fill="none" stroke="#f59e0b" stroke-width="2.8"/>
+  <!-- Rising trend line inside the O -->
+  <polyline points="9,20 13,15 17,17 23,10"
+    fill="none" stroke="#22c55e" stroke-width="2.2"
+    stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

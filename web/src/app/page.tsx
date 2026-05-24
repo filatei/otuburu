@@ -49,7 +49,7 @@ export default function TradingPage() {
     ? (mode === 'real' ? user.account_id : user.demo_id)
     : 'demo'
 
-  const { positions, binaries, refresh } = useAccount(accountId)
+  const { account, positions, binaries, settledHistory, refresh } = useAccount(accountId)
 
   const selectedInfo = symbols.find(s => s.symbol === selected) ?? null
 
@@ -86,6 +86,7 @@ export default function TradingPage() {
         user={user}
         connected={connected}
         mode={mode}
+        engineBalance={account?.balance ?? null}
         onModeToggle={() => setMode(m => m === 'demo' ? 'real' : 'demo')}
         onMenuOpen={() => setDrawerOpen(true)}
       />
@@ -106,6 +107,7 @@ export default function TradingPage() {
           <Positions
             positions={positions}
             binaries={binaries}
+            settledHistory={settledHistory}
             ticks={allTicks}
             accountId={accountId}
             onRefresh={refresh}

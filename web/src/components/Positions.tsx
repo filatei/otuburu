@@ -1,113 +1,222 @@
 'use client'
+import { useState } from 'react'
 import clsx from 'clsx'
-import type { Position, BinaryOption, Tick } from '@/types'
+import type { Position, BinaryOption, Tick, SettledTrade } from '@/types'
 import { closePosition } from '@/hooks/useAccount'
 
 interface Props {
-  positions: Position[]
-  binaries:  BinaryOption[]
-  ticks:     Record<string, Tick>
-  accountId: string
-  onRefresh: () => void
-  mobile?:   boolean
+  positions:      Position[]
+  binaries:       BinaryOption[]
+  settledHistory: SettledTrade[]
+  ticks:          Record<string, Tick>
+  accountId:      string
+  onRefresh:      () => void
+  mobile?:        boolean
 }
 
-export default function Positions({ positions, binaries, ticks, accountId, onRefresh, mobile }: Props) {
-  const hasData = positions.length > 0 || binaries.length > 0
+type Tab = 'open' | 'recent' | 'history'
+
+export default function Positions({
+  positions, binaries, settledHistory, ticks, accountId, onRefresh, mobile,
+}: Props) {
+  const [tab, setTab] = useState<Tab>('open')
+
+  const openCount    = positions.length + binaries.length
+  const recentTrades = settledHistory.slice(0, 10)
+  const winCount     = settledHistory.filter(t => t.outcome === 'win').length
+  const totalPnl     = settledHistory.reduce((sum, t) => sum + t.pnl, 0)
 
   return (
-    <div className={`border-t border-border bg-panel ${mobile ? 'min-h-full' : 'shrink-0'}`} style={mobile ? undefined : { height: '180px' }}>
-      <div className="flex items-center h-8 px-4 border-b border-border gap-4">
-        <span className="text-xs font-semibold text-dim uppercase tracking-wider">Open Positions</span>
-        <span className="text-[10px] bg-surface px-1.5 rounded text-dim">
-          {positions.length} CFD · {binaries.length} Binary
-        </span>
-      </div>
+    <div
+      className={`border-t border-border bg-panel ${mobile ? 'min-h-full' : 'shrink-0'}`}
+      style={mobile ? undefined : { height: '210px' }}
+    >
+      {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
+      <div className="flex items-center h-8 border-b border-border px-2 gap-1">
+        <TabBtn label="Open" count={openCount} active={tab === 'open'} onClick={() => setTab('open')} />
+        <TabBtn label="Recent" count={recentTrades.length} active={tab === 'recent'} onClick={() => setTab('recent')} />
+        <TabBtn label="History" active={tab === 'history'} onClick={() => setTab('history')} />
 
-      <div className={mobile ? 'overflow-y-auto' : 'overflow-y-auto h-[148px]'}>
-        {!hasData && (
-          <div className="flex items-center justify-center h-full text-dim text-sm">
-            No open trades
+        {settledHistory.length > 0 && (
+          <div className="ml-auto flex items-center gap-3 text-[10px] text-dim pr-2">
+            <span>{winCount}W&nbsp;/&nbsp;{settledHistory.length - winCount}L</span>
+            <span className={clsx('font-semibold num', totalPnl >= 0 ? 'text-up' : 'text-down')}>
+              {totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(2)}
+            </span>
           </div>
         )}
+      </div>
 
-        {positions.length > 0 && (
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-dim border-b border-border">
-                {['Symbol','Side','Lots','Entry','Current','P&L',''].map(h => (
-                  <th key={h} className="px-3 py-1 text-left font-normal">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {positions.map(p => {
-                const tick    = ticks[p.symbol]
-                const current = tick ? (p.side === 'BUY' ? tick.bid : tick.ask) : p.entry
-                const pnl     = p.unrealised_pnl
-                return (
-                  <tr key={p.id} className="border-b border-border/50 hover:bg-surface/50">
-                    <td className="px-3 py-1.5 font-semibold">{p.symbol}</td>
-                    <td className={clsx('px-3 py-1.5 font-semibold', p.side === 'BUY' ? 'text-up' : 'text-down')}>
-                      {p.side}
-                    </td>
-                    <td className="px-3 py-1.5 num">{p.lots.toFixed(2)}</td>
-                    <td className="px-3 py-1.5 num">{p.entry.toFixed(5)}</td>
-                    <td className="px-3 py-1.5 num">{current.toFixed(5)}</td>
-                    <td className={clsx('px-3 py-1.5 num font-semibold', pnl >= 0 ? 'text-up' : 'text-down')}>
-                      {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <button
-                        onClick={async () => { await closePosition(accountId, p.id); onRefresh() }}
-                        className="px-2 py-0.5 text-[10px] rounded border border-down/30 text-down hover:bg-down/10"
-                      >
-                        Close
-                      </button>
-                    </td>
+      {/* ── Content ──────────────────────────────────────────────────────────── */}
+      <div className={mobile ? 'overflow-y-auto' : 'overflow-y-auto'} style={mobile ? undefined : { height: '170px' }}>
+
+        {/* OPEN ──────────────────────────────────────────────────────────────── */}
+        {tab === 'open' && (
+          <>
+            {openCount === 0 && (
+              <div className="flex items-center justify-center py-8 text-dim text-sm">No open trades</div>
+            )}
+
+            {positions.length > 0 && (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-dim border-b border-border">
+                    {['Symbol','Side','Lots','Entry','Current','P&L',''].map(h => (
+                      <th key={h} className="px-3 py-1 text-left font-normal">{h}</th>
+                    ))}
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {positions.map(p => {
+                    const tick    = ticks[p.symbol]
+                    const current = tick ? (p.side === 'BUY' ? tick.bid : tick.ask) : p.entry
+                    const pnl     = p.unrealised_pnl
+                    return (
+                      <tr key={p.id} className="border-b border-border/50 hover:bg-surface/50">
+                        <td className="px-3 py-1.5 font-semibold">{p.symbol}</td>
+                        <td className={clsx('px-3 py-1.5 font-semibold', p.side === 'BUY' ? 'text-up' : 'text-down')}>{p.side}</td>
+                        <td className="px-3 py-1.5 num">{p.lots.toFixed(2)}</td>
+                        <td className="px-3 py-1.5 num">{p.entry.toFixed(5)}</td>
+                        <td className="px-3 py-1.5 num">{current.toFixed(5)}</td>
+                        <td className={clsx('px-3 py-1.5 num font-semibold', pnl >= 0 ? 'text-up' : 'text-down')}>
+                          {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <button
+                            onClick={async () => { await closePosition(accountId, p.id); onRefresh() }}
+                            className="px-2 py-0.5 text-[10px] rounded border border-down/30 text-down hover:bg-down/10"
+                          >Close</button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+
+            {binaries.length > 0 && (
+              <table className="w-full text-xs mt-1">
+                <thead>
+                  <tr className="text-dim border-b border-border">
+                    {['Symbol','Dir','Stake','Entry','Ticks',''].map(h => (
+                      <th key={h} className="px-3 py-1 text-left font-normal">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {binaries.map(b => (
+                    <tr key={b.id} className="border-b border-border/50 hover:bg-surface/50">
+                      <td className="px-3 py-1.5 font-semibold">{b.symbol}</td>
+                      <td className={clsx('px-3 py-1.5 font-semibold', b.direction === 'UP' ? 'text-up' : 'text-down')}>
+                        {b.direction === 'UP' ? '▲ Rise' : '▼ Fall'}
+                      </td>
+                      <td className="px-3 py-1.5 num">${b.stake.toFixed(2)}</td>
+                      <td className="px-3 py-1.5 num">{b.entry_mid.toFixed(5)}</td>
+                      <td className="px-3 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 bg-muted rounded-full h-1">
+                            <div
+                              className="bg-up h-1 rounded-full transition-all"
+                              style={{ width: `${(b.ticks_left / b.ticks_total) * 100}%` }}
+                            />
+                          </div>
+                          <span className="num">{b.ticks_left}/{b.ticks_total}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-1.5 text-dim text-[10px]">Settling…</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
         )}
 
-        {binaries.length > 0 && (
-          <table className="w-full text-xs mt-1">
-            <thead>
-              <tr className="text-dim border-b border-border">
-                {['Symbol','Dir','Stake','Entry','Ticks left',''].map(h => (
-                  <th key={h} className="px-3 py-1 text-left font-normal">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {binaries.map(b => (
-                <tr key={b.id} className="border-b border-border/50 hover:bg-surface/50">
-                  <td className="px-3 py-1.5 font-semibold">{b.symbol}</td>
-                  <td className={clsx('px-3 py-1.5 font-semibold', b.direction === 'UP' ? 'text-up' : 'text-down')}>
-                    {b.direction === 'UP' ? '▲ Rise' : '▼ Fall'}
-                  </td>
-                  <td className="px-3 py-1.5 num">${b.stake.toFixed(2)}</td>
-                  <td className="px-3 py-1.5 num">{b.entry_mid.toFixed(5)}</td>
-                  <td className="px-3 py-1.5">
-                    <div className="flex items-center gap-2">
-                      <div className="w-16 bg-muted rounded-full h-1">
-                        <div
-                          className="bg-up h-1 rounded-full transition-all"
-                          style={{ width: `${(b.ticks_left / b.ticks_total) * 100}%` }}
-                        />
-                      </div>
-                      <span className="num">{b.ticks_left}/{b.ticks_total}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-1.5 text-dim text-[10px]">Auto-settles</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* RECENT ─────────────────────────────────────────────────────────────── */}
+        {tab === 'recent' && (
+          recentTrades.length === 0
+            ? <div className="flex items-center justify-center py-8 text-dim text-sm">No recent trades yet</div>
+            : <HistoryTable trades={recentTrades} />
+        )}
+
+        {/* HISTORY ────────────────────────────────────────────────────────────── */}
+        {tab === 'history' && (
+          settledHistory.length === 0
+            ? <div className="flex items-center justify-center py-8 text-dim text-sm">No trade history yet</div>
+            : <HistoryTable trades={settledHistory} />
         )}
       </div>
     </div>
   )
+}
+
+// ─── History table (shared by Recent + History tabs) ─────────────────────────
+function HistoryTable({ trades }: { trades: SettledTrade[] }) {
+  return (
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="text-dim border-b border-border">
+          {['Symbol','Dir','Stake','Entry','Ticks','Result','P&L','Time'].map(h => (
+            <th key={h} className="px-3 py-1 text-left font-normal">{h}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {trades.map(t => <SettledRow key={t.id} trade={t} />)}
+      </tbody>
+    </table>
+  )
+}
+
+function SettledRow({ trade: t }: { trade: SettledTrade }) {
+  return (
+    <tr className="border-b border-border/50 hover:bg-surface/50">
+      <td className="px-3 py-1.5 font-semibold">{t.symbol}</td>
+      <td className={clsx('px-3 py-1.5 font-semibold', t.direction === 'UP' ? 'text-up' : 'text-down')}>
+        {t.direction === 'UP' ? '▲ Rise' : '▼ Fall'}
+      </td>
+      <td className="px-3 py-1.5 num">${t.stake.toFixed(2)}</td>
+      <td className="px-3 py-1.5 num">{t.entry_mid.toFixed(5)}</td>
+      <td className="px-3 py-1.5 num">{t.ticks_total}</td>
+      <td className="px-3 py-1.5">
+        <span className={clsx(
+          'px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide',
+          t.outcome === 'win' ? 'bg-up/15 text-up' : 'bg-down/15 text-down',
+        )}>
+          {t.outcome === 'win' ? 'WON' : 'LOST'}
+        </span>
+      </td>
+      <td className={clsx('px-3 py-1.5 num font-semibold', t.pnl >= 0 ? 'text-up' : 'text-down')}>
+        {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
+      </td>
+      <td className="px-3 py-1.5 text-dim text-[10px] whitespace-nowrap">{formatAgo(t.settled_at)}</td>
+    </tr>
+  )
+}
+
+// ─── Tab button ───────────────────────────────────────────────────────────────
+function TabBtn({ label, count, active, onClick }: {
+  label: string; count?: number; active: boolean; onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={clsx(
+        'flex items-center gap-1 px-2.5 h-full text-[11px] font-medium border-b-2 transition-colors',
+        active ? 'border-brand text-text' : 'border-transparent text-dim hover:text-text',
+      )}
+    >
+      {label}
+      {count !== undefined && count > 0 && (
+        <span className="bg-brand/20 text-brand text-[9px] px-1 rounded-full">{count}</span>
+      )}
+    </button>
+  )
+}
+
+function formatAgo(ms: number): string {
+  const diff = Date.now() - ms
+  if (diff < 60_000)    return `${Math.floor(diff / 1000)}s ago`
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
+  return `${Math.floor(diff / 3_600_000)}h ago`
 }

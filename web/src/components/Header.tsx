@@ -2,17 +2,19 @@
 import type { AuthUser } from '@/hooks/useAuth'
 
 interface Props {
-  user:          AuthUser | null
-  connected:     boolean
-  mode:          'demo' | 'real'
-  onModeToggle:  () => void
-  onMenuOpen:    () => void
+  user:           AuthUser | null
+  connected:      boolean
+  mode:           'demo' | 'real'
+  engineBalance:  number | null   // live balance from engine, overrides static auth balance
+  onModeToggle:   () => void
+  onMenuOpen:     () => void
 }
 
-export default function Header({ user, connected, mode, onModeToggle, onMenuOpen }: Props) {
-  const balance = user
-    ? (mode === 'demo' ? user.demo_balance : user.real_balance)
-    : null
+export default function Header({ user, connected, mode, engineBalance, onModeToggle, onMenuOpen }: Props) {
+  // Prefer the live engine balance (updates as trades settle) over the static wallet balance
+  const balance = engineBalance !== null
+    ? engineBalance
+    : user ? (mode === 'demo' ? user.demo_balance : user.real_balance) : null
 
   return (
     <header className="h-12 bg-panel border-b border-border flex items-center px-3 gap-3 shrink-0 z-10">
