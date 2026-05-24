@@ -31,7 +31,8 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "timeout 1 bash -c 'cat /dev/null > /dev/tcp/localhost/9090' && echo ok || exit 1"]
+      # nc is available in slim images; checks gRPC port is accepting connections
+      test: ["CMD", "nc", "-z", "localhost", "9090"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -49,7 +50,8 @@ services:
     depends_on:
       - engine
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/healthz || exit 1"]
+      # Go binary has /healthz; use nc to avoid needing wget/curl in slim image
+      test: ["CMD", "nc", "-z", "localhost", "8082"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -76,7 +78,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/healthz || exit 1"]
+      test: ["CMD", "nc", "-z", "localhost", "8083"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -108,7 +110,7 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8084/healthz || exit 1"]
+      test: ["CMD", "nc", "-z", "localhost", "8084"]
       interval: 30s
       timeout: 5s
       retries: 3
