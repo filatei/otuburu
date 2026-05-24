@@ -24,7 +24,10 @@ export default function Positions({
   const openCount    = positions.length + binaries.length
   const recentTrades = settledHistory.slice(0, 10)
   const winCount     = settledHistory.filter(t => t.outcome === 'win').length
-  const totalPnl     = settledHistory.reduce((sum, t) => sum + t.pnl, 0)
+  // Net P&L: payout received minus stake paid. Win = payout − stake; Loss = −stake.
+  const netPnl       = (t: { outcome: string; pnl: number; stake: number }) =>
+    t.outcome === 'win' ? t.pnl - t.stake : -t.stake
+  const totalPnl     = settledHistory.reduce((sum, t) => sum + netPnl(t), 0)
 
   return (
     <div
@@ -169,6 +172,11 @@ function HistoryTable({ trades }: { trades: SettledTrade[] }) {
 }
 
 function SettledRow({ trade: t }: { trade: SettledTrade }) {
+  // Net P&L: what the user actually gained or lost on this trade.
+  // Win:  payout_received − stake_paid  (e.g. $18.50 − $10 = +$8.50)
+  // Loss: −stake_paid                   (e.g. −$10.00)
+  const net = t.outcome === 'win' ? t.pnl - t.stake : -t.stake
+
   return (
     <tr className="border-b border-border/50 hover:bg-surface/50">
       <td className="px-3 py-1.5 font-semibold">{t.symbol}</td>
@@ -186,8 +194,8 @@ function SettledRow({ trade: t }: { trade: SettledTrade }) {
           {t.outcome === 'win' ? 'WON' : 'LOST'}
         </span>
       </td>
-      <td className={clsx('px-3 py-1.5 num font-semibold', t.pnl >= 0 ? 'text-up' : 'text-down')}>
-        {t.pnl >= 0 ? '+' : ''}{t.pnl.toFixed(2)}
+      <td className={clsx('px-3 py-1.5 num font-semibold', net >= 0 ? 'text-up' : 'text-down')}>
+        {net >= 0 ? '+' : ''}{net.toFixed(2)}
       </td>
       <td className="px-3 py-1.5 text-dim text-[10px] whitespace-nowrap">{formatAgo(t.settled_at)}</td>
     </tr>
