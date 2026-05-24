@@ -138,11 +138,16 @@ jobs:
           key:      ${{ secrets.LINODE_SSH_KEY }}
           port:     ${{ secrets.LINODE_SSH_PORT }}
           script: |
-            # Create dirs if missing, preserving otuburu ownership
-            sudo mkdir -p /opt/otuburu/frontend /opt/otuburu/backend/infra
-            sudo chown -R otuburu:otuburu /opt/otuburu
-            # user1 writes via the otuburu group (setgid keeps new files in group)
-            sudo chmod -R g+rwXs /opt/otuburu
+            # Frontend: user1 owns it — SCP extracts tar here directly
+            sudo mkdir -p /opt/otuburu/frontend
+            sudo chown -R user1:otuburu /opt/otuburu/frontend
+            sudo chmod -R 775 /opt/otuburu/frontend
+            sudo chmod -R g-s /opt/otuburu/frontend
+
+            # Backend: otuburu owns it — no tar extraction, setgid fine
+            sudo mkdir -p /opt/otuburu/backend/infra
+            sudo chown -R otuburu:otuburu /opt/otuburu/backend
+            sudo chmod -R g+rwXs /opt/otuburu/backend
 
       # ── Static frontend ───────────────────────────────────────────────────────
       - name: Copy frontend to server
