@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"otuburu.money/gateway/internal/engine"
 	"otuburu.money/gateway/internal/enginepb"
@@ -17,6 +19,22 @@ var (
 	engineAddr   = envOr("ENGINE_ADDR", "localhost:9090")
 	engineClient *engine.Client
 )
+
+// protoJSON serialises a proto.Message as JSON using snake_case field names
+// and emitting zero-value (unpopulated) fields so the frontend always sees all keys.
+var protoMarshaler = protojson.MarshalOptions{
+	UseProtoNames:   true,  // snake_case → matches TypeScript interfaces
+	EmitUnpopulated: true,  // include balance:0, positions:[] etc.
+}
+
+func writeProtoJSON(c *gin.Context, status int, msg proto.Message) {
+	b, err := protoMarshaler.Marshal(msg)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Data(status, "application/json; charset=utf-8", b)
+}
 
 // Init wires the shared engine client into this package.
 // Must be called before RegisterRoutes.
@@ -29,7 +47,8 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/symbols", handleSymbols)
 	rg.GET("/state", handleState)
 	rg.POST("/order", handleOrder)
-	rg.POST("/close", handleClose)
+	rg.POST("/close", handleClose)               // legacy
+	rg.DELETE("/position/:id", handleDeletePos)  // frontend: closePosition()
 	rg.POST("/binary", handleBinary)
 }
 
@@ -57,7 +76,7 @@ func handleSymbols(c *gin.Context) {
 		engineErr(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	writeProtoJSON(c, http.StatusOK, resp)
 }
 
 func handleState(c *gin.Context) {
@@ -71,7 +90,7 @@ func handleState(c *gin.Context) {
 		engineErr(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	writeProtoJSON(c, http.StatusOK, resp)
 }
 
 type placeOrderReq struct {
@@ -100,7 +119,7 @@ func handleOrder(c *gin.Context) {
 		engineErr(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	writeProtoJSON(c, http.StatusOK, resp)
 }
 
 type closePositionReq struct {
@@ -108,6 +127,7 @@ type closePositionReq struct {
 	PositionID string `json:"position_id" binding:"required"`
 }
 
+// handleClose handles the legacy POST /close route.
 func handleClose(c *gin.Context) {
 	var req closePositionReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -125,7 +145,33 @@ func handleClose(c *gin.Context) {
 		engineErr(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	writeProtoJSON(c, http.StatusOK, resp)
+}
+
+// handleDeletePos handles DELETE /position/:id  (used by the frontend closePosition()).
+// The account_id comes from the JSON body (same shape as legacy close).
+func handleDeletePos(c *gin.Context) {
+	posID := c.Param("id")
+
+	// account_id may arrive in the JSON body
+	var body struct {
+		AccountID string `json:"account_id"`
+	}
+	// non-fatal if body is missing — engine will validate
+	_ = c.ShouldBindJSON(&body)
+
+	ctx, cancel := rpcCtx()
+	defer cancel()
+
+	resp, err := engineClient.Service().ClosePosition(ctx, &enginepb.ClosePositionRequest{
+		AccountId:  body.AccountID,
+		PositionId: posID,
+	})
+	if err != nil {
+		engineErr(c, err)
+		return
+	}
+	writeProtoJSON(c, http.StatusOK, resp)
 }
 
 type placeBinaryReq struct {
@@ -156,7 +202,7 @@ func handleBinary(c *gin.Context) {
 		engineErr(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	writeProtoJSON(c, http.StatusOK, resp)
 }
 
 func envOr(k, def string) string {

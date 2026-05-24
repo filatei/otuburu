@@ -156,7 +156,9 @@ pub struct Account {
 impl Account {
     pub fn new_demo() -> Self {
         Account {
-            id: Uuid::new_v4(),
+            // Fixed UUID so demo account ID is stable across engine restarts.
+            // Changing this would invalidate any persisted client-side state.
+            id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
             currency: "USD".into(),
             balance: 10_000.0,
             realised_pnl: 0.0,
@@ -242,7 +244,7 @@ impl Book {
 
     // ── margin helpers ──────────────────────────────────────
 
-    fn used_margin(&self) -> f64 {
+    pub fn used_margin(&self) -> f64 {
         self.positions.values().map(|p| p.margin).sum()
     }
     fn unrealised_pnl(&self) -> f64 {

@@ -122,7 +122,7 @@ impl EngineService for EngineServiceImpl {
             currency: book.account.currency.clone(),
             balance: book.account.balance,
             equity: book.equity(),
-            used_margin: book.free_margin(), // Note: will fix naming below
+            used_margin: book.used_margin(),
             free_margin: book.free_margin(),
             margin_level: book.margin_level(),
             realised_pnl: book.account.realised_pnl,
