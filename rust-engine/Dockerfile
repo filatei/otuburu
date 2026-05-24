@@ -18,7 +18,12 @@ COPY proto/  proto/
 RUN cargo build --release --bin otuburu-engine
 
 # ── Stage 2: minimal runtime ──────────────────────────────────────────────────
-FROM gcr.io/distroless/cc-debian12
+# debian:12-slim provides glibc (needed by Rust binary) + nc for healthchecks.
+FROM debian:12-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends netcat-openbsd \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/release/otuburu-engine /otuburu-engine
 

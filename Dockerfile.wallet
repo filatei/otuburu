@@ -7,7 +7,13 @@ WORKDIR /build/go-services/wallet
 RUN go mod tidy \
  && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /otuburu-wallet ./cmd
 
-FROM gcr.io/distroless/static-debian12
+# debian:12-slim instead of distroless so healthcheck (nc) works inside the container.
+FROM debian:12-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends netcat-openbsd \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /otuburu-wallet /otuburu-wallet
 
 ENV PORT=8083 \

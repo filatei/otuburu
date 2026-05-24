@@ -86,7 +86,7 @@ export function useAccount(accountId: string): GameState {
           ticks_total: b.ticks_total,
           entry_mid:   b.entry_mid,
           settled_at:  Date.now(),
-          outcome:     pnlEach >= 0 ? 'win' : 'loss',
+          outcome:     pnlEach > 0 ? 'win' : 'loss',
           pnl:         parseFloat(pnlEach.toFixed(2)),
         }))
 

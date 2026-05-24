@@ -110,7 +110,9 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "8084"]
+      # node is always available in the Node.js image; avoids needing nc/curl
+      test: ["CMD", "node", "-e",
+        "require('http').get('http://localhost:8084/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
