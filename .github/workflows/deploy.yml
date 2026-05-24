@@ -149,6 +149,19 @@ jobs:
             sudo chown -R otuburu:otuburu /opt/otuburu/backend
             sudo chmod -R g+rwXs /opt/otuburu/backend
 
+            # Ensure user1 can manage Apache without a password
+            # (scoped to only the commands the deploy pipeline needs)
+            cat <<'SUDOEOF' | sudo tee /etc/sudoers.d/user1-apache >/dev/null
+            user1 ALL=(ALL) NOPASSWD: \
+              /usr/sbin/a2enmod, \
+              /usr/sbin/a2ensite, \
+              /usr/sbin/apache2ctl, \
+              /bin/systemctl reload apache2, \
+              /bin/systemctl status apache2, \
+              /bin/cp /opt/otuburu/backend/infra/* /etc/apache2/sites-available/*
+            SUDOEOF
+            sudo chmod 440 /etc/sudoers.d/user1-apache
+
       # ── Static frontend ───────────────────────────────────────────────────────
       - name: Copy frontend to server
         uses: appleboy/scp-action@v0.1.7

@@ -41,13 +41,31 @@ docker compose up -d --remove-orphans
 # ── 4. Prune old images ──────────────────────────────────────────────────────
 docker image prune -f --filter "until=24h" >/dev/null 2>&1 || true
 
-# ── 5. Reload Apache (picks up any vhost changes) ────────────────────────────
-log "Reloading Apache..."
-if sudo -n systemctl reload apache2 2>/dev/null; then
+# ── 5. Install Apache vhost + reload ─────────────────────────────────────────
+log "Configuring Apache..."
+VHOST_SRC="${BACKEND}/infra/otuburu.torama.money.conf"
+VHOST_DST="/etc/apache2/sites-available/otuburu.conf"
+
+if [ -f "${VHOST_SRC}" ]; then
+  # Enable required modules (idempotent)
+  sudo -n a2enmod proxy proxy_http rewrite headers 2>/dev/null || true
+
+  # Install/update vhost only when it changed
+  if ! diff -q "${VHOST_SRC}" "${VHOST_DST}" >/dev/null 2>&1; then
+    sudo -n cp "${VHOST_SRC}" "${VHOST_DST}" \
+      && log "Apache vhost updated" \
+      || log "WARNING: could not copy vhost (needs sudo). Run manually: sudo cp ${VHOST_SRC} ${VHOST_DST}"
+  fi
+
+  # Enable site (idempotent)
+  sudo -n a2ensite otuburu 2>/dev/null || true
+fi
+
+if sudo -n apache2ctl configtest 2>/dev/null && sudo -n systemctl reload apache2 2>/dev/null; then
   ok "Apache reloaded"
 else
-  log "WARNING: could not reload Apache (no passwordless sudo). Run once on server:"
-  log "  echo 'otuburu ALL=(ALL) NOPASSWD: /bin/systemctl reload apache2' | sudo tee /etc/sudoers.d/otuburu-apache"
+  log "WARNING: Apache reload failed or needs manual sudo. Run on server:"
+  log "  sudo apache2ctl configtest && sudo systemctl reload apache2"
 fi
 
 # ── 6. Health checks ─────────────────────────────────────────────────────────
