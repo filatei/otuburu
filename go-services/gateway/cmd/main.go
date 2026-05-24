@@ -57,6 +57,7 @@ func main() {
 	defer stop()
 
 	go engine.RunTickPump(ctx, engineClient, hub)
+	go engine.RunStatePump(ctx, engineClient, hub) // pushes state every 1s → no HTTP polling needed
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	r := gin.New()

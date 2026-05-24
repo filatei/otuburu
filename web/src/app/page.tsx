@@ -43,13 +43,15 @@ export default function TradingPage() {
       .catch(() => {})
   }, [])
 
-  const { lastTick, allTicks, candles, connected } = useTicks(selected)
-
   const accountId = user
     ? (mode === 'real' ? user.account_id : user.demo_id)
     : 'demo'
 
-  const { account, positions, binaries, settledHistory, refresh } = useAccount(accountId)
+  // applyState is passed to useTicks so WebSocket state pushes update account
+  // without any HTTP polling — eliminates the mod_evasive rate-limit trigger.
+  const { account, positions, binaries, settledHistory, refresh, applyState } = useAccount(accountId)
+
+  const { lastTick, allTicks, candles, connected } = useTicks(selected, applyState)
 
   const selectedInfo = symbols.find(s => s.symbol === selected) ?? null
 

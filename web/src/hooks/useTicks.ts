@@ -7,15 +7,23 @@ const WS_URL   = API_BASE.replace(/^http/, 'ws') + '/ws'
 
 const CANDLE_SECONDS = 5  // aggregate ticks into 5-second candles
 
-export function useTicks(symbol: string) {
-  const [lastTick,    setLastTick]    = useState<Tick | null>(null)
-  const [allTicks,    setAllTicks]    = useState<Record<string, Tick>>({})
-  const [candles,     setCandles]     = useState<Candle[]>([])
-  const [connected,   setConnected]   = useState(false)
+// onState is called whenever the gateway pushes a {"type":"state",...} message.
+// useAccount passes its applyState here so it receives engine state via WebSocket
+// instead of polling GET /api/state every second.
+export function useTicks(
+  symbol:   string,
+  onState?: (data: unknown) => void,
+) {
+  const [lastTick,  setLastTick]  = useState<Tick | null>(null)
+  const [allTicks,  setAllTicks]  = useState<Record<string, Tick>>({})
+  const [candles,   setCandles]   = useState<Candle[]>([])
+  const [connected, setConnected] = useState(false)
 
   const wsRef      = useRef<WebSocket | null>(null)
   const candleRef  = useRef<Candle | null>(null)
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const onStateRef = useRef(onState)
+  onStateRef.current = onState  // always call the latest version without recreating connect()
 
   const buildCandle = useCallback((tick: Tick) => {
     const bucket = Math.floor(tick.ts_ms / 1000 / CANDLE_SECONDS) * CANDLE_SECONDS
@@ -34,7 +42,6 @@ export function useTicks(symbol: string) {
       } else {
         const fresh: Candle = { time: bucket, open: tick.mid, high: tick.mid, low: tick.mid, close: tick.mid }
         candleRef.current = fresh
-        // keep max 500 candles
         return [...prev.slice(-499), fresh]
       }
     })
@@ -58,10 +65,18 @@ export function useTicks(symbol: string) {
 
     ws.onmessage = (ev) => {
       try {
-        const msg  = JSON.parse(ev.data)
-        // Gateway wraps ticks as {type:"tick", data:{...}}
+        const msg = JSON.parse(ev.data)
+
+        if (msg.type === 'state') {
+          // Push engine state to useAccount without any HTTP request
+          onStateRef.current?.(msg.data)
+          return
+        }
+
+        // Tick message: {type:"tick", data:{...}} or raw tick object
         const tick: Tick = msg.type === 'tick' ? msg.data : msg
-        if (!tick.symbol) return
+        if (!tick?.symbol) return
+
         setAllTicks(prev => ({ ...prev, [tick.symbol]: tick }))
         if (tick.symbol === symbol) {
           setLastTick(tick)
@@ -71,7 +86,7 @@ export function useTicks(symbol: string) {
     }
   }, [symbol, buildCandle])
 
-  // reconnect when symbol changes (reset candles)
+  // Reconnect when symbol changes (reset candles)
   useEffect(() => {
     setCandles([])
     candleRef.current = null

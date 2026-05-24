@@ -4,7 +4,7 @@ import type { AccountState, Position, BinaryOption, SettledTrade } from '@/types
 
 const API_BASE    = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 const HISTORY_KEY = 'otuburu_trade_history'
-const MAX_HISTORY = 200   // keep last 200 settled trades per account
+const MAX_HISTORY = 200
 
 // ─── Persist helpers ──────────────────────────────────────────────────────────
 function loadHistory(accountId: string): SettledTrade[] {
@@ -20,7 +20,7 @@ function saveHistory(accountId: string, history: SettledTrade[]) {
       `${HISTORY_KEY}:${accountId}`,
       JSON.stringify(history.slice(0, MAX_HISTORY)),
     )
-  } catch { /* storage full — ignore */ }
+  } catch { /* storage full */ }
 }
 
 // ─── Public interface ─────────────────────────────────────────────────────────
@@ -30,7 +30,8 @@ export interface GameState {
   binaries:       BinaryOption[]
   settledHistory: SettledTrade[]
   loading:        boolean
-  refresh:        () => void
+  refresh:        () => void       // one-shot HTTP fetch (post-trade fallback)
+  applyState:     (data: unknown) => void  // called by useTicks on WS state push
 }
 
 export function useAccount(accountId: string): GameState {
@@ -40,12 +41,12 @@ export function useAccount(accountId: string): GameState {
   const [settledHistory, setSettledHistory] = useState<SettledTrade[]>([])
   const [loading,        setLoading]        = useState(true)
 
-  // Refs — track previous state between polls without triggering re-renders
   const prevBinariesRef = useRef<Map<string, BinaryOption>>(new Map())
   const prevBalanceRef  = useRef<number | null>(null)
   const historyRef      = useRef<SettledTrade[]>([])
+  const inflightRef     = useRef(false)
 
-  // Load persisted history whenever accountId changes
+  // Load persisted history when accountId changes
   useEffect(() => {
     if (!accountId || accountId === 'demo') { setSettledHistory([]); return }
     const stored = loadHistory(accountId)
@@ -55,79 +56,76 @@ export function useAccount(accountId: string): GameState {
     prevBalanceRef.current  = null
   }, [accountId])
 
-  // In-flight guard — prevents two simultaneous /api/state requests.
-  // The 1 s interval + onTraded() both calling refresh() in the same second
-  // would fire 2 identical requests and trigger mod_evasive's rate limiter.
-  const inflightRef = useRef(false)
+  // ── Core state application — shared by both WebSocket push and HTTP fetch ──
+  const applyState = useCallback((data: unknown) => {
+    const d = data as Record<string, unknown>
+    const newAccount:   AccountState   = (d.account   as AccountState)   ?? null
+    const newPositions: Position[]     = (d.positions as Position[])     ?? []
+    const newBinaries:  BinaryOption[] = (d.binaries  as BinaryOption[]) ?? []
+    const newBalance = newAccount?.balance ?? null
 
+    // Detect settled binaries (disappeared from live list since last update)
+    const prevBinaries = prevBinariesRef.current
+    const prevBalance  = prevBalanceRef.current
+
+    if (prevBinaries.size > 0 && newBalance !== null && prevBalance !== null) {
+      const settledNow: BinaryOption[] = []
+      prevBinaries.forEach((binary, id) => {
+        if (!newBinaries.find(b => b.id === id)) settledNow.push(binary)
+      })
+
+      if (settledNow.length > 0) {
+        const balanceDelta = newBalance - prevBalance
+        const pnlEach      = balanceDelta / settledNow.length
+
+        const newlySettled: SettledTrade[] = settledNow.map(b => ({
+          id:          b.id,
+          symbol:      b.symbol,
+          direction:   b.direction,
+          stake:       b.stake,
+          ticks_total: b.ticks_total,
+          entry_mid:   b.entry_mid,
+          settled_at:  Date.now(),
+          outcome:     pnlEach >= 0 ? 'win' : 'loss',
+          pnl:         parseFloat(pnlEach.toFixed(2)),
+        }))
+
+        const updated = [...newlySettled, ...historyRef.current].slice(0, MAX_HISTORY)
+        historyRef.current = updated
+        setSettledHistory(updated)
+        if (accountId !== 'demo') saveHistory(accountId, updated)
+      }
+    }
+
+    prevBinariesRef.current = new Map(newBinaries.map(b => [b.id, b]))
+    prevBalanceRef.current  = newBalance
+
+    setAccount(newAccount)
+    setPositions(newPositions)
+    setBinaries(newBinaries)
+    setLoading(false)
+  }, [accountId])
+
+  // ── HTTP fetch — initial load + explicit post-trade refresh ───────────────
+  // No more setInterval — state arrives via WebSocket (RunStatePump in gateway).
   const refresh = useCallback(async () => {
-    if (!accountId) return
-    if (inflightRef.current) return   // previous request still in flight
+    if (!accountId || inflightRef.current) return
     inflightRef.current = true
     try {
       const res = await fetch(`${API_BASE}/api/state?account_id=${accountId}`)
       if (!res.ok) return
-      const data = await res.json()
-
-      const newAccount:   AccountState   = data.account   ?? null
-      const newPositions: Position[]     = data.positions ?? []
-      const newBinaries:  BinaryOption[] = data.binaries  ?? []
-      const newBalance = newAccount?.balance ?? null
-
-      // ── Detect settled binaries ───────────────────────────────────────────
-      const prevBinaries = prevBinariesRef.current
-      const prevBalance  = prevBalanceRef.current
-
-      if (prevBinaries.size > 0 && newBalance !== null && prevBalance !== null) {
-        const settledNow: BinaryOption[] = []
-        prevBinaries.forEach((binary, id) => {
-          if (!newBinaries.find(b => b.id === id)) settledNow.push(binary)
-        })
-
-        if (settledNow.length > 0) {
-          const balanceDelta = newBalance - prevBalance
-          const pnlEach      = balanceDelta / settledNow.length
-
-          const newlySettled: SettledTrade[] = settledNow.map(b => ({
-            id:          b.id,
-            symbol:      b.symbol,
-            direction:   b.direction,
-            stake:       b.stake,
-            ticks_total: b.ticks_total,
-            entry_mid:   b.entry_mid,
-            settled_at:  Date.now(),
-            outcome:     pnlEach >= 0 ? 'win' : 'loss',
-            pnl:         parseFloat(pnlEach.toFixed(2)),
-          }))
-
-          const updated = [...newlySettled, ...historyRef.current].slice(0, MAX_HISTORY)
-          historyRef.current = updated
-          setSettledHistory(updated)
-          if (accountId !== 'demo') saveHistory(accountId, updated)
-        }
-      }
-
-      // Update refs for next poll
-      prevBinariesRef.current = new Map(newBinaries.map(b => [b.id, b]))
-      prevBalanceRef.current  = newBalance
-
-      setAccount(newAccount)
-      setPositions(newPositions)
-      setBinaries(newBinaries)
+      applyState(await res.json())
     } catch { /* silent */ } finally {
-      setLoading(false)
       inflightRef.current = false
     }
-  }, [accountId])
+  }, [accountId, applyState])
 
+  // One initial fetch so the UI has data immediately (before first WS push, ~1s)
   useEffect(() => {
     refresh()
-    // 1 s polling — short enough to catch 1-tick binary settlements
-    const id = setInterval(refresh, 1000)
-    return () => clearInterval(id)
   }, [refresh])
 
-  return { account, positions, binaries, settledHistory, loading, refresh }
+  return { account, positions, binaries, settledHistory, loading, refresh, applyState }
 }
 
 // ─── Trade actions ────────────────────────────────────────────────────────────
