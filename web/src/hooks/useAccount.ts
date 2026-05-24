@@ -55,8 +55,15 @@ export function useAccount(accountId: string): GameState {
     prevBalanceRef.current  = null
   }, [accountId])
 
+  // In-flight guard — prevents two simultaneous /api/state requests.
+  // The 1 s interval + onTraded() both calling refresh() in the same second
+  // would fire 2 identical requests and trigger mod_evasive's rate limiter.
+  const inflightRef = useRef(false)
+
   const refresh = useCallback(async () => {
     if (!accountId) return
+    if (inflightRef.current) return   // previous request still in flight
+    inflightRef.current = true
     try {
       const res = await fetch(`${API_BASE}/api/state?account_id=${accountId}`)
       if (!res.ok) return
@@ -109,6 +116,7 @@ export function useAccount(accountId: string): GameState {
       setBinaries(newBinaries)
     } catch { /* silent */ } finally {
       setLoading(false)
+      inflightRef.current = false
     }
   }, [accountId])
 
