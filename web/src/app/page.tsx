@@ -146,6 +146,7 @@ export default function TradingPage() {
               <Positions
                 positions={positions}
                 binaries={binaries}
+                settledHistory={settledHistory}
                 ticks={allTicks}
                 accountId={accountId}
                 onRefresh={refresh}
