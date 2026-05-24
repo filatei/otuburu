@@ -129,6 +129,21 @@ jobs:
           name: frontend-out
           path: frontend-out/
 
+      # ── Ensure deploy dirs exist (otuburu owns, user1 writes via group) ─────────
+      - name: Prepare server directories
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.LINODE_HOST }}
+          username: ${{ secrets.LINODE_USER }}
+          key:      ${{ secrets.LINODE_SSH_KEY }}
+          port:     ${{ secrets.LINODE_SSH_PORT }}
+          script: |
+            # Create dirs if missing, preserving otuburu ownership
+            sudo mkdir -p /opt/otuburu/frontend /opt/otuburu/backend/infra
+            sudo chown -R otuburu:otuburu /opt/otuburu
+            # user1 writes via the otuburu group (setgid keeps new files in group)
+            sudo chmod -R g+rwXs /opt/otuburu
+
       # ── Static frontend ───────────────────────────────────────────────────────
       - name: Copy frontend to server
         uses: appleboy/scp-action@v0.1.7
