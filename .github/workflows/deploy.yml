@@ -9,9 +9,10 @@ env:
   ENGINE_IMAGE:  ghcr.io/filatei/otuburu-engine
   GATEWAY_IMAGE: ghcr.io/filatei/otuburu-gateway
   WALLET_IMAGE:  ghcr.io/filatei/otuburu-wallet
+  STAKING_IMAGE: ghcr.io/filatei/otuburu-staking
 
 jobs:
-  # ── Build + push Docker images to GHCR ──────────────────────────────────────
+  # ── Build + push Docker images to GHCR ─────────────────────────────────────
   build:
     name: Build & push images
     runs-on: ubuntu-latest
@@ -35,6 +36,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # ── Rust engine ──────────────────────────────────────────────────────────
       - name: Build & push engine
         uses: docker/build-push-action@v6
         with:
@@ -45,6 +47,7 @@ jobs:
           cache-from: type=gha,scope=engine
           cache-to:   type=gha,mode=max,scope=engine
 
+      # ── Go gateway ───────────────────────────────────────────────────────────
       - name: Build & push gateway
         uses: docker/build-push-action@v6
         with:
@@ -55,6 +58,7 @@ jobs:
           cache-from: type=gha,scope=gateway
           cache-to:   type=gha,mode=max,scope=gateway
 
+      # ── Go wallet ────────────────────────────────────────────────────────────
       - name: Build & push wallet
         uses: docker/build-push-action@v6
         with:
@@ -65,7 +69,18 @@ jobs:
           cache-from: type=gha,scope=wallet
           cache-to:   type=gha,mode=max,scope=wallet
 
-  # ── Build Next.js frontend → static export ──────────────────────────────────
+      # ── Node.js staking service ───────────────────────────────────────────────
+      - name: Build & push staking
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file:    Dockerfile.staking
+          push:    true
+          tags:    ${{ env.STAKING_IMAGE }}:staging,${{ env.STAKING_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=staking
+          cache-to:   type=gha,mode=max,scope=staking
+
+  # ── Build Next.js frontend → static export ─────────────────────────────────
   frontend:
     name: Build frontend
     runs-on: ubuntu-latest
@@ -98,7 +113,7 @@ jobs:
           path: web/out/
           retention-days: 1
 
-  # ── SSH deploy: copy files + restart containers ──────────────────────────────
+  # ── SSH deploy: copy files + restart containers ─────────────────────────────
   deploy:
     name: Deploy to Linode VPS
     needs: [build, frontend]
@@ -114,73 +129,73 @@ jobs:
           name: frontend-out
           path: frontend-out/
 
-      # Deploy frontend → /opt/otuburu/frontend/
+      # ── Static frontend ───────────────────────────────────────────────────────
       - name: Copy frontend to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host:     ${{ secrets.LINODE_HOST }}
-          username: otuburu
+          username: ${{ secrets.LINODE_USER }}
           key:      ${{ secrets.LINODE_SSH_KEY }}
-          port:     22
+          port:     ${{ secrets.LINODE_SSH_PORT }}
           source:   "frontend-out/*"
           target:   "/opt/otuburu/frontend"
           strip_components: 1
 
-      # Deploy docker-compose → /opt/otuburu/backend/
+      # ── docker-compose ────────────────────────────────────────────────────────
       - name: Copy docker-compose to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host:     ${{ secrets.LINODE_HOST }}
-          username: otuburu
+          username: ${{ secrets.LINODE_USER }}
           key:      ${{ secrets.LINODE_SSH_KEY }}
-          port:     22
+          port:     ${{ secrets.LINODE_SSH_PORT }}
           source:   "docker-compose.staging.yml"
           target:   "/opt/otuburu/backend"
 
-      # Copy deploy script (strip_components:1 drops the scripts/ prefix)
+      # ── deploy script ─────────────────────────────────────────────────────────
       - name: Copy deploy script to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host:     ${{ secrets.LINODE_HOST }}
-          username: otuburu
+          username: ${{ secrets.LINODE_USER }}
           key:      ${{ secrets.LINODE_SSH_KEY }}
-          port:     22
+          port:     ${{ secrets.LINODE_SSH_PORT }}
           source:   "scripts/deploy.sh"
           target:   "/opt/otuburu/backend"
           strip_components: 1
 
-      # Copy DB schema (postgres init — only used on first boot)
+      # ── DB schema (wallet PostgreSQL) ─────────────────────────────────────────
       - name: Copy schema.sql to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host:     ${{ secrets.LINODE_HOST }}
-          username: otuburu
+          username: ${{ secrets.LINODE_USER }}
           key:      ${{ secrets.LINODE_SSH_KEY }}
-          port:     22
+          port:     ${{ secrets.LINODE_SSH_PORT }}
           source:   "go-services/wallet/internal/db/schema.sql"
           target:   "/opt/otuburu/backend/schema.sql"
           strip_components: 5
 
-      # Copy Apache vhost config (strip infra/apache/ prefix → lands at /opt/otuburu/backend/infra/<file>)
+      # ── Apache vhost (now includes /api/stake/ + /staking proxy) ─────────────
       - name: Copy Apache config to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host:     ${{ secrets.LINODE_HOST }}
-          username: otuburu
+          username: ${{ secrets.LINODE_USER }}
           key:      ${{ secrets.LINODE_SSH_KEY }}
-          port:     22
+          port:     ${{ secrets.LINODE_SSH_PORT }}
           source:   "infra/apache/otuburu.torama.money.conf"
           target:   "/opt/otuburu/backend/infra"
           strip_components: 2
 
-      # Write .env + pull images + restart
+      # ── Write .env + pull images + restart all services ───────────────────────
       - name: SSH deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
           host:     ${{ secrets.LINODE_HOST }}
-          username: otuburu
+          username: ${{ secrets.LINODE_USER }}
           key:      ${{ secrets.LINODE_SSH_KEY }}
-          port:     22
+          port:     ${{ secrets.LINODE_SSH_PORT }}
           script: |
             set -e
 
@@ -196,20 +211,33 @@ jobs:
                          /etc/apache2/sites-available/otuburu.conf >/dev/null 2>&1; then
               sudo -n cp /opt/otuburu/backend/infra/otuburu.torama.money.conf \
                          /etc/apache2/sites-available/otuburu.conf \
-                || echo "WARNING: could not update Apache vhost (add sudo perms on server)"
+                || echo "WARNING: could not update Apache vhost"
             fi
 
             # Write .env from GitHub Secrets (fresh on every deploy)
-            cat > /opt/otuburu/backend/.env << 'EOF'
-            POSTGRES_USER=otuburu
+            # ── Core services ──────────────────────────────────────────────────
+            cat > /opt/otuburu/backend/.env << 'ENVEOF'
+            POSTGRES_USER=${{ secrets.POSTGRES_USER || 'otuburu' }}
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-            POSTGRES_DB=otuburu
+            POSTGRES_DB=${{ secrets.POSTGRES_DB || 'otuburu' }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
             WALLET_MNEMONIC=${{ secrets.WALLET_MNEMONIC }}
             TRONGRID_API_KEY=${{ secrets.TRONGRID_API_KEY }}
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             ADMIN_SECRET=${{ secrets.ADMIN_SECRET }}
-            EOF
+            # ── Staking service ────────────────────────────────────────────────
+            PAYSTACK_SECRET_KEY=${{ secrets.PAYSTACK_SECRET_KEY }}
+            PAYSTACK_PUBLIC_KEY=${{ secrets.PAYSTACK_PUBLIC_KEY }}
+            USD_TO_NGN_RATE=${{ secrets.USD_TO_NGN_RATE || '1600' }}
+            SMTP_HOST=${{ secrets.SMTP_HOST || 'smtp-relay.gmail.com' }}
+            SMTP_PORT=${{ secrets.SMTP_PORT || '587' }}
+            SMTP_SECURE=${{ secrets.SMTP_SECURE || 'false' }}
+            SMTP_USER=${{ secrets.SMTP_USER }}
+            SMTP_PASS=${{ secrets.SMTP_PASS }}
+            SMTP_FROM=${{ secrets.SMTP_FROM || 'Otuburu <noreply@torama.money>' }}
+            ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL || 'filatei@gtsng.com' }}
+            ADMIN_EMAILS=${{ secrets.ADMIN_EMAILS || 'filatei@gtsng.com' }}
+            ENVEOF
 
             # Login to GHCR and deploy
             echo "${{ secrets.GHCR_TOKEN }}" | \

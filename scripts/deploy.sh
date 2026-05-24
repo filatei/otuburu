@@ -65,6 +65,7 @@ check() {
 
 check "gateway"  "http://127.0.0.1:8082/healthz"
 check "wallet"   "http://127.0.0.1:8083/healthz"
+check "staking"  "http://127.0.0.1:8084/healthz"
 check "frontend" "http://127.0.0.1/index.html"
 
 ok "Deploy complete — https://${DOMAIN}"

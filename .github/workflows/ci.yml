@@ -11,7 +11,7 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # ── Rust engine ─────────────────────────────────────────────
+  # ── Rust engine ─────────────────────────────────────────────────────────────
   rust:
     name: Rust engine
     runs-on: ubuntu-latest
@@ -49,7 +49,7 @@ jobs:
       - name: Tests
         run: cargo test --all
 
-  # ── Go services ─────────────────────────────────────────────
+  # ── Go services ─────────────────────────────────────────────────────────────
   go:
     name: Go services
     runs-on: ubuntu-latest
@@ -92,7 +92,7 @@ jobs:
             (cd $mod && go test ./... -race -timeout 60s)
           done
 
-  # ── Node demo ───────────────────────────────────────────────
+  # ── Node demo (legacy) ──────────────────────────────────────────────────────
   node-demo:
     name: Node demo lint
     runs-on: ubuntu-latest
@@ -113,7 +113,85 @@ jobs:
       - name: Syntax check
         run: node --check engine/server.js engine/engine.js engine/generators.js engine/rng.js
 
-  # ── Terraform validate ──────────────────────────────────────
+  # ── Staking service ─────────────────────────────────────────────────────────
+  staking:
+    name: Staking service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: staking
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: staking/package-lock.json
+
+      - name: Install native build tools (for better-sqlite3)
+        run: sudo apt-get install -y python3 make g++
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Syntax check — all source files
+        run: |
+          node --check server.js
+          node --check routes.js
+          node --check db.js
+          node --check paystack.js
+          node --check mailer.js
+
+      - name: Smoke test — DB schema migration
+        run: |
+          node -e "
+            process.env.STAKING_DB_PATH = '/tmp/test-staking.db';
+            const db = require('./db');
+            const algos = db.getAlgorithms();
+            console.assert(algos.length === 5, 'Expected 5 algorithms, got ' + algos.length);
+            console.log('DB smoke test passed:', algos.map(a => a.id).join(', '));
+          "
+
+      - name: Smoke test — JWT auth middleware
+        run: |
+          node -e "
+            const jwt = require('jsonwebtoken');
+            const secret = 'test-secret-32-chars-minimum-ok!';
+            const token = jwt.sign({ uid: 'u1', aid: 'a1', did: 'd1', email: 'test@test.com' }, secret, { algorithm: 'HS256' });
+            const decoded = jwt.verify(token, secret, { algorithms: ['HS256'] });
+            console.assert(decoded.uid === 'u1', 'uid mismatch');
+            console.assert(decoded.email === 'test@test.com', 'email mismatch');
+            console.log('JWT smoke test passed');
+          "
+
+  # ── Next.js frontend ─────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend typecheck + lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+  # ── Terraform validate ──────────────────────────────────────────────────────
   terraform:
     name: Terraform validate
     runs-on: ubuntu-latest

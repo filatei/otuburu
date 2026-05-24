@@ -1,0 +1,42 @@
+# ── Stage 1: install native deps (better-sqlite3 needs gcc) ───────────────────
+FROM node:20-bookworm-slim AS builder
+
+WORKDIR /build
+
+# Copy only package files first for cache efficiency
+COPY staking/package.json ./
+
+# Install with native build tools
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 make g++ \
+ && npm install --omit=dev \
+ && apt-get purge -y python3 make g++ \
+ && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+FROM node:20-bookworm-slim
+
+# Create data directory for SQLite DB (volume-mounted in production)
+RUN mkdir -p /data && chown node:node /data
+
+WORKDIR /app
+
+# Copy installed node_modules from builder
+COPY --from=builder /build/node_modules ./node_modules/
+
+# Copy staking source
+COPY staking/ ./
+
+USER node
+
+ENV PORT=8084 \
+    NODE_ENV=production \
+    STAKING_DB_PATH=/data/staking.db
+
+EXPOSE 8084
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD wget -qO- http://localhost:8084/healthz || exit 1
+
+ENTRYPOINT ["node", "server.js"]

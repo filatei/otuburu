@@ -1,0 +1,21 @@
+{
+  "name": "otuburu-staking",
+  "version": "0.1.0",
+  "description": "Otuburu Algorithm Staking service — Paystack payments, Exness sub-account management, 80/20 profit sharing",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.6.0",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^6.9.14",
+    "uuid": "^10.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

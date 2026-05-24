@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Algo Staking — Otuburu</title>
+<script src="https://js.paystack.co/v1/inline.js"></script>
+<style>
+  :root {
+    --bg:        #0e0e0e;
+    --surface:   #161616;
+    --surface2:  #1e1e1e;
+    --border:    #2a2a2a;
+    --gold:      #f59e0b;
+    --gold-dim:  #92600a;
+    --green:     #22c55e;
+    --red:       #ef4444;
+    --blue:      #3b82f6;
+    --text:      #e5e7eb;
+    --muted:     #6b7280;
+    --muted2:    #4b5563;
+    --font:      'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    min-height: 100vh;
+  }
+
+  /* ── Top bar ── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .logo { font-size: 20px; font-weight: 900; color: var(--gold); letter-spacing: 2px; }
+  .logo span { font-size: 10px; color: var(--muted); letter-spacing: 4px; display: block; margin-top: -2px; }
+  .back-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: border-color .2s;
+  }
+  .back-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+  /* ── Layout ── */
+  .page { max-width: 1100px; margin: 0 auto; padding: 32px 20px 80px; }
+
+  .hero {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+  .hero h1 { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
+  .hero h1 span { color: var(--gold); }
+  .hero p { color: var(--muted); font-size: 15px; max-width: 520px; margin: 0 auto; line-height: 1.6; }
+
+  .split-share {
+    display: inline-flex;
+    gap: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 16px auto 0;
+  }
+  .split-share .sh {
+    padding: 8px 20px;
+    font-size: 13px;
+  }
+  .split-share .sh strong { display: block; font-size: 20px; font-weight: 800; }
+  .split-share .sh.user strong { color: var(--green); }
+  .split-share .sh.house strong { color: var(--gold); }
+  .split-share .divider { width: 1px; background: var(--border); }
+
+  /* ── Section headings ── */
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  /* ── Algorithm cards ── */
+  .algo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 32px;
+  }
+  .algo-card {
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    position: relative;
+  }
+  .algo-card:hover { border-color: var(--gold-dim); background: var(--surface2); }
+  .algo-card.selected { border-color: var(--gold); background: #1c1504; }
+  .algo-card .algo-name { font-weight: 700; font-size: 14px; color: var(--gold); margin-bottom: 4px; }
+  .algo-card .algo-desc { font-size: 12px; color: var(--muted); line-height: 1.5; margin-bottom: 10px; }
+  .algo-card .algo-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+  .badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+  }
+  .badge.low    { background: #14532d; color: #4ade80; }
+  .badge.medium { background: #713f12; color: #fbbf24; }
+  .badge.high   { background: #7f1d1d; color: #f87171; }
+  .badge.min    { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .check-mark {
+    position: absolute;
+    top: 10px; right: 10px;
+    width: 20px; height: 20px;
+    background: var(--gold);
+    border-radius: 50%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: #000;
+    font-weight: 900;
+  }
+  .algo-card.selected .check-mark { display: flex; }
+
+  /* ── Stake form ── */
+  .stake-form {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 32px;
+  }
+  .form-row { margin-bottom: 20px; }
+  .form-row label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 8px; letter-spacing: 0.5px; }
+  .amount-input-wrap { display: flex; align-items: center; }
+  .currency-prefix {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-right: none;
+    border-radius: 8px 0 0 8px;
+    padding: 12px 14px;
+    font-size: 15px;
+    color: var(--gold);
+    font-weight: 700;
+  }
+  .amount-input {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 0 8px 8px 0;
+    padding: 12px 16px;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+    width: 100%;
+    outline: none;
+    transition: border-color .2s;
+    font-family: var(--font);
+  }
+  .amount-input:focus { border-color: var(--gold); }
+  .amount-input::placeholder { color: var(--muted2); }
+
+  .quick-amounts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .qa-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .15s;
+    font-family: var(--font);
+  }
+  .qa-btn:hover { border-color: var(--gold); color: var(--gold); }
+  .qa-btn.active { border-color: var(--gold); color: var(--gold); background: #1c1504; }
+
+  .summary-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 16px;
+  }
+  .summary-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+  .summary-row:last-child { margin-bottom: 0; }
+  .summary-row .label { color: var(--muted); }
+  .summary-row .value { font-weight: 600; }
+  .summary-row.total .value { color: var(--green); font-size: 16px; }
+  .summary-divider { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+
+  /* ── T&Cs ── */
+  .terms-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 20px;
+    cursor: pointer;
+  }
+  .terms-check input[type=checkbox] { margin-top: 2px; accent-color: var(--gold); width: 16px; height: 16px; flex-shrink: 0; cursor: pointer; }
+  .terms-check span { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .terms-check a { color: var(--gold); text-decoration: none; }
+
+  /* ── CTA button ── */
+  .cta-btn {
+    width: 100%;
+    background: var(--gold);
+    color: #000;
+    border: none;
+    border-radius: 8px;
+    padding: 16px;
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: background .2s, opacity .2s;
+    font-family: var(--font);
+    letter-spacing: 0.5px;
+  }
+  .cta-btn:hover:not(:disabled) { background: #d97706; }
+  .cta-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── My Stakes dashboard ── */
+  .stakes-section { margin-top: 48px; }
+  .stakes-table { width: 100%; border-collapse: collapse; }
+  .stakes-table th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 0 12px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .stakes-table td {
+    padding: 14px 12px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .stakes-table tr:last-child td { border-bottom: none; }
+  .stakes-table tr:hover td { background: #1a1a1a; }
+  .status-pill {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    letter-spacing: 0.5px;
+  }
+  .status-pill.ACTIVE           { background: #14532d; color: #4ade80; }
+  .status-pill.PENDING_PAYMENT  { background: #1c1504; color: #fbbf24; }
+  .status-pill.FAILED           { background: #7f1d1d; color: #f87171; }
+  .status-pill.CLOSED           { background: #1e1e1e; color: #6b7280; }
+  .status-pill.PAUSED           { background: #1e293b; color: #60a5fa; }
+
+  .empty-state {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--muted);
+  }
+  .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+  .empty-state p { font-size: 14px; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    z-index: 9999;
+    transition: transform .3s ease;
+    white-space: nowrap;
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+  #toast.success { border-color: var(--green); color: var(--green); }
+  #toast.error   { border-color: var(--red);   color: var(--red);   }
+
+  /* ── Loader overlay ── */
+  #loader {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 9998;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+  }
+  #loader.show { display: flex; }
+  .spinner {
+    width: 40px; height: 40px;
+    border: 3px solid var(--border);
+    border-top-color: var(--gold);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Success modal ── */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 9997;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    max-width: 440px;
+    width: 100%;
+    text-align: center;
+  }
+  .modal .icon { font-size: 48px; margin-bottom: 16px; }
+  .modal h2 { font-size: 22px; font-weight: 800; margin-bottom: 8px; }
+  .modal p { color: var(--muted); font-size: 14px; line-height: 1.6; margin-bottom: 20px; }
+  .modal-btn {
+    background: var(--gold);
+    color: #000;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 32px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: var(--font);
+  }
+
+  @media (max-width: 600px) {
+    .algo-grid { grid-template-columns: 1fr 1fr; }
+    .page { padding: 20px 12px 60px; }
+    .stakes-table th, .stakes-table td { padding: 10px 8px; font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">OTUBURU <span>SYNTHETIC TRADING</span></div>
+  <a href="/" class="back-btn">← Back to Trading</a>
+</div>
+
+<div class="page">
+
+  <!-- Hero -->
+  <div class="hero">
+    <h1>Invest in an <span>Algorithm</span></h1>
+    <p>Fund a professional trading algorithm. We trade on your behalf using a dedicated Exness sub-account. Profits are shared monthly.</p>
+    <div class="split-share">
+      <div class="sh user"><strong>80%</strong> You</div>
+      <div class="divider"></div>
+      <div class="sh house"><strong>20%</strong> Otuburu</div>
+    </div>
+  </div>
+
+  <!-- Algorithm selection -->
+  <div class="section-label">1 — Choose an Algorithm</div>
+  <div class="algo-grid" id="algoGrid">
+    <!-- Populated by JS -->
+    <div style="color:var(--muted);font-size:13px">Loading algorithms…</div>
+  </div>
+
+  <!-- Stake form -->
+  <div class="stake-form">
+    <div class="section-label" style="margin-bottom:20px">2 — Set Your Stake Amount</div>
+
+    <div class="form-row">
+      <label>AMOUNT (USD)</label>
+      <div class="amount-input-wrap">
+        <div class="currency-prefix">$</div>
+        <input class="amount-input" id="amountInput" type="number" min="100" step="50" placeholder="0" value=""/>
+      </div>
+      <div class="quick-amounts">
+        <button class="qa-btn" data-amt="100">$100</button>
+        <button class="qa-btn" data-amt="250">$250</button>
+        <button class="qa-btn" data-amt="500">$500</button>
+        <button class="qa-btn" data-amt="1000">$1,000</button>
+        <button class="qa-btn" data-amt="5000">$5,000</button>
+      </div>
+    </div>
+
+    <div class="summary-box" id="summaryBox" style="display:none">
+      <div class="summary-row">
+        <span class="label">Algorithm</span>
+        <span class="value" id="sumAlgo">—</span>
+      </div>
+      <div class="summary-row">
+        <span class="label">Stake (USD)</span>
+        <span class="value" id="sumUSD">—</span>
+      </div>
+      <div class="summary-row">
+        <span class="label">Payment (NGN @ <span id="fxRateLabel">1600</span>)</span>
+        <span class="value" id="sumNGN">—</span>
+      </div>
+      <hr class="summary-divider"/>
+      <div class="summary-row total">
+        <span class="label">Your monthly profit share</span>
+        <span class="value">80% of profits</span>
+      </div>
+    </div>
+
+    <div class="form-row" style="margin-top:20px">
+      <label class="terms-check">
+        <input type="checkbox" id="termsCheck"/>
+        <span>
+          I understand this is a managed algo trading service. Capital is at risk. Past performance does not guarantee future results. I agree to the
+          <a href="/terms" target="_blank">Terms &amp; Conditions</a> and the 80/20 profit-sharing arrangement.
+          Profits are distributed monthly after Exness statement reconciliation.
+        </span>
+      </label>
+    </div>
+
+    <button class="cta-btn" id="payBtn" disabled>Select an algorithm to continue</button>
+  </div>
+
+  <!-- My Stakes -->
+  <div class="stakes-section">
+    <div class="section-label">My Stakes</div>
+    <div id="stakesContainer">
+      <div class="empty-state">
+        <div class="icon">📊</div>
+        <p id="stakesMsg">Sign in to view your stakes.</p>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<!-- Loader -->
+<div id="loader"><div class="spinner"></div><div style="color:var(--muted);font-size:13px">Processing…</div></div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- Success modal -->
+<div class="modal-overlay" id="successModal">
+  <div class="modal">
+    <div class="icon">✅</div>
+    <h2 style="color:var(--green)">Stake Confirmed!</h2>
+    <p>Your payment has been received. Our team will set up your dedicated Exness trading account within <strong>24 hours</strong>. You'll receive an email confirmation shortly.</p>
+    <button class="modal-btn" onclick="closeSuccessModal()">View My Stakes</button>
+  </div>
+</div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+const PAYSTACK_PUBLIC_KEY = '__PAYSTACK_PUBLIC_KEY__'; // injected by deploy.sh (sed replacement)
+const USD_TO_NGN = parseFloat('__USD_TO_NGN_RATE__') || 1600;
+const API = '/api/stake';
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let selectedAlgo = null;
+let algorithms = [];
+let currentUser = null; // populated by auth check
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+function fmtUSD(n) { return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
+function fmtNGN(n) { return '₦' + Number(n).toLocaleString('en-NG', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
+
+function showToast(msg, type = '') {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'show ' + type;
+  setTimeout(() => t.className = '', 3500);
+}
+
+function showLoader(v) { $('loader').classList[v ? 'add' : 'remove']('show'); }
+
+function closeSuccessModal() {
+  $('successModal').classList.remove('show');
+  loadMyStakes();
+}
+
+// ── Auth: read JWT from sessionStorage (set by wallet service / Next.js app) ──
+// Token key: 'otuburu_token'  (matches useAuth.ts TOKEN_KEY)
+// On success resolves to { token, email, name, picture, user_id, ... }
+async function getCurrentUser() {
+  const token = sessionStorage.getItem('otuburu_token');
+  if (!token) return null;
+  try {
+    const r = await fetch('/auth/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    return { ...data, token };
+  } catch (_) {
+    return null;
+  }
+}
+
+// ── Load Algorithms ───────────────────────────────────────────────────────────
+async function loadAlgorithms() {
+  try {
+    const r = await fetch(`${API}/algorithms`);
+    const data = await r.json();
+    algorithms = data.algorithms || [];
+    renderAlgorithms();
+  } catch(e) {
+    $('algoGrid').innerHTML = `<div style="color:var(--red);font-size:13px">Could not load algorithms. Please refresh.</div>`;
+  }
+}
+
+function renderAlgorithms() {
+  const riskMap = { LOW: 'low', MEDIUM: 'medium', HIGH: 'high' };
+  $('algoGrid').innerHTML = algorithms.map(a => `
+    <div class="algo-card" data-id="${a.id}" onclick="selectAlgo('${a.id}')">
+      <div class="check-mark">✓</div>
+      <div class="algo-name">${a.name}</div>
+      <div class="algo-desc">${a.description}</div>
+      <div class="algo-meta">
+        <span class="badge ${riskMap[a.risk_level] || 'medium'}">${a.risk_level}</span>
+        <span class="badge min">Min ${fmtUSD(a.min_stake_usd)}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectAlgo(id) {
+  selectedAlgo = algorithms.find(a => a.id === id);
+  document.querySelectorAll('.algo-card').forEach(c => c.classList.remove('selected'));
+  document.querySelector(`[data-id="${id}"]`)?.classList.add('selected');
+  updateForm();
+}
+
+// ── Form logic ────────────────────────────────────────────────────────────────
+$('amountInput').addEventListener('input', () => { clearQuickAmounts(); updateForm(); });
+
+document.querySelectorAll('.qa-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    $('amountInput').value = btn.dataset.amt;
+    document.querySelectorAll('.qa-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    updateForm();
+  });
+});
+
+function clearQuickAmounts() {
+  document.querySelectorAll('.qa-btn').forEach(b => b.classList.remove('active'));
+}
+
+function updateForm() {
+  const amount = parseFloat($('amountInput').value) || 0;
+  const terms = $('termsCheck').checked;
+  const btn = $('payBtn');
+
+  // Update FX label
+  $('fxRateLabel').textContent = USD_TO_NGN.toLocaleString();
+
+  if (selectedAlgo && amount >= selectedAlgo.min_stake_usd) {
+    const ngn = Math.round(amount * USD_TO_NGN);
+    $('sumAlgo').textContent = selectedAlgo.name;
+    $('sumUSD').textContent = fmtUSD(amount);
+    $('sumNGN').textContent = fmtNGN(ngn);
+    $('summaryBox').style.display = 'block';
+
+    btn.disabled = !terms;
+    btn.textContent = terms
+      ? `Pay ${fmtNGN(ngn)} via Paystack →`
+      : 'Accept terms to continue';
+  } else if (selectedAlgo && amount > 0 && amount < selectedAlgo.min_stake_usd) {
+    $('summaryBox').style.display = 'none';
+    btn.disabled = true;
+    btn.textContent = `Minimum stake is ${fmtUSD(selectedAlgo.min_stake_usd)}`;
+  } else if (!selectedAlgo) {
+    $('summaryBox').style.display = 'none';
+    btn.disabled = true;
+    btn.textContent = 'Select an algorithm to continue';
+  } else {
+    $('summaryBox').style.display = 'none';
+    btn.disabled = true;
+    btn.textContent = 'Enter stake amount';
+  }
+}
+
+$('termsCheck').addEventListener('change', updateForm);
+
+// ── Payment ───────────────────────────────────────────────────────────────────
+$('payBtn').addEventListener('click', initiatePayment);
+
+async function initiatePayment() {
+  if (!currentUser) {
+    showToast('Please sign in first', 'error');
+    setTimeout(() => window.location.href = '/?redirect=/staking', 1200);
+    return;
+  }
+  if (!selectedAlgo) return showToast('Select an algorithm', 'error');
+  const amount_usd = parseFloat($('amountInput').value);
+  if (!amount_usd || amount_usd < selectedAlgo.min_stake_usd) {
+    return showToast(`Minimum stake is ${fmtUSD(selectedAlgo.min_stake_usd)}`, 'error');
+  }
+  if (!$('termsCheck').checked) return showToast('Please accept the terms', 'error');
+
+  showLoader(true);
+
+  try {
+    const token = sessionStorage.getItem('otuburu_token') || '';
+    const r = await fetch(`${API}/init`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ algorithm_id: selectedAlgo.id, amount_usd }),
+    });
+
+    const data = await r.json();
+    showLoader(false);
+
+    if (!r.ok) return showToast(data.error || 'Failed to initialize payment', 'error');
+
+    // Open Paystack popup
+    const handler = PaystackPop.setup({
+      key: PAYSTACK_PUBLIC_KEY,
+      email: currentUser.email,
+      amount: Math.round(amount_usd * USD_TO_NGN * 100), // kobo
+      currency: 'NGN',
+      ref: data.reference,
+      label: `${selectedAlgo.name} Stake`,
+      metadata: {
+        algorithm: selectedAlgo.name,
+        amount_usd,
+        custom_fields: [
+          { display_name: 'Algorithm', variable_name: 'algorithm', value: selectedAlgo.name },
+          { display_name: 'Amount USD', variable_name: 'amount_usd', value: fmtUSD(amount_usd) },
+        ],
+      },
+      onClose: () => showToast('Payment window closed. Your stake is pending.'),
+      callback: (response) => {
+        // Payment successful on Paystack's side.
+        // Webhook handles DB update. We just show success UI.
+        if (response.status === 'success') {
+          $('successModal').classList.add('show');
+        } else {
+          showToast('Payment incomplete. Please try again.', 'error');
+        }
+      },
+    });
+    handler.openIframe();
+
+  } catch(e) {
+    showLoader(false);
+    showToast('Network error. Please try again.', 'error');
+    console.error(e);
+  }
+}
+
+// ── My Stakes ─────────────────────────────────────────────────────────────────
+async function loadMyStakes() {
+  if (!currentUser) {
+    $('stakesMsg').textContent = 'Sign in to view your stakes.';
+    return;
+  }
+
+  try {
+    const token = sessionStorage.getItem('otuburu_token') || '';
+    const r = await fetch(`${API}/my-stakes`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    const data = await r.json();
+    renderStakes(data.stakes || []);
+  } catch(e) {
+    $('stakesContainer').innerHTML = `<div class="empty-state"><p style="color:var(--red)">Could not load stakes.</p></div>`;
+  }
+}
+
+function renderStakes(stakes) {
+  if (!stakes.length) {
+    $('stakesContainer').innerHTML = `
+      <div class="empty-state">
+        <div class="icon">📊</div>
+        <p>No active stakes yet. Fund an algorithm above to get started.</p>
+      </div>`;
+    return;
+  }
+
+  const rows = stakes.map(s => {
+    const date = new Date(s.created_at * 1000).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+    const exness = s.exness_account
+      ? `<code style="color:var(--green);font-size:11px">${s.exness_account}</code>`
+      : `<span style="color:var(--muted);font-size:11px">Provisioning…</span>`;
+    return `
+      <tr>
+        <td><strong style="color:var(--gold)">${s.algo_name}</strong></td>
+        <td><strong>${fmtUSD(s.amount_usd)}</strong></td>
+        <td><span class="status-pill ${s.status}">${s.status.replace('_',' ')}</span></td>
+        <td>${exness}</td>
+        <td style="color:var(--muted)">${date}</td>
+        <td style="color:var(--green)">80%</td>
+      </tr>`;
+  }).join('');
+
+  $('stakesContainer').innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="stakes-table">
+        <thead>
+          <tr>
+            <th>Algorithm</th>
+            <th>Staked</th>
+            <th>Status</th>
+            <th>Exness Account</th>
+            <th>Date</th>
+            <th>Your Share</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+// ── Handle callback redirect params ──────────────────────────────────────────
+function handleCallbackParams() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('status') === 'success') {
+    $('successModal').classList.add('show');
+    history.replaceState({}, '', '/staking');
+  } else if (params.get('status') === 'failed') {
+    showToast('Payment was not completed. Please try again.', 'error');
+    history.replaceState({}, '', '/staking');
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async function init() {
+  currentUser = await getCurrentUser();
+  await loadAlgorithms();
+  await loadMyStakes();
+  handleCallbackParams();
+})();
+</script>
+</body>
+</html>

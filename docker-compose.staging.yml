@@ -81,9 +81,42 @@ services:
       timeout: 5s
       retries: 3
 
+  staking:
+    image: ghcr.io/filatei/otuburu-staking:staging
+    restart: always
+    environment:
+      PORT:                "8084"
+      NODE_ENV:            "production"
+      BASE_URL:            "https://otuburu.torama.money"
+      JWT_SECRET:          ${JWT_SECRET:-change-me-in-production-use-32-chars-min}
+      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
+      PAYSTACK_PUBLIC_KEY: ${PAYSTACK_PUBLIC_KEY:-}
+      USD_TO_NGN_RATE:     ${USD_TO_NGN_RATE:-1600}
+      SMTP_HOST:           ${SMTP_HOST:-smtp-relay.gmail.com}
+      SMTP_PORT:           ${SMTP_PORT:-587}
+      SMTP_SECURE:         ${SMTP_SECURE:-false}
+      SMTP_USER:           ${SMTP_USER:-}
+      SMTP_PASS:           ${SMTP_PASS:-}
+      SMTP_FROM:           ${SMTP_FROM:-Otuburu <noreply@torama.money>}
+      ADMIN_EMAIL:         ${ADMIN_EMAIL:-filatei@gtsng.com}
+      ADMIN_EMAILS:        ${ADMIN_EMAILS:-filatei@gtsng.com}
+      STAKING_DB_PATH:     "/data/staking.db"
+    ports:
+      - "127.0.0.1:8084:8084"
+    volumes:
+      - stakingdata:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8084/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
 networks:
   internal:
     driver: bridge
 
 volumes:
   pgdata:
+  stakingdata:
