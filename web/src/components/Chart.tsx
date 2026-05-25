@@ -1,26 +1,99 @@
 'use client'
-import { useEffect, useRef } from 'react'
-import type { Candle, Tick, BinaryOption, SettledTrade } from '@/types'
+import { useEffect, useRef, useState } from 'react'
+import type { Candle, Tick, BinaryOption, SettledTrade, Resolution, ApiSettledTrade } from '@/types'
+import { RESOLUTIONS } from '@/types'
+import { useChartHistory } from '@/hooks/useChartHistory'
 
 interface Props {
   candles:          Candle[]
   lastTick:         Tick | null
   symbol:           string
-  binaries?:        BinaryOption[]      // open trades → entry-price dashed lines
-  settledHistory?:  SettledTrade[]      // settled trades → ▲/▼ markers with P&L
+  accountId?:       string
+  binaries?:        BinaryOption[]      // open trades → entry-price dashed lines (LIVE only)
+  settledHistory?:  SettledTrade[]      // settled trades → ▲/▼ markers (LIVE only)
 }
 
 export default function Chart({
-  candles, lastTick, symbol,
+  candles, lastTick, symbol, accountId = 'demo',
   binaries = [], settledHistory = [],
 }: Props) {
+  const [resolution, setResolution] = useState<Resolution>('LIVE')
+
+  const { candles: histCandles, trades: histTrades, loading } =
+    useChartHistory(symbol, resolution, accountId)
+
+  // Reset to LIVE when symbol changes
+  useEffect(() => {
+    setResolution('LIVE')
+  }, [symbol])
+
+  return (
+    <div className="flex flex-col w-full h-full">
+      {/* Timeframe bar */}
+      <TimeframeBar resolution={resolution} onSelect={setResolution} />
+
+      {/* Chart area */}
+      {resolution === 'LIVE' ? (
+        <LiveChart
+          candles={candles}
+          lastTick={lastTick}
+          symbol={symbol}
+          binaries={binaries}
+          settledHistory={settledHistory}
+        />
+      ) : (
+        <HistoricalChart
+          symbol={symbol}
+          resolution={resolution}
+          candles={histCandles}
+          trades={histTrades}
+          loading={loading}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Timeframe bar ────────────────────────────────────────────────────────────
+
+function TimeframeBar({ resolution, onSelect }: {
+  resolution: Resolution
+  onSelect: (r: Resolution) => void
+}) {
+  return (
+    <div className="shrink-0 flex items-center gap-0.5 px-2 py-1.5 bg-panel border-b border-border overflow-x-auto scrollbar-none">
+      {RESOLUTIONS.map(r => (
+        <button
+          key={r}
+          onClick={() => onSelect(r)}
+          className={`px-2.5 py-0.5 rounded text-[11px] font-semibold transition-colors shrink-0 ${
+            resolution === r
+              ? 'bg-brand text-white'
+              : 'text-dim hover:text-text hover:bg-surface'
+          }`}
+        >
+          {r}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ─── Live line chart (existing behaviour) ─────────────────────────────────────
+
+function LiveChart({ candles, lastTick, symbol, binaries, settledHistory }: {
+  candles:         Candle[]
+  lastTick:        Tick | null
+  symbol:          string
+  binaries:        BinaryOption[]
+  settledHistory:  SettledTrade[]
+}) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const chartRef      = useRef<import('lightweight-charts').IChartApi | null>(null)
   const seriesRef     = useRef<import('lightweight-charts').ISeriesApi<'Line'> | null>(null)
-  // Track price lines by binary id so we can remove stale ones
   const priceLinesRef = useRef<Map<string, import('lightweight-charts').IPriceLine>>(new Map())
 
-  // ── Create chart once ────────────────────────────────────────────────────────
+  // Create chart once
   useEffect(() => {
     if (!containerRef.current) return
     let chart: import('lightweight-charts').IChartApi
@@ -29,32 +102,22 @@ export default function Chart({
       if (!containerRef.current) return
 
       chart = createChart(containerRef.current, {
-        layout: {
-          background: { color: '#0d0d0d' },
-          textColor:  '#888',
-        },
-        grid: {
-          vertLines: { color: '#1a1a1a' },
-          horzLines: { color: '#1a1a1a' },
-        },
-        crosshair:       { mode: CrosshairMode.Normal },
+        layout: { background: { color: '#0d0d0d' }, textColor: '#888' },
+        grid: { vertLines: { color: '#1a1a1a' }, horzLines: { color: '#1a1a1a' } },
+        crosshair: { mode: CrosshairMode.Normal },
         rightPriceScale: { borderColor: '#242424' },
-        timeScale: {
-          borderColor:    '#242424',
-          timeVisible:    true,
-          secondsVisible: true,
-        },
+        timeScale: { borderColor: '#242424', timeVisible: true, secondsVisible: true },
         handleScroll: true,
-        handleScale:  true,
+        handleScale: true,
       })
 
       const series = chart.addLineSeries({
-        color:                  '#4bb4b4',
-        lineWidth:              2,
-        priceLineVisible:       false,
-        lastValueVisible:       true,
+        color: '#4bb4b4',
+        lineWidth: 2,
+        priceLineVisible: false,
+        lastValueVisible: true,
         crosshairMarkerVisible: true,
-        crosshairMarkerRadius:  4,
+        crosshairMarkerRadius: 4,
       })
 
       chartRef.current  = chart
@@ -73,25 +136,21 @@ export default function Chart({
     })
 
     return () => {
-      // Wipe price line refs so they aren't applied to a new chart instance
       priceLinesRef.current.clear()
       chart?.remove()
     }
   }, []) // eslint-disable-line
 
-  // ── Load full series when symbol changes ────────────────────────────────────
+  // Load full series when symbol changes
   useEffect(() => {
     if (!seriesRef.current || candles.length === 0) return
     seriesRef.current.setData(
-      candles.map(c => ({
-        time:  c.time as import('lightweight-charts').Time,
-        value: c.close,
-      }))
+      candles.map(c => ({ time: c.time as import('lightweight-charts').Time, value: c.close }))
     )
     chartRef.current?.timeScale().fitContent()
   }, [symbol, candles.length === 0]) // eslint-disable-line
 
-  // ── Tick-by-tick update ─────────────────────────────────────────────────────
+  // Tick-by-tick update
   useEffect(() => {
     if (!seriesRef.current || candles.length === 0) return
     const last = candles[candles.length - 1]
@@ -101,33 +160,23 @@ export default function Chart({
     })
   }, [lastTick]) // eslint-disable-line
 
-  // ── Entry-price lines for open binary trades ────────────────────────────────
-  // Each open trade gets a dashed horizontal line at its entry_mid price.
-  // UP trade → cyan line below current price if winning, above if losing.
-  // DOWN trade → red line above current price if winning, below if losing.
-  // The price line label shows direction, stake, and remaining ticks.
+  // Entry-price lines for open binary trades
   useEffect(() => {
     if (!seriesRef.current) return
-
     import('lightweight-charts').then(({ LineStyle }) => {
       const series = seriesRef.current!
       const activeForSymbol = new Set(
         binaries.filter(b => b.symbol === symbol).map(b => b.id)
       )
-
-      // Remove price lines that no longer have a live trade
       priceLinesRef.current.forEach((line, id) => {
         if (!activeForSymbol.has(id)) {
           try { series.removePriceLine(line) } catch { /* chart may have remounted */ }
           priceLinesRef.current.delete(id)
         }
       })
-
-      // Add price lines for new open trades
       for (const b of binaries) {
         if (b.symbol !== symbol) continue
         if (priceLinesRef.current.has(b.id)) continue
-
         const isUp  = b.direction === 'UP'
         const color = isUp ? '#4bb4b4' : '#cc2e3d'
         const line  = series.createPriceLine({
@@ -143,23 +192,15 @@ export default function Chart({
     })
   }, [binaries, symbol])
 
-  // ── Settled trade markers ───────────────────────────────────────────────────
-  // Arrows at the settlement time on the price line.
-  // RISE won → green ▲ below bar   RISE lost → red ▲ below bar (faded)
-  // FALL won → green ▼ above bar   FALL lost → red ▼ above bar
-  // Net P&L shown as text next to the marker.
+  // Settled trade markers
   useEffect(() => {
     if (!seriesRef.current) return
-
-    const symbolTrades = settledHistory
-      .filter(t => t.symbol === symbol)
-      .slice(0, 40) // last 40 on this symbol
-
+    const symbolTrades = settledHistory.filter(t => t.symbol === symbol).slice(0, 40)
     const markers = symbolTrades
       .map(t => {
-        const isUp   = t.direction === 'UP'
-        const won    = t.outcome === 'win'
-        const net    = won ? t.pnl - t.stake : -t.stake
+        const isUp = t.direction === 'UP'
+        const won  = t.outcome === 'win'
+        const net  = won ? t.pnl : -t.stake
         return {
           time:     Math.floor(t.settled_at / 1000) as import('lightweight-charts').Time,
           position: (isUp ? 'belowBar' : 'aboveBar') as 'belowBar' | 'aboveBar',
@@ -170,14 +211,12 @@ export default function Chart({
           id:       t.id,
         }
       })
-      // lightweight-charts requires markers sorted oldest → newest
       .sort((a, b) => (a.time as number) - (b.time as number))
-
     seriesRef.current.setMarkers(markers)
   }, [settledHistory, symbol])
 
   return (
-    <div className="relative w-full h-full">
+    <div className="relative flex-1 overflow-hidden">
       {/* Symbol + live price overlay */}
       <div className="absolute top-3 left-4 z-10 flex items-center gap-3 pointer-events-none">
         <span className="text-text font-bold text-lg">{symbol}</span>
@@ -209,6 +248,127 @@ export default function Chart({
       {candles.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center text-dim text-sm">
           Waiting for ticks…
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Historical candlestick chart ─────────────────────────────────────────────
+
+function HistoricalChart({ symbol, resolution, candles, trades, loading }: {
+  symbol:     string
+  resolution: Resolution
+  candles:    { ts_s: number; open: number; high: number; low: number; close: number }[]
+  trades:     ApiSettledTrade[]
+  loading:    boolean
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const chartRef     = useRef<import('lightweight-charts').IChartApi | null>(null)
+  const seriesRef    = useRef<import('lightweight-charts').ISeriesApi<'Candlestick'> | null>(null)
+
+  // Create chart once per mount
+  useEffect(() => {
+    if (!containerRef.current) return
+    let chart: import('lightweight-charts').IChartApi
+
+    import('lightweight-charts').then(({ createChart, CrosshairMode }) => {
+      if (!containerRef.current) return
+
+      chart = createChart(containerRef.current, {
+        layout: { background: { color: '#0d0d0d' }, textColor: '#888' },
+        grid: { vertLines: { color: '#1a1a1a' }, horzLines: { color: '#1a1a1a' } },
+        crosshair: { mode: CrosshairMode.Normal },
+        rightPriceScale: { borderColor: '#242424' },
+        timeScale: { borderColor: '#242424', timeVisible: true, secondsVisible: false },
+        handleScroll: true,
+        handleScale: true,
+      })
+
+      const series = chart.addCandlestickSeries({
+        upColor:   '#4bb4b4',
+        downColor: '#cc2e3d',
+        borderUpColor:   '#4bb4b4',
+        borderDownColor: '#cc2e3d',
+        wickUpColor:   '#4bb4b4',
+        wickDownColor: '#cc2e3d',
+      })
+
+      chartRef.current  = chart
+      seriesRef.current = series
+
+      const ro = new ResizeObserver(() => {
+        if (containerRef.current) {
+          chart.applyOptions({
+            width:  containerRef.current.clientWidth,
+            height: containerRef.current.clientHeight,
+          })
+        }
+      })
+      ro.observe(containerRef.current)
+      return () => ro.disconnect()
+    })
+
+    return () => { chart?.remove() }
+  }, []) // eslint-disable-line
+
+  // Reload candles when data changes
+  useEffect(() => {
+    if (!seriesRef.current || candles.length === 0) return
+    seriesRef.current.setData(
+      candles.map(c => ({
+        time:  c.ts_s as import('lightweight-charts').Time,
+        open:  c.open,
+        high:  c.high,
+        low:   c.low,
+        close: c.close,
+      }))
+    )
+    chartRef.current?.timeScale().fitContent()
+  }, [candles])
+
+  // Trade markers from API history
+  useEffect(() => {
+    if (!seriesRef.current) return
+    const markers = trades
+      .filter(t => t.symbol === symbol)
+      .map(t => {
+        const isUp = t.direction === 'UP'
+        const net  = t.won ? t.payout - t.stake : -t.stake
+        return {
+          time:     Math.floor(t.settled_at_ms / 1000) as import('lightweight-charts').Time,
+          position: (isUp ? 'belowBar' : 'aboveBar') as 'belowBar' | 'aboveBar',
+          color:    t.won ? '#4bb4b4' : '#cc2e3d',
+          shape:    (isUp ? 'arrowUp' : 'arrowDown') as 'arrowUp' | 'arrowDown',
+          text:     (net >= 0 ? '+' : '') + net.toFixed(0),
+          size:     1,
+          id:       t.id,
+        }
+      })
+      .sort((a, b) => (a.time as number) - (b.time as number))
+    seriesRef.current.setMarkers(markers)
+  }, [trades, symbol])
+
+  return (
+    <div className="relative flex-1 overflow-hidden">
+      {/* Symbol + resolution overlay */}
+      <div className="absolute top-3 left-4 z-10 flex items-center gap-2 pointer-events-none">
+        <span className="text-text font-bold text-lg">{symbol}</span>
+        <span className="text-brand text-xs font-semibold bg-brand/10 px-1.5 py-0.5 rounded">
+          {resolution}
+        </span>
+      </div>
+
+      <div ref={containerRef} className="w-full h-full" />
+
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-surface/60 text-dim text-sm">
+          Loading {resolution} history…
+        </div>
+      )}
+      {!loading && candles.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center text-dim text-sm">
+          No {resolution} data yet — trade data builds over time.
         </div>
       )}
     </div>

@@ -5,6 +5,8 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -47,9 +49,19 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/symbols", handleSymbols)
 	rg.GET("/state", handleState)
 	rg.POST("/order", handleOrder)
-	rg.POST("/close", handleClose)               // legacy
-	rg.DELETE("/position/:id", handleDeletePos)  // frontend: closePosition()
+	rg.POST("/close", handleClose)              // legacy
+	rg.DELETE("/position/:id", handleDeletePos) // frontend: closePosition()
 	rg.POST("/binary", handleBinary)
+
+	// Account management
+	rg.POST("/account", handleCreateAccount)
+	rg.GET("/accounts", handleListAccounts)
+
+	// Chart history
+	rg.GET("/candles", handleCandles)
+
+	// Trade history
+	rg.GET("/history", handleTradeHistory)
 }
 
 // EngineAddr returns the configured engine address (used for health checks).
@@ -197,6 +209,121 @@ func handleBinary(c *gin.Context) {
 		Direction: req.Direction,
 		Stake:     req.Stake,
 		Ticks:     req.Ticks,
+	})
+	if err != nil {
+		engineErr(c, err)
+		return
+	}
+	writeProtoJSON(c, http.StatusOK, resp)
+}
+
+// ── Account management ────────────────────────────────────────────────────────
+
+type createAccountReq struct {
+	AccountID      string  `json:"account_id"      binding:"required"`
+	Label          string  `json:"label"`
+	IsDemo         bool    `json:"is_demo"`
+	InitialBalance float64 `json:"initial_balance"`
+}
+
+func handleCreateAccount(c *gin.Context) {
+	var req createAccountReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ctx, cancel := rpcCtx()
+	defer cancel()
+
+	resp, err := engineClient.Service().CreateAccount(ctx, &enginepb.CreateAccountRequest{
+		AccountId:      req.AccountID,
+		Label:          req.Label,
+		IsDemo:         req.IsDemo,
+		InitialBalance: req.InitialBalance,
+	})
+	if err != nil {
+		engineErr(c, err)
+		return
+	}
+	writeProtoJSON(c, http.StatusOK, resp)
+}
+
+// GET /api/accounts?ids=uuid1,uuid2,...
+func handleListAccounts(c *gin.Context) {
+	idsParam := c.Query("ids")
+	var ids []string
+	if idsParam != "" {
+		ids = strings.Split(idsParam, ",")
+	}
+	ctx, cancel := rpcCtx()
+	defer cancel()
+
+	resp, err := engineClient.Service().ListAccounts(ctx, &enginepb.ListAccountsRequest{
+		AccountIds: ids,
+	})
+	if err != nil {
+		engineErr(c, err)
+		return
+	}
+	writeProtoJSON(c, http.StatusOK, resp)
+}
+
+// ── Chart history ─────────────────────────────────────────────────────────────
+
+// GET /api/candles?symbol=frxEURUSD&resolution=M1&from=<ms>&to=<ms>
+func handleCandles(c *gin.Context) {
+	symbol := c.Query("symbol")
+	if symbol == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
+		return
+	}
+	resolution := c.Query("resolution")
+	if resolution == "" {
+		resolution = "M1"
+	}
+
+	fromMs, _ := strconv.ParseInt(c.Query("from"), 10, 64)
+	toMs, _ := strconv.ParseInt(c.Query("to"), 10, 64)
+
+	ctx, cancel := rpcCtx()
+	defer cancel()
+
+	resp, err := engineClient.Service().GetCandles(ctx, &enginepb.GetCandlesRequest{
+		Symbol:     symbol,
+		Resolution: resolution,
+		FromMs:     fromMs,
+		ToMs:       toMs,
+	})
+	if err != nil {
+		engineErr(c, err)
+		return
+	}
+	writeProtoJSON(c, http.StatusOK, resp)
+}
+
+// ── Trade history ─────────────────────────────────────────────────────────────
+
+// GET /api/history?account_id=<uuid>&symbol=<sym>&from=<ms>&to=<ms>&limit=<n>
+func handleTradeHistory(c *gin.Context) {
+	accountID := c.Query("account_id")
+	if accountID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "account_id is required"})
+		return
+	}
+
+	fromMs, _ := strconv.ParseInt(c.Query("from"), 10, 64)
+	toMs, _ := strconv.ParseInt(c.Query("to"), 10, 64)
+	limit, _ := strconv.ParseUint(c.Query("limit"), 10, 32)
+
+	ctx, cancel := rpcCtx()
+	defer cancel()
+
+	resp, err := engineClient.Service().GetTradeHistory(ctx, &enginepb.GetTradeHistoryRequest{
+		AccountId: accountID,
+		Symbol:    c.Query("symbol"),
+		FromMs:    fromMs,
+		ToMs:      toMs,
+		Limit:     uint32(limit),
 	})
 	if err != nil {
 		engineErr(c, err)

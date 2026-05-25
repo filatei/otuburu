@@ -9,7 +9,9 @@
 //! Exposes a tonic gRPC server on `ENGINE_GRPC_ADDR` (default 0.0.0.0:9090)
 //! implementing `EngineService` as defined in `proto/engine.proto`.
 
+mod db;
 mod engine_service;
+mod ohlc;
 mod persistence;
 mod state;
 mod tick_loop;
@@ -41,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Otuburu engine starting on {}", addr);
 
     // ── Shared state ─────────────────────────────────────────────────────────
-    let shared = state::SharedState::new();
+    let shared = state::SharedState::new().await;
 
     // ── Tick loop (one task per symbol) ──────────────────────────────────────
     tick_loop::start(shared.clone());

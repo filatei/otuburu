@@ -15,16 +15,16 @@ message Tick {
 }
 
 message Position {
-  string id              = 1;  // UUID
-  string account_id      = 2;
-  string symbol          = 3;
-  string side            = 4;  // "BUY" | "SELL"
-  double lots            = 5;
-  double entry           = 6;
-  double margin          = 7;
-  double notional        = 8;
-  double unrealised_pnl  = 9;
-  int64  opened_at_ms    = 10;
+  string id             = 1;  // UUID
+  string account_id     = 2;
+  string symbol         = 3;
+  string side           = 4;  // "BUY" | "SELL"
+  double lots           = 5;
+  double entry          = 6;
+  double margin         = 7;
+  double notional       = 8;
+  double unrealised_pnl = 9;
+  int64  opened_at_ms   = 10;
 }
 
 message BinaryOption {
@@ -40,14 +40,16 @@ message BinaryOption {
 }
 
 message AccountState {
-  string id            = 1;
-  string currency      = 2;
-  double balance       = 3;
-  double equity        = 4;
-  double used_margin   = 5;
-  double free_margin   = 6;
-  double margin_level  = 7;
-  double realised_pnl  = 8;
+  string id           = 1;
+  string currency     = 2;
+  double balance      = 3;
+  double equity       = 4;
+  double used_margin  = 5;
+  double free_margin  = 6;
+  double margin_level = 7;
+  double realised_pnl = 8;
+  string label        = 9;   // "Demo" | user-defined name
+  bool   is_demo      = 10;
 }
 
 message HouseStats {
@@ -61,6 +63,31 @@ message HouseStats {
   double binary_win_rate       = 8;
   double payout_multiplier     = 9;
   double expected_house_edge   = 10;
+}
+
+// Candle for chart history
+message Candle {
+  int64  ts_s  = 1;   // unix seconds, floored to resolution
+  double open  = 2;
+  double high  = 3;
+  double low   = 4;
+  double close = 5;
+}
+
+// Settled binary option trade
+message SettledTrade {
+  string id            = 1;
+  string account_id    = 2;
+  string symbol        = 3;
+  string direction     = 4;  // "UP" | "DOWN"
+  double stake         = 5;
+  double payout        = 6;
+  bool   won           = 7;
+  double entry_mid     = 8;
+  double exit_mid      = 9;
+  uint32 ticks_total   = 10;
+  int64  opened_at_ms  = 11;
+  int64  settled_at_ms = 12;
 }
 
 // ─── EngineService ───────────────────────────────────────────────────────────
@@ -81,6 +108,16 @@ service EngineService {
 
   // Symbol catalogue
   rpc GetSymbols     (GetSymbolsRequest)      returns (GetSymbolsResponse);
+
+  // Account management
+  rpc CreateAccount  (CreateAccountRequest)   returns (CreateAccountResponse);
+  rpc ListAccounts   (ListAccountsRequest)    returns (ListAccountsResponse);
+
+  // Chart history (OHLC candles)
+  rpc GetCandles     (GetCandlesRequest)      returns (GetCandlesResponse);
+
+  // Trade history (settled binary options)
+  rpc GetTradeHistory (GetTradeHistoryRequest) returns (GetTradeHistoryResponse);
 }
 
 // ─── Request / Response messages ─────────────────────────────────────────────
@@ -95,11 +132,11 @@ message GetStateRequest {
 }
 
 message StateSnapshot {
-  AccountState        account   = 1;
-  repeated Position   positions = 2;
-  repeated BinaryOption binaries = 3;
-  map<string, Tick>   quotes    = 4;
-  HouseStats          house     = 5;
+  AccountState          account   = 1;
+  repeated Position     positions = 2;
+  repeated BinaryOption binaries  = 3;
+  map<string, Tick>     quotes    = 4;
+  HouseStats            house     = 5;
 }
 
 message PlaceOrderRequest {
@@ -161,4 +198,53 @@ message SymbolInfo {
   uint32 leverage      = 3;
   double contract_size = 4;
   uint32 cadence_ms    = 5;  // tick interval
+}
+
+// ── Account management ────────────────────────────────────────────────────────
+
+message CreateAccountRequest {
+  string account_id      = 1;  // pre-assigned UUID from wallet service
+  string label           = 2;  // e.g. "Demo" | "Main" | user-defined
+  bool   is_demo         = 3;
+  double initial_balance = 4;  // 0 = default 10 000 USD
+}
+
+message CreateAccountResponse {
+  string account_id = 1;
+}
+
+message ListAccountsRequest {
+  repeated string account_ids = 1;
+}
+
+message ListAccountsResponse {
+  repeated AccountState accounts = 1;
+}
+
+// ── Chart history ─────────────────────────────────────────────────────────────
+
+message GetCandlesRequest {
+  string symbol     = 1;
+  string resolution = 2;  // "M1"|"M5"|"M15"|"M30"|"H1"|"H4"|"D1"
+  int64  from_ms    = 3;
+  int64  to_ms      = 4;
+}
+
+message GetCandlesResponse {
+  string          resolution = 1;
+  repeated Candle candles    = 2;
+}
+
+// ── Trade history ─────────────────────────────────────────────────────────────
+
+message GetTradeHistoryRequest {
+  string account_id = 1;
+  string symbol     = 2;  // empty = all symbols
+  int64  from_ms    = 3;
+  int64  to_ms      = 4;
+  uint32 limit      = 5;  // 0 = default 200
+}
+
+message GetTradeHistoryResponse {
+  repeated SettledTrade trades = 1;
 }

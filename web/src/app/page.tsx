@@ -106,6 +106,7 @@ export default function TradingPage() {
           <div className="flex-1 overflow-hidden">
             <Chart
               candles={candles} lastTick={lastTick} symbol={selected}
+              accountId={accountId}
               binaries={binaries} settledHistory={settledHistory}
             />
           </div>
@@ -134,6 +135,7 @@ export default function TradingPage() {
           {mobileTab === 'chart' && (
             <Chart
               candles={candles} lastTick={lastTick} symbol={selected}
+              accountId={accountId}
               binaries={binaries} settledHistory={settledHistory}
             />
           )}

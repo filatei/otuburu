@@ -151,17 +151,23 @@ pub struct Account {
     pub currency: String,
     pub balance: f64,
     pub realised_pnl: f64,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub is_demo: bool,
 }
 
 impl Account {
     pub fn new_demo() -> Self {
         Account {
-            // Fixed UUID so demo account ID is stable across engine restarts.
+            // Fixed UUID so the canonical demo account ID is stable across restarts.
             // Changing this would invalidate any persisted client-side state.
             id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
             currency: "USD".into(),
             balance: 10_000.0,
             realised_pnl: 0.0,
+            label: "Demo".into(),
+            is_demo: true,
         }
     }
 }

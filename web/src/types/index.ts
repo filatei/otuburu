@@ -49,10 +49,21 @@ export interface AccountState {
   free_margin:  number
   margin_level: number
   realised_pnl: number
+  label?:       string
+  is_demo?:     boolean
 }
 
 export interface Candle {
   time:  number   // seconds
+  open:  number
+  high:  number
+  low:   number
+  close: number
+}
+
+/** Candle returned by GET /api/candles (ts_s instead of time) */
+export interface ApiCandle {
+  ts_s:  number
   open:  number
   high:  number
   low:   number
@@ -69,4 +80,35 @@ export interface SettledTrade {
   settled_at:  number        // ms timestamp
   outcome:     'win' | 'loss'
   pnl:         number        // net gain/loss (positive = profit, negative = -stake)
+}
+
+/** Settled trade returned by GET /api/history */
+export interface ApiSettledTrade {
+  id:            string
+  account_id:    string
+  symbol:        string
+  direction:     'UP' | 'DOWN'
+  stake:         number
+  payout:        number
+  won:           boolean
+  entry_mid:     number
+  exit_mid:      number
+  ticks_total:   number
+  opened_at_ms:  number
+  settled_at_ms: number
+}
+
+export type Resolution = 'LIVE' | 'M1' | 'M5' | 'M15' | 'M30' | 'H1' | 'H4' | 'D1'
+
+export const RESOLUTIONS: Resolution[] = ['LIVE', 'M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1']
+
+/** How far back each resolution fetches (ms) */
+export const RESOLUTION_WINDOW_MS: Record<Exclude<Resolution, 'LIVE'>, number> = {
+  M1:  1 * 24 * 3600 * 1000,          // 1 day
+  M5:  7 * 24 * 3600 * 1000,          // 1 week
+  M15: 7 * 24 * 3600 * 1000,
+  M30: 30 * 24 * 3600 * 1000,         // 1 month
+  H1:  365 * 24 * 3600 * 1000,        // 1 year
+  H4:  365 * 24 * 3600 * 1000,
+  D1:  2 * 365 * 24 * 3600 * 1000,    // 2 years
 }

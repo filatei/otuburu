@@ -1,9 +1,10 @@
 //! Spawns one async task per symbol — each calls its generator on a fixed
-//! cadence, feeds the tick into the order book (MTM + settlement), and
-//! broadcasts it to all gRPC subscribers.
+//! cadence, feeds the tick into every account book (MTM + settlement) and the
+//! OHLC aggregators, then broadcasts to all gRPC subscribers.
 //!
-//! Also spawns a periodic snapshot task that saves state every 60 s so that
-//! CFD position changes (open, close, MTM) are captured even between settlements.
+//! Also spawns:
+//!   - A periodic snapshot task (60 s) for CFD position drift.
+//!   - A daily OHLC flush task (every 5 min) to persist D1 candles to SQLite.
 
 use std::time::Duration;
 use tokio::time;
@@ -28,43 +29,74 @@ pub fn start(state: SharedState) {
                 let tick = gen.next_tick();
                 debug!(symbol = %tick.symbol, mid = tick.mid, "tick");
 
-                // Feed tick into the order book; capture snapshot data if anything settled
-                let snap = {
+                // ── Feed books + OHLC, collect settlements ────────────────────
+                let (all_settled, maybe_snap) = {
                     let mut inner = state.inner.write().await;
-                    let settled = inner.book.on_tick(&tick);
 
-                    for s in &settled {
-                        tracing::info!(
-                            binary_id = %s.option.id,
-                            won        = s.won,
-                            payout     = s.payout,
-                            "binary settled"
-                        );
+                    // Update OHLC for this symbol across all resolutions.
+                    inner.ohlc.on_tick(&tick.symbol, tick.ts, tick.mid);
+
+                    // Tick every account book.
+                    let mut all_settled = Vec::new();
+                    for book in inner.books.values_mut() {
+                        let settled = book.on_tick(&tick);
+                        for s in &settled {
+                            tracing::info!(
+                                binary_id = %s.option.id,
+                                account_id = %s.option.account_id,
+                                won = s.won,
+                                payout = s.payout,
+                                "binary settled"
+                            );
+                        }
+                        all_settled.extend(settled);
                     }
 
-                    // Build snapshot while holding the lock so data is consistent.
-                    // Only do this when something actually changed (a settlement happened).
-                    if !settled.is_empty() {
-                        Some(crate::persistence::build(
-                            inner.book.account.clone(),
-                            inner.book.positions_snapshot(),
-                        ))
+                    // Snapshot only when something settled (balance changed).
+                    let maybe_snap = if !all_settled.is_empty() {
+                        let snap_books = inner
+                            .books
+                            .values()
+                            .map(|book| crate::persistence::BookSnapshot {
+                                account: book.account.clone(),
+                                positions: book.positions_snapshot(),
+                            })
+                            .collect();
+                        Some(crate::persistence::build(snap_books))
                     } else {
                         None
-                    }
-                    // Lock dropped here
+                    };
+
+                    (all_settled, maybe_snap)
+                    // Lock released here
                 };
 
-                // Persist asynchronously — do NOT hold the book lock during I/O
-                if let Some(snap) = snap {
-                    tokio::task::spawn_blocking(move || {
-                        if let Err(e) = crate::persistence::save(&snap) {
-                            tracing::error!(%e, "failed to save snapshot after settlement");
+                // ── Persist settlements to SQLite ─────────────────────────────
+                if !all_settled.is_empty() {
+                    let settled_at_ms = chrono::Utc::now().timestamp_millis();
+                    let db = state.db.clone();
+                    let settled = all_settled.clone();
+                    tokio::spawn(async move {
+                        for s in &settled {
+                            if let Err(e) =
+                                crate::db::save_settled_trade(&db, s, settled_at_ms).await
+                            {
+                                tracing::error!(%e, "failed to save settled trade to DB");
+                            }
                         }
                     });
                 }
 
-                // Broadcast tick to all gRPC subscribers (error = no subscribers, fine)
+                // ── Persist snapshot ──────────────────────────────────────────
+                if let Some(snap) = maybe_snap {
+                    tokio::task::spawn_blocking(move || {
+                        if let Err(e) = crate::persistence::save(&snap) {
+                            tracing::error!(%e, "snapshot save failed after settlement");
+                        }
+                    });
+                }
+
+                // ── Broadcast tick ────────────────────────────────────────────
                 if let Err(e) = state.tick_tx.send(tick) {
                     debug!("tick broadcast: no subscribers ({})", e);
                 }
@@ -72,8 +104,7 @@ pub fn start(state: SharedState) {
         });
     }
 
-    // ── Periodic snapshot task ─────────────────────────────────────────────────
-    // Saves every 60 s regardless of settlements — catches CFD open/close/MTM.
+    // ── Periodic snapshot task (60 s) ─────────────────────────────────────────
     {
         let state = state.clone();
         tokio::spawn(async move {
@@ -86,15 +117,54 @@ pub fn start(state: SharedState) {
 
                 let snap = {
                     let inner = state.inner.read().await;
-                    crate::persistence::build(
-                        inner.book.account.clone(),
-                        inner.book.positions_snapshot(),
-                    )
+                    let snap_books = inner
+                        .books
+                        .values()
+                        .map(|book| crate::persistence::BookSnapshot {
+                            account: book.account.clone(),
+                            positions: book.positions_snapshot(),
+                        })
+                        .collect();
+                    crate::persistence::build(snap_books)
                 };
 
                 tokio::task::spawn_blocking(move || {
                     if let Err(e) = crate::persistence::save(&snap) {
                         tracing::error!(%e, "periodic snapshot save failed");
+                    }
+                });
+            }
+        });
+    }
+
+    // ── Daily OHLC flush task (every 5 min) ───────────────────────────────────
+    // Upserts the current in-progress D1 candle for each symbol into SQLite so
+    // daily history survives restarts even before the candle closes.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_secs(300));
+            interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+            interval.tick().await; // skip immediate first tick
+
+            loop {
+                interval.tick().await;
+
+                let snapshots = {
+                    let inner = state.inner.read().await;
+                    inner.ohlc.daily_snapshots()
+                };
+
+                let db = state.db.clone();
+                tokio::spawn(async move {
+                    for (sym, c) in snapshots {
+                        if let Err(e) = crate::db::upsert_daily_candle(
+                            &db, &sym, c.ts_s, c.open, c.high, c.low, c.close,
+                        )
+                        .await
+                        {
+                            tracing::error!(%e, symbol = %sym, "daily OHLC flush failed");
+                        }
                     }
                 });
             }
