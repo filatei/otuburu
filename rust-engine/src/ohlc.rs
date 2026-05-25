@@ -175,23 +175,12 @@ impl SymbolOhlc {
 // ── OhlcStore (public API) ────────────────────────────────────────────────────
 
 /// Global OHLC store — one `SymbolOhlc` per symbol, all kept in the RwLock.
+#[derive(Default)]
 pub struct OhlcStore {
     symbols: HashMap<String, SymbolOhlc>,
 }
 
-impl Default for OhlcStore {
-    fn default() -> Self {
-        OhlcStore {
-            symbols: HashMap::new(),
-        }
-    }
-}
-
 impl OhlcStore {
-    pub fn new() -> Self {
-        OhlcStore::default()
-    }
-
     /// Feed one tick into every resolution buffer for this symbol.
     pub fn on_tick(&mut self, symbol: &str, ts_ms: i64, mid: f64) {
         self.symbols

@@ -102,6 +102,9 @@ fn to_pb_house(book: &order_book::Book) -> HouseStats {
 }
 
 /// Parse a required account_id field; return gRPC error on bad UUID.
+/// `tonic::Status` is intentionally large; boxing here would break `?` propagation at every
+/// call-site, so we suppress the lint instead.
+#[allow(clippy::result_large_err)]
 fn parse_account_id(s: &str) -> Result<Uuid, Status> {
     if s.is_empty() {
         // Legacy: fall back to the canonical demo account UUID.
