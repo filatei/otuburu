@@ -363,7 +363,8 @@ impl EngineService for EngineServiceImpl {
         // This is the deposit-credit path: wallet credits Postgres then pushes
         // the new balance here so the engine book stays in sync without polling.
         if let Some(book) = inner.books.get_mut(&account_id) {
-            if r.initial_balance > 0.0 && book.positions().is_empty() && book.binaries().is_empty() {
+            if r.initial_balance > 0.0 && book.positions().is_empty() && book.binaries().is_empty()
+            {
                 book.account.balance = r.initial_balance;
                 tracing::info!(
                     %account_id,
