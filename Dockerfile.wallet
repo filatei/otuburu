@@ -11,7 +11,7 @@ RUN go mod tidy \
 FROM debian:12-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends netcat-openbsd \
+ && apt-get install -y --no-install-recommends netcat-openbsd ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /otuburu-wallet /otuburu-wallet
