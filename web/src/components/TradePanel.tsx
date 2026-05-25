@@ -70,7 +70,7 @@ export default function TradePanel({ symbol, info, lastTick, account, accountId,
   const lotsNum     = parseFloat(lots)      || 0
   const spotNum     = parseFloat(spotStake) || 0
   const notional    = info ? (lotsNum * info.contract_size * (lastTick?.mid ?? 0)).toFixed(2) : '—'
-  const isSpotSym   = info?.type === 'CRYPTO' || info?.type === 'METAL'
+  const isSpotSym   = info?.type === 'CRYPTO' || info?.type === 'METAL' || info?.type === 'INDEX'
   const decimals    = priceDecimals(info)
   const displaySym  = displayNameOf(info, symbol)
   const divisor     = divisorOf(info)

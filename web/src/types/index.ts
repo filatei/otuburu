@@ -9,7 +9,7 @@ export interface Tick {
 
 export interface SymbolInfo {
   symbol:          string                  // internal id, used in API calls (e.g. "cryBTCUSD")
-  type:            'BOOM_CRASH' | 'FX' | 'CRYPTO' | 'METAL'
+  type:            'BOOM_CRASH' | 'FX' | 'CRYPTO' | 'METAL' | 'INDEX'
   leverage:        number
   contract_size:   number
   cadence_ms:      number

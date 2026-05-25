@@ -15,6 +15,8 @@ const TYPE_BADGE: Record<string, string> = {
   BOOM_CRASH: 'text-[#f5a623]',
   FX:         'text-up',
   CRYPTO:     'text-[#9b59b6]',
+  METAL:      'text-[#d4af37]',
+  INDEX:      'text-[#5dade2]',
 }
 
 export default function SymbolBar({ symbols, ticks, selected, onSelect }: Props) {

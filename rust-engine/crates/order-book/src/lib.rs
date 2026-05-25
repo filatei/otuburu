@@ -79,6 +79,30 @@ pub fn default_contract_specs() -> HashMap<String, ContractSpec> {
                 leverage: 20,
             },
         ),
+        // ── US equity indices (Yahoo Finance feeds, no leverage) ─────────────
+        // Internal IDs match Yahoo tickers minus the `^` prefix so the symbol
+        // map → fetcher mapping in live_feed.rs is straightforward.
+        (
+            "SPX",  // Yahoo ^GSPC → S&P 500
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 1,
+            },
+        ),
+        (
+            "DJI",  // Yahoo ^DJI → Dow 30
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 1,
+            },
+        ),
+        (
+            "NDX",  // Yahoo ^IXIC → Nasdaq Composite
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 1,
+            },
+        ),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v))

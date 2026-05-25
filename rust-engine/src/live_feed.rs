@@ -31,11 +31,16 @@ use feed_generator::Tick;
 use crate::state::SharedState;
 
 // ── Spread constants (all in % of mid) ───────────────────────────────────────
+//
+// Yahoo-fed symbols only return a mid (regularMarketPrice), so we synthesise
+// bid/ask around it. BTC/ETH come from Binance bookTicker with real bid/ask,
+// so no synthetic spread is needed there.
 
-/// Gold: 0.15% half-spread (15 bps each side). Used to synthesise bid/ask from
-/// Frankfurter's mid-price. BTC/ETH come from Binance bookTicker with real
-/// bid/ask, so no synthetic spread is needed there.
+/// Gold: 0.15% half-spread (15 bps each side).
 const GOLD_HALF_SPREAD_PCT: f64 = 0.0015;
+/// US indices: 0.05% half-spread (5 bps each side). Real-world index CFD
+/// spreads run 0.5–2 points on SPX (~3–10 bps); we sit at the tighter end.
+const INDEX_HALF_SPREAD_PCT: f64 = 0.0005;
 
 // ── Binance book ticker ───────────────────────────────────────────────────────
 
@@ -95,12 +100,15 @@ struct YahooMeta {
     regular_market_price: Option<f64>,
 }
 
-async fn fetch_xauusd(client: &reqwest::Client) -> Option<f64> {
-    // COMEX gold futures (GC=F) as a proxy for spot XAU/USD. Trades roughly
-    // Sun 18:00 ET → Fri 17:00 ET; outside those hours the price stays at
-    // the last close (which is fine for our display purposes).
+/// Fetch the latest regular-market price for any Yahoo Finance ticker via the
+/// public chart endpoint. Works for `GC=F` (gold futures), `^GSPC`, `^DJI`,
+/// `^IXIC`, equities, etc. Outside trading hours Yahoo returns the last close.
+async fn fetch_yahoo_chart(client: &reqwest::Client, yahoo_ticker: &str) -> Option<f64> {
+    let url = format!(
+        "https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_ticker}"
+    );
     let resp = client
-        .get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F")
+        .get(&url)
         .header(reqwest::header::USER_AGENT, YAHOO_UA)
         .timeout(Duration::from_secs(8))
         .send()
@@ -114,6 +122,7 @@ async fn fetch_xauusd(client: &reqwest::Client) -> Option<f64> {
         None
     }
 }
+
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -229,12 +238,16 @@ pub fn start(state: SharedState) {
             .expect("reqwest client build failed"),
     );
 
-    // BTC/USD — 500 ms
+    // BTC/USD — 500 ms (Binance bookTicker, real bid/ask)
     spawn_binance(state.clone(), client.clone(), "BTCUSDT", "cryBTCUSD", 500);
-    // ETH/USD — 500 ms
+    // ETH/USD — 500 ms (Binance bookTicker, real bid/ask)
     spawn_binance(state.clone(), client.clone(), "ETHUSDT", "cryETHUSD", 500);
-    // XAU/USD — 2 s (Frankfurter updates ~60 s anyway, but we re-broadcast each cycle)
-    spawn_gold(state, client, 2_000);
+
+    // Yahoo-fed symbols — 2 s polling, synthetic bid/ask around the mid.
+    spawn_yahoo(state.clone(), client.clone(), "GC=F",  "cryXAUUSD", GOLD_HALF_SPREAD_PCT,  2_000);
+    spawn_yahoo(state.clone(), client.clone(), "^GSPC", "SPX",       INDEX_HALF_SPREAD_PCT, 2_000);
+    spawn_yahoo(state.clone(), client.clone(), "^DJI",  "DJI",       INDEX_HALF_SPREAD_PCT, 2_000);
+    spawn_yahoo(state,         client,         "^IXIC", "NDX",       INDEX_HALF_SPREAD_PCT, 2_000);
 }
 
 fn spawn_binance(
@@ -270,7 +283,17 @@ fn spawn_binance(
     });
 }
 
-fn spawn_gold(state: SharedState, client: Arc<reqwest::Client>, cadence_ms: u64) {
+/// Generic Yahoo Finance chart-endpoint feeder. Polls every `cadence_ms`,
+/// synthesises bid/ask around the mid using `half_spread_pct`, and dispatches
+/// a tick under the internal `symbol` id. Used for gold (GC=F) and US indices.
+fn spawn_yahoo(
+    state: SharedState,
+    client: Arc<reqwest::Client>,
+    yahoo_ticker: &'static str,
+    symbol: &'static str,
+    half_spread_pct: f64,
+    cadence_ms: u64,
+) {
     tokio::spawn(async move {
         let last: Arc<Mutex<Option<f64>>> = Arc::new(Mutex::new(None));
         let mut interval = time::interval(Duration::from_millis(cadence_ms));
@@ -279,22 +302,26 @@ fn spawn_gold(state: SharedState, client: Arc<reqwest::Client>, cadence_ms: u64)
         loop {
             interval.tick().await;
 
-            match fetch_xauusd(&client).await {
+            match fetch_yahoo_chart(&client, yahoo_ticker).await {
                 Some(mid) => {
                     *last.lock().await = Some(mid);
                 }
                 None => {
                     let have_last = last.lock().await.is_some();
                     if have_last {
-                        warn!("gold fetch failed — using last known price");
+                        warn!(symbol, yahoo_ticker, "yahoo fetch failed — using last known price");
                     } else {
-                        warn!("gold fetch failed — no price yet, symbol will be silent until first success");
+                        warn!(
+                            symbol,
+                            yahoo_ticker,
+                            "yahoo fetch failed — no price yet, symbol will be silent until first success"
+                        );
                     }
                 }
             }
 
             if let Some(mid) = *last.lock().await {
-                let tick = mid_to_tick("cryXAUUSD", mid, GOLD_HALF_SPREAD_PCT);
+                let tick = mid_to_tick(symbol, mid, half_spread_pct);
                 dispatch(&state, tick).await;
             }
         }

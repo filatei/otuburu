@@ -30,6 +30,9 @@ pub fn symbol_cadence_ms(symbol: &str) -> u64 {
         "cryBTCUSD" => 500,
         "cryETHUSD" => 500,
         "cryXAUUSD" => 1000,
+        // US indices polled from Yahoo at 2s — the upstream doesn't update
+        // any faster anyway and we don't want to hammer them.
+        "SPX" | "DJI" | "NDX" => 2000,
         _ => 1000, // BOOM1000, CRASH1000
     }
 }
@@ -67,10 +70,13 @@ pub fn symbol_display_name(symbol: &str) -> &str {
 /// and never divided. Returns 1.0 when no scaling is wanted.
 ///
 /// Tuned for typical mid-2026 spot prices so display values land in a
-/// retail-friendly $10–$500 range:
-///   - cryBTCUSD ÷ 1000 → BTC ~$108k shows as ~$108
-///   - cryETHUSD ÷ 10   → ETH ~$3.9k shows as ~$390
-///   - cryXAUUSD ÷ 10   → XAU ~$3.3k shows as ~$330
+/// retail-friendly $5–$500 range:
+///   - cryBTCUSD ÷ 1000 → BTC ~$77k  shows as ~$77
+///   - cryETHUSD ÷ 10   → ETH ~$2.1k shows as ~$210
+///   - cryXAUUSD ÷ 10   → XAU ~$4.5k shows as ~$452
+///   - SPX       ÷ 1000 → S&P ~7400  shows as ~$7.40
+///   - DJI       ÷ 1000 → Dow ~50.6k shows as ~$50.60
+///   - NDX       ÷ 1000 → Nasdaq ~26k shows as ~$26.30
 ///
 /// Adjust if prices drift far enough that the display values leave the band.
 pub fn symbol_display_divisor(symbol: &str) -> f64 {
@@ -78,9 +84,14 @@ pub fn symbol_display_divisor(symbol: &str) -> f64 {
         "cryBTCUSD" => 1000.0,
         "cryETHUSD" => 10.0,
         "cryXAUUSD" => 10.0,
+        "SPX" | "DJI" | "NDX" => 1000.0,
         _ => 1.0,
     }
 }
+
+/// Symbols that represent US equity indices fed from Yahoo (no `^` prefix
+/// in our internal IDs — the prefix is added only when calling Yahoo).
+const INDEX_SYMBOLS: &[&str] = &["SPX", "DJI", "NDX"];
 
 pub fn symbol_meta(specs: &HashMap<String, ContractSpec>) -> Vec<SymbolMeta> {
     specs
@@ -92,6 +103,8 @@ pub fn symbol_meta(specs: &HashMap<String, ContractSpec>) -> Vec<SymbolMeta> {
                 "METAL"
             } else if sym.starts_with("cry") {
                 "CRYPTO"
+            } else if INDEX_SYMBOLS.contains(&sym.as_str()) {
+                "INDEX"
             } else {
                 "BOOM_CRASH"
             };
