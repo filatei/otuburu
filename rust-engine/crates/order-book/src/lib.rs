@@ -242,6 +242,18 @@ impl Book {
         }
     }
 
+    // ── persistence helpers ─────────────────────────────────
+
+    /// Returns a snapshot of all open CFD positions for serialisation.
+    pub fn positions_snapshot(&self) -> Vec<CfdPosition> {
+        self.positions.values().cloned().collect()
+    }
+
+    /// Restores CFD positions from a persisted snapshot (called once on startup).
+    pub fn restore_positions(&mut self, positions: Vec<CfdPosition>) {
+        self.positions = positions.into_iter().map(|p| (p.id, p)).collect();
+    }
+
     // ── margin helpers ──────────────────────────────────────
 
     pub fn used_margin(&self) -> f64 {

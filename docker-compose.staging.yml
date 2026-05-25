@@ -26,6 +26,9 @@ services:
     environment:
       ENGINE_GRPC_ADDR: "0.0.0.0:9090"
       RUST_LOG: "otuburu_engine=info,warn"
+      SNAPSHOT_PATH: "/data/engine_snapshot.json"
+    volumes:
+      - enginedata:/data
     expose:
       - "9090"
     networks:
@@ -124,3 +127,4 @@ networks:
 volumes:
   pgdata:
   stakingdata:
+  enginedata:

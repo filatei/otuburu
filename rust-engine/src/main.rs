@@ -10,6 +10,7 @@
 //! implementing `EngineService` as defined in `proto/engine.proto`.
 
 mod engine_service;
+mod persistence;
 mod state;
 mod tick_loop;
 

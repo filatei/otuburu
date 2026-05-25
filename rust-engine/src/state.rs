@@ -75,9 +75,17 @@ impl SharedState {
         let specs = order_book::default_contract_specs();
         let metas = symbol_meta(&specs);
 
-        let book = Book::new(Account::new_demo(), specs);
-        let risk = RiskEngine::new(RiskConfig::default());
+        // Restore from last snapshot (survives container restarts).
+        // Falls back to a fresh $10 000 demo account if no snapshot exists.
+        let (account, saved_positions) = match crate::persistence::load() {
+            Some(snap) => (snap.account, snap.positions),
+            None       => (Account::new_demo(), vec![]),
+        };
 
+        let mut book = Book::new(account, specs);
+        book.restore_positions(saved_positions);
+
+        let risk = RiskEngine::new(RiskConfig::default());
         let (tick_tx, _) = broadcast::channel(TICK_CHANNEL_CAP);
 
         SharedState {
