@@ -443,6 +443,7 @@ impl EngineService for EngineServiceImpl {
                 leverage: m.leverage,
                 contract_size: m.contract_size,
                 cadence_ms: m.cadence_ms as u32,
+                display_divisor: m.display_divisor,
             })
             .collect();
         Ok(Response::new(GetSymbolsResponse { symbols }))

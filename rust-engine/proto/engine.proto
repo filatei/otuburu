@@ -260,11 +260,16 @@ message GetSymbolsResponse {
 }
 
 message SymbolInfo {
-  string symbol        = 1;
-  string type          = 2;  // "BOOM_CRASH" | "FX" | "CRYPTO" | "METAL"
-  uint32 leverage      = 3;
-  double contract_size = 4;
-  uint32 cadence_ms    = 5;  // tick interval
+  string symbol          = 1;
+  string type            = 2;  // "BOOM_CRASH" | "FX" | "CRYPTO" | "METAL"
+  uint32 leverage        = 3;
+  double contract_size   = 4;
+  uint32 cadence_ms      = 5;  // tick interval
+  // Display-only price divisor. Engine stores true prices; frontends should
+  // divide bid/ask/entry/mark by this value at render time for high-priced
+  // assets (e.g. BTC=1000 shows $108 instead of $108k). PnL is always in real
+  // USD and never divided. Default 1.0 = no scaling.
+  double display_divisor = 6;
 }
 
 // ── Account management ────────────────────────────────────────────────────────

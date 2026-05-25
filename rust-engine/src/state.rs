@@ -42,6 +42,18 @@ pub struct SymbolMeta {
     pub contract_size: f64,
     pub leverage: u32,
     pub cadence_ms: u64,
+    /// Display-only price divisor — see `display_divisor` on `SymbolInfo` in
+    /// the proto. Storage and math always use true prices; this is applied at
+    /// render time. Default 1.0 = no scaling.
+    pub display_divisor: f64,
+}
+
+/// Display divisor used to scale high-priced assets for retail UX. Engine
+/// stores true prices; frontends divide for presentation. Returns 1.0 for
+/// symbols where no scaling is wanted. Per-symbol values are filled in by
+/// the fractional-spot rollout.
+pub fn symbol_display_divisor(_symbol: &str) -> f64 {
+    1.0
 }
 
 pub fn symbol_meta(specs: &HashMap<String, ContractSpec>) -> Vec<SymbolMeta> {
@@ -63,6 +75,7 @@ pub fn symbol_meta(specs: &HashMap<String, ContractSpec>) -> Vec<SymbolMeta> {
                 contract_size: spec.contract_size,
                 leverage: spec.leverage,
                 cadence_ms: symbol_cadence_ms(sym),
+                display_divisor: symbol_display_divisor(sym),
             }
         })
         .collect()
