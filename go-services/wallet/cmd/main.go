@@ -11,6 +11,7 @@ import (
 	"otuburu.money/wallet/internal/admin"
 	"otuburu.money/wallet/internal/auth"
 	"otuburu.money/wallet/internal/db"
+	"otuburu.money/wallet/internal/payments"
 	"otuburu.money/wallet/internal/sweep"
 	"otuburu.money/wallet/internal/wallet"
 )
@@ -78,6 +79,10 @@ func main() {
 	protected.GET("/wallet/balance", walletH.Balance)
 	protected.GET("/wallet/transactions", walletH.Transactions)
 	protected.POST("/wallet/withdraw", walletH.Withdraw)
+
+	// ── Payment channels ──────────────────────────────────────────────────────
+	paystackH := payments.New(pool)
+	paystackH.RegisterRoutes(protected, r.Group("/"))
 
 	// ── Admin: back-office dashboard ──────────────────────────────────────────
 	// Note: avoid r.Group("/admin") alongside r.GET("/admin") — Gin's router

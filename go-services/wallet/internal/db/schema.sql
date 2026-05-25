@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS deposit_addresses (
 CREATE TABLE IF NOT EXISTS ledger (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     account_id UUID NOT NULL REFERENCES accounts(id),
-    type       TEXT NOT NULL CHECK (type IN ('deposit','withdrawal','trade_win','trade_loss','bonus')),
+    type       TEXT NOT NULL CHECK (type IN ('deposit','withdrawal','withdrawal_refund','trade_win','trade_loss','bonus')),
     amount     NUMERIC(20,6) NOT NULL,   -- positive = credit, negative = debit
     status     TEXT NOT NULL DEFAULT 'confirmed' CHECK (status IN ('pending','confirmed','failed')),
     ref        TEXT,                     -- blockchain txid or trade id
@@ -76,6 +76,19 @@ CREATE TABLE IF NOT EXISTS treasury_sweeps (
     amount     NUMERIC(20,6) NOT NULL,
     sweep_txid TEXT NOT NULL,
     swept_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ── Paystack NGN payments ────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS paystack_payments (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reference        TEXT UNIQUE NOT NULL,   -- Paystack reference
+    account_id       UUID NOT NULL REFERENCES accounts(id),
+    user_id          UUID NOT NULL REFERENCES users(id),
+    amount_usd       NUMERIC(20,6) NOT NULL, -- requested USD equivalent
+    amount_usd_actual NUMERIC(20,6),         -- actual USD credited (computed from kobo)
+    status           TEXT NOT NULL DEFAULT 'pending'
+                     CHECK (status IN ('pending','processing','confirmed','failed')),
+    created_at       TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ── Indices ───────────────────────────────────────────────────────────────────

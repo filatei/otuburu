@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	"otuburu.money/gateway/internal/auth"
 	"otuburu.money/gateway/internal/engine"
 	"otuburu.money/gateway/internal/enginepb"
 )
@@ -25,8 +26,8 @@ var (
 // protoJSON serialises a proto.Message as JSON using snake_case field names
 // and emitting zero-value (unpopulated) fields so the frontend always sees all keys.
 var protoMarshaler = protojson.MarshalOptions{
-	UseProtoNames:   true,  // snake_case → matches TypeScript interfaces
-	EmitUnpopulated: true,  // include balance:0, positions:[] etc.
+	UseProtoNames:   true,
+	EmitUnpopulated: true,
 }
 
 func writeProtoJSON(c *gin.Context, status int, msg proto.Message) {
@@ -45,23 +46,37 @@ func Init(client *engine.Client) {
 }
 
 // RegisterRoutes attaches all REST proxy endpoints to the given router group.
+//
+// Public routes (no auth required):
+//   - GET /symbols   — market symbol list
+//   - GET /candles   — OHLC history
+//
+// Protected routes (valid JWT required, account_id must belong to the caller):
+//   - GET  /state           — account state
+//   - POST /order           — place CFD order
+//   - POST /close           — close position (legacy)
+//   - DELETE /position/:id  — close position
+//   - POST /binary          — place binary option
+//   - POST /account         — provision engine account
+//   - GET  /accounts        — list accounts (own only)
+//   - GET  /history         — trade history
 func RegisterRoutes(rg *gin.RouterGroup) {
+	// ── Public ────────────────────────────────────────────────────────────────
 	rg.GET("/symbols", handleSymbols)
-	rg.GET("/state", handleState)
-	rg.POST("/order", handleOrder)
-	rg.POST("/close", handleClose)              // legacy
-	rg.DELETE("/position/:id", handleDeletePos) // frontend: closePosition()
-	rg.POST("/binary", handleBinary)
-
-	// Account management
-	rg.POST("/account", handleCreateAccount)
-	rg.GET("/accounts", handleListAccounts)
-
-	// Chart history
 	rg.GET("/candles", handleCandles)
 
-	// Trade history
-	rg.GET("/history", handleTradeHistory)
+	// ── Authenticated ─────────────────────────────────────────────────────────
+	protected := rg.Group("/", auth.Middleware())
+	{
+		protected.GET("/state", handleState)
+		protected.POST("/order", handleOrder)
+		protected.POST("/close", handleClose)
+		protected.DELETE("/position/:id", handleDeletePos)
+		protected.POST("/binary", handleBinary)
+		protected.POST("/account", handleCreateAccount)
+		protected.GET("/accounts", handleListAccounts)
+		protected.GET("/history", handleTradeHistory)
+	}
 }
 
 // EngineAddr returns the configured engine address (used for health checks).
@@ -75,6 +90,16 @@ func rpcCtx() (context.Context, context.CancelFunc) {
 
 func engineErr(c *gin.Context, err error) {
 	c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+}
+
+// forbiddenAccount aborts with 403 when the requested account_id is not owned by the caller.
+func forbiddenAccount(c *gin.Context, accountID string) bool {
+	claims := auth.GetClaims(c)
+	if claims == nil || !claims.OwnsAccount(accountID) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "account not owned by caller"})
+		return true
+	}
+	return false
 }
 
 // ── handlers ──────────────────────────────────────────────────────────────────
@@ -92,11 +117,16 @@ func handleSymbols(c *gin.Context) {
 }
 
 func handleState(c *gin.Context) {
+	accountID := c.Query("account_id")
+	if forbiddenAccount(c, accountID) {
+		return
+	}
+
 	ctx, cancel := rpcCtx()
 	defer cancel()
 
 	resp, err := engineClient.Service().GetState(ctx, &enginepb.GetStateRequest{
-		AccountId: c.Query("account_id"),
+		AccountId: accountID,
 	})
 	if err != nil {
 		engineErr(c, err)
@@ -118,6 +148,10 @@ func handleOrder(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if forbiddenAccount(c, req.AccountID) {
+		return
+	}
+
 	ctx, cancel := rpcCtx()
 	defer cancel()
 
@@ -146,6 +180,10 @@ func handleClose(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if forbiddenAccount(c, req.AccountID) {
+		return
+	}
+
 	ctx, cancel := rpcCtx()
 	defer cancel()
 
@@ -160,17 +198,18 @@ func handleClose(c *gin.Context) {
 	writeProtoJSON(c, http.StatusOK, resp)
 }
 
-// handleDeletePos handles DELETE /position/:id  (used by the frontend closePosition()).
-// The account_id comes from the JSON body (same shape as legacy close).
+// handleDeletePos handles DELETE /position/:id (used by the frontend closePosition()).
 func handleDeletePos(c *gin.Context) {
 	posID := c.Param("id")
 
-	// account_id may arrive in the JSON body
 	var body struct {
 		AccountID string `json:"account_id"`
 	}
-	// non-fatal if body is missing — engine will validate
 	_ = c.ShouldBindJSON(&body)
+
+	if forbiddenAccount(c, body.AccountID) {
+		return
+	}
 
 	ctx, cancel := rpcCtx()
 	defer cancel()
@@ -200,6 +239,10 @@ func handleBinary(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if forbiddenAccount(c, req.AccountID) {
+		return
+	}
+
 	ctx, cancel := rpcCtx()
 	defer cancel()
 
@@ -232,6 +275,11 @@ func handleCreateAccount(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// Only allow provisioning your own accounts
+	if forbiddenAccount(c, req.AccountID) {
+		return
+	}
+
 	ctx, cancel := rpcCtx()
 	defer cancel()
 
@@ -249,12 +297,23 @@ func handleCreateAccount(c *gin.Context) {
 }
 
 // GET /api/accounts?ids=uuid1,uuid2,...
+// Filtered to only return accounts belonging to the authenticated user.
 func handleListAccounts(c *gin.Context) {
+	claims := auth.GetClaims(c)
+
 	idsParam := c.Query("ids")
 	var ids []string
 	if idsParam != "" {
-		ids = strings.Split(idsParam, ",")
+		for _, id := range strings.Split(idsParam, ",") {
+			if claims.OwnsAccount(id) {
+				ids = append(ids, id)
+			}
+		}
+	} else {
+		// Default: return the caller's own accounts
+		ids = []string{claims.AccountID, claims.DemoID}
 	}
+
 	ctx, cancel := rpcCtx()
 	defer cancel()
 
@@ -308,6 +367,9 @@ func handleTradeHistory(c *gin.Context) {
 	accountID := c.Query("account_id")
 	if accountID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "account_id is required"})
+		return
+	}
+	if forbiddenAccount(c, accountID) {
 		return
 	}
 

@@ -4,14 +4,16 @@ import type { SymbolInfo } from '@/types'
 import { useTicks }   from '@/hooks/useTicks'
 import { useAccount } from '@/hooks/useAccount'
 import { useAuth }    from '@/hooks/useAuth'
-import Header       from '@/components/Header'
-import SymbolBar    from '@/components/SymbolBar'
-import Chart        from '@/components/Chart'
-import TradePanel   from '@/components/TradePanel'
-import Positions    from '@/components/Positions'
-import AuthModal    from '@/components/AuthModal'
-import ProfileModal from '@/components/ProfileModal'
-import AppDrawer    from '@/components/AppDrawer'
+import Header         from '@/components/Header'
+import SymbolBar      from '@/components/SymbolBar'
+import Chart          from '@/components/Chart'
+import TradePanel     from '@/components/TradePanel'
+import Positions      from '@/components/Positions'
+import AuthModal      from '@/components/AuthModal'
+import ProfileModal   from '@/components/ProfileModal'
+import AppDrawer      from '@/components/AppDrawer'
+import DepositModal   from '@/components/DepositModal'
+import { provisionAccount } from '@/hooks/useAccount'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 
@@ -25,6 +27,7 @@ export default function TradingPage() {
   const [authError,     setAuthError]     = useState<string | null>(null)
   const [profileOpen,   setProfileOpen]   = useState(false)
   const [drawerOpen,    setDrawerOpen]    = useState(false)
+  const [depositOpen,   setDepositOpen]   = useState(false)
   const [mobileTab,     setMobileTab]     = useState<MobileTab>('chart')
 
   const { user, loading: authLoading, loginWithGoogle, logout, refreshBalances } = useAuth()
@@ -59,7 +62,14 @@ export default function TradingPage() {
   const handleGoogleLogin = useCallback(async (credential: string) => {
     setAuthError(null)
     try {
-      await loginWithGoogle(credential)
+      const authUser = await loginWithGoogle(credential)
+      // Provision engine accounts immediately after login so the user can trade
+      // without a round-trip delay.  Demo always starts at $10 000; real account
+      // uses the Postgres balance so it reflects any prior deposits.
+      await Promise.allSettled([
+        provisionAccount(authUser.demo_id,    'Demo', true,  10_000),
+        provisionAccount(authUser.account_id, 'Real', false, authUser.real_balance ?? 0),
+      ])
     } catch (err: any) {
       setAuthError(err?.message ?? 'Sign-in failed. Please try again.')
     }
@@ -77,6 +87,7 @@ export default function TradingPage() {
       {/* Modals & drawer */}
       {authOpen    && <AuthModal onSuccess={handleGoogleLogin} error={authError} />}
       {profileOpen && user && <ProfileModal user={user} onClose={() => setProfileOpen(false)} />}
+      {depositOpen && user && <DepositModal user={user} onClose={() => setDepositOpen(false)} />}
       <AppDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -85,7 +96,7 @@ export default function TradingPage() {
         onModeToggle={() => setMode(m => m === 'demo' ? 'real' : 'demo')}
         onLogout={logout}
         onEditProfile={() => setProfileOpen(true)}
-        onDeposit={() => {}}
+        onDeposit={() => setDepositOpen(true)}
         onWithdraw={() => {}}
         onHistory={() => {}}
       />

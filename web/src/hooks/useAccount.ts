@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import type { AccountState, Position, BinaryOption, SettledTrade } from '@/types'
+import { authFetch } from '@/lib/api'
 
 const API_BASE    = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 const HISTORY_KEY = 'otuburu_trade_history'
@@ -112,7 +113,7 @@ export function useAccount(accountId: string): GameState {
     if (!accountId || inflightRef.current) return
     inflightRef.current = true
     try {
-      const res = await fetch(`${API_BASE}/api/state?account_id=${accountId}`)
+      const res = await authFetch(`${API_BASE}/api/state?account_id=${accountId}`)
       if (!res.ok) return
       applyState(await res.json())
     } catch { /* silent */ } finally {
@@ -131,18 +132,16 @@ export function useAccount(accountId: string): GameState {
 // ─── Trade actions ────────────────────────────────────────────────────────────
 
 export async function placeCFD(accountId: string, symbol: string, side: 'BUY' | 'SELL', lots: number) {
-  const res = await fetch(`${API_BASE}/api/order`, {
+  const res = await authFetch(`${API_BASE}/api/order`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ account_id: accountId, symbol, side, lots }),
   })
   return res.json()
 }
 
 export async function closePosition(accountId: string, positionId: string) {
-  const res = await fetch(`${API_BASE}/api/position/${positionId}`, {
+  const res = await authFetch(`${API_BASE}/api/position/${positionId}`, {
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ account_id: accountId }),
   })
   return res.json()
@@ -152,10 +151,31 @@ export async function placeBinary(
   accountId: string, symbol: string,
   direction: 'UP' | 'DOWN', stake: number, ticks: number,
 ) {
-  const res = await fetch(`${API_BASE}/api/binary`, {
+  const res = await authFetch(`${API_BASE}/api/binary`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ account_id: accountId, symbol, direction, stake, ticks }),
+  })
+  return res.json()
+}
+
+/**
+ * Provision (or sync) an engine account.
+ * Called on login and on balance top-up after a deposit.
+ */
+export async function provisionAccount(
+  accountId: string,
+  label: string,
+  isDemo: boolean,
+  initialBalance: number,
+) {
+  const res = await authFetch(`${API_BASE}/api/account`, {
+    method: 'POST',
+    body: JSON.stringify({
+      account_id:      accountId,
+      label,
+      is_demo:         isDemo,
+      initial_balance: initialBalance,
+    }),
   })
   return res.json()
 }

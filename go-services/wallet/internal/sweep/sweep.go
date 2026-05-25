@@ -156,7 +156,7 @@ func (s *Sweeper) sweepDeposit(ctx context.Context, depositTxid, address string,
 	}
 
 	// 1. Check live on-chain balances
-	usdtBalance, trxSun, err := s.getBalances(address)
+	usdtBalance, trxSun, err := s.getBalances(ctx, address)
 	if err != nil {
 		return fmt.Errorf("get balances: %w", err)
 	}
@@ -190,9 +190,9 @@ func (s *Sweeper) sweepDeposit(ctx context.Context, depositTxid, address string,
 // ── TronGrid helpers ──────────────────────────────────────────────────────────
 
 // getBalances returns the live USDT float balance and TRX sun balance at a Tron address.
-func (s *Sweeper) getBalances(addr string) (usdtFloat float64, trxSun int64, err error) {
+func (s *Sweeper) getBalances(ctx context.Context, addr string) (usdtFloat float64, trxSun int64, err error) {
 	url := fmt.Sprintf("%s/v1/accounts/%s", wallet.TronGridBase, addr)
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if s.apiKey != "" {
 		req.Header.Set("TRON-PRO-API-KEY", s.apiKey)
 	}

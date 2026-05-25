@@ -69,6 +69,7 @@ func main() {
 	})
 
 	rest.RegisterRoutes(r.Group("/api"))
+	rest.RegisterInternalRoutes(r.Group("/internal"))
 
 	srv := &http.Server{
 		Addr:         ":" + port,

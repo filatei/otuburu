@@ -2,8 +2,13 @@ package wallet
 
 // TronGrid deposit monitor — polls TRC20 transfer events for each
 // registered deposit address and credits user accounts on confirmation.
+//
+// After crediting a deposit, the monitor pushes the new Postgres balance
+// into the engine book via the gateway's internal balance-sync endpoint
+// so the user can trade real funds immediately without a page refresh.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,12 +25,21 @@ import (
 const pollInterval = 30 * time.Second
 
 type Monitor struct {
-	db     *pgxpool.Pool
-	apiKey string
+	db             *pgxpool.Pool
+	apiKey         string
+	gatewayURL     string // e.g. http://gateway:8082
+	internalSecret string
+	client         *http.Client
 }
 
 func NewMonitor(db *pgxpool.Pool) *Monitor {
-	return &Monitor{db: db, apiKey: os.Getenv("TRONGRID_API_KEY")}
+	return &Monitor{
+		db:             db,
+		apiKey:         os.Getenv("TRONGRID_API_KEY"),
+		gatewayURL:     os.Getenv("GATEWAY_URL"),
+		internalSecret: os.Getenv("INTERNAL_SECRET"),
+		client:         &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
 func (m *Monitor) Run(ctx context.Context) {
@@ -93,7 +107,7 @@ func (m *Monitor) checkAddress(ctx context.Context, address, accountID string) {
 		req.Header.Set("TRON-PRO-API-KEY", m.apiKey)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := m.client.Do(req)
 	if err != nil {
 		slog.Warn("trongrid fetch", "addr", address, "err", err)
 		return
@@ -183,6 +197,55 @@ func (m *Monitor) credit(ctx context.Context, t trc20Transfer, accountID string)
 		"amount", amount,
 		"txid", t.TransactionID,
 	)
+
+	// Push the new balance into the engine book so the user can trade immediately.
+	// We read the current Postgres balance (post-credit) for accuracy.
+	m.syncEngineBalance(ctx, accountID)
+}
+
+// syncEngineBalance reads the current Postgres balance for accountID and
+// pushes it to the engine via the gateway's internal balance-sync endpoint.
+// A failure here is non-fatal — the user's next page load will reconcile.
+func (m *Monitor) syncEngineBalance(ctx context.Context, accountID string) {
+	if m.gatewayURL == "" || m.internalSecret == "" {
+		return // not configured — skip silently
+	}
+
+	var balance float64
+	if err := m.db.QueryRow(ctx,
+		`SELECT balance FROM accounts WHERE id = $1`, accountID,
+	).Scan(&balance); err != nil {
+		slog.Warn("engine sync: balance query failed", "account", accountID, "err", err)
+		return
+	}
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"account_id": accountID,
+		"balance":    balance,
+	})
+
+	url := m.gatewayURL + "/internal/balance-sync"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Internal-Secret", m.internalSecret)
+
+	resp, err := m.client.Do(req)
+	if err != nil {
+		slog.Warn("engine sync: http request failed", "account", accountID, "err", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		slog.Warn("engine sync: unexpected status", "account", accountID, "status", resp.StatusCode, "body", string(body))
+		return
+	}
+
+	slog.Info("engine balance synced", "account", accountID, "balance", balance)
 }
 
 func pow10(n int) int {

@@ -356,12 +356,37 @@ impl EngineService for EngineServiceImpl {
         };
 
         let mut inner = self.state.inner.write().await;
+
+        // If the account already exists, sync its balance from the wallet when:
+        //   (a) the caller supplied a positive initial_balance, AND
+        //   (b) there are no open CFD positions or binary options in-flight.
+        // This is the deposit-credit path: wallet credits Postgres then pushes
+        // the new balance here so the engine book stays in sync without polling.
+        if let Some(book) = inner.books.get_mut(&account_id) {
+            if r.initial_balance > 0.0
+                && book.positions().is_empty()
+                && book.binaries().is_empty()
+            {
+                book.account.balance = r.initial_balance;
+                tracing::info!(
+                    %account_id,
+                    balance = r.initial_balance,
+                    "account balance synced from wallet"
+                );
+            }
+            return Ok(Response::new(CreateAccountResponse {
+                account_id: account_id.to_string(),
+            }));
+        }
+
+        // New account — create with the provided balance (or default demo balance).
         inner.get_or_create_book(account_id, &label, r.is_demo, r.initial_balance);
 
         tracing::info!(
             %account_id,
             label = %label,
             is_demo = r.is_demo,
+            initial_balance = r.initial_balance,
             "account provisioned"
         );
 
