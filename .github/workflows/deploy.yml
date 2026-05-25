@@ -254,6 +254,8 @@ jobs:
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
             POSTGRES_DB=${{ secrets.POSTGRES_DB || 'otuburu' }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
+            INTERNAL_SECRET=${{ secrets.INTERNAL_SECRET }}
+            GATEWAY_URL=${{ secrets.GATEWAY_URL || 'http://gateway:8082' }}
             WALLET_MNEMONIC=${{ secrets.WALLET_MNEMONIC }}
             TRONGRID_API_KEY=${{ secrets.TRONGRID_API_KEY }}
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}

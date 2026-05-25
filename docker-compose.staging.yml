@@ -45,9 +45,10 @@ services:
     image: ghcr.io/filatei/otuburu-gateway:staging
     restart: always
     environment:
-      PORT:        "8082"
-      ENGINE_ADDR: "engine:9090"
-      JWT_SECRET:  ${JWT_SECRET:-change-me-in-production}
+      PORT:            "8082"
+      ENGINE_ADDR:     "engine:9090"
+      JWT_SECRET:      ${JWT_SECRET:-change-me-in-production}
+      INTERNAL_SECRET: ${INTERNAL_SECRET:-}
     ports:
       - "127.0.0.1:8082:8082"
     networks:
@@ -71,6 +72,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-otuburu}
       POSTGRES_DB:       ${POSTGRES_DB:-otuburu}
       JWT_SECRET:        ${JWT_SECRET:-change-me-in-production}
+      INTERNAL_SECRET:   ${INTERNAL_SECRET:-}
+      GATEWAY_URL:       ${GATEWAY_URL:-http://gateway:8082}
       WALLET_MNEMONIC:   ${WALLET_MNEMONIC:-}
       TRONGRID_API_KEY:  ${TRONGRID_API_KEY:-}
       GOOGLE_CLIENT_ID:  ${GOOGLE_CLIENT_ID:-}
