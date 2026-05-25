@@ -249,8 +249,16 @@ impl EngineService for EngineServiceImpl {
         };
         let account_id = parse_account_id(&r.account_id)?;
 
-        let tp = if r.tp_profit > 0.0 { Some(r.tp_profit) } else { None };
-        let sl = if r.sl_loss > 0.0 { Some(r.sl_loss) } else { None };
+        let tp = if r.tp_profit > 0.0 {
+            Some(r.tp_profit)
+        } else {
+            None
+        };
+        let sl = if r.sl_loss > 0.0 {
+            Some(r.sl_loss)
+        } else {
+            None
+        };
 
         let mut inner = self.state.inner.write().await;
         let book = inner.get_or_create_book(account_id, "Demo", true, 0.0);
@@ -362,8 +370,16 @@ impl EngineService for EngineServiceImpl {
             other => return Err(Status::invalid_argument(format!("invalid side: {other}"))),
         };
         let account_id = parse_account_id(&r.account_id)?;
-        let tp = if r.tp_profit > 0.0 { Some(r.tp_profit) } else { None };
-        let sl = if r.sl_loss > 0.0 { Some(r.sl_loss) } else { None };
+        let tp = if r.tp_profit > 0.0 {
+            Some(r.tp_profit)
+        } else {
+            None
+        };
+        let sl = if r.sl_loss > 0.0 {
+            Some(r.sl_loss)
+        } else {
+            None
+        };
 
         let mut inner = self.state.inner.write().await;
         let book = inner.get_or_create_book(account_id, "Demo", true, 0.0);
@@ -371,7 +387,9 @@ impl EngineService for EngineServiceImpl {
 
         let resp = match result {
             Ok(pos) => PlaceSpotResponse {
-                result: Some(crate::pb::place_spot_response::Result::Spot(to_pb_spot(&pos))),
+                result: Some(crate::pb::place_spot_response::Result::Spot(to_pb_spot(
+                    &pos,
+                ))),
             },
             Err(e) => PlaceSpotResponse {
                 result: Some(crate::pb::place_spot_response::Result::Error(e.to_string())),
@@ -386,8 +404,8 @@ impl EngineService for EngineServiceImpl {
         req: Request<CloseSpotRequest>,
     ) -> Result<Response<CloseSpotResponse>, Status> {
         let r = req.into_inner();
-        let spot_id = Uuid::parse_str(&r.spot_id)
-            .map_err(|_| Status::invalid_argument("invalid spot_id"))?;
+        let spot_id =
+            Uuid::parse_str(&r.spot_id).map_err(|_| Status::invalid_argument("invalid spot_id"))?;
         let account_id = parse_account_id(&r.account_id)?;
 
         let mut inner = self.state.inner.write().await;

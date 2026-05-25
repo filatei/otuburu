@@ -47,9 +47,7 @@ async fn fetch_binance(
     client: &reqwest::Client,
     pair: &str, // e.g. "BTCUSDT"
 ) -> Option<(f64, f64)> {
-    let url = format!(
-        "https://api.binance.com/api/v3/ticker/bookTicker?symbol={pair}"
-    );
+    let url = format!("https://api.binance.com/api/v3/ticker/bookTicker?symbol={pair}");
     let resp = client
         .get(&url)
         .timeout(Duration::from_secs(5))
