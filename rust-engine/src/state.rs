@@ -79,7 +79,7 @@ impl SharedState {
         // Falls back to a fresh $10 000 demo account if no snapshot exists.
         let (account, saved_positions) = match crate::persistence::load() {
             Some(snap) => (snap.account, snap.positions),
-            None       => (Account::new_demo(), vec![]),
+            None => (Account::new_demo(), vec![]),
         };
 
         let mut book = Book::new(account, specs);

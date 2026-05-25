@@ -104,7 +104,10 @@ export default function TradingPage() {
       <div className="hidden md:flex flex-1 overflow-hidden">
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-hidden">
-            <Chart candles={candles} lastTick={lastTick} symbol={selected} />
+            <Chart
+              candles={candles} lastTick={lastTick} symbol={selected}
+              binaries={binaries} settledHistory={settledHistory}
+            />
           </div>
           <Positions
             positions={positions}
@@ -129,7 +132,10 @@ export default function TradingPage() {
         {/* Content area */}
         <div className="flex-1 overflow-hidden">
           {mobileTab === 'chart' && (
-            <Chart candles={candles} lastTick={lastTick} symbol={selected} />
+            <Chart
+              candles={candles} lastTick={lastTick} symbol={selected}
+              binaries={binaries} settledHistory={settledHistory}
+            />
           )}
           {mobileTab === 'trade' && (
             <div className="h-full overflow-y-auto bg-panel">
