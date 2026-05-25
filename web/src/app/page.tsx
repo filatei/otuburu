@@ -22,6 +22,7 @@ export default function TradingPage() {
   const [selected,      setSelected]      = useState('frxEURUSD')
   const [mode,          setMode]          = useState<'demo' | 'real'>('demo')
   const [authOpen,      setAuthOpen]      = useState(false)
+  const [authError,     setAuthError]     = useState<string | null>(null)
   const [profileOpen,   setProfileOpen]   = useState(false)
   const [drawerOpen,    setDrawerOpen]    = useState(false)
   const [mobileTab,     setMobileTab]     = useState<MobileTab>('chart')
@@ -56,7 +57,12 @@ export default function TradingPage() {
   const selectedInfo = symbols.find(s => s.symbol === selected) ?? null
 
   const handleGoogleLogin = useCallback(async (credential: string) => {
-    await loginWithGoogle(credential)
+    setAuthError(null)
+    try {
+      await loginWithGoogle(credential)
+    } catch (err: any) {
+      setAuthError(err?.message ?? 'Sign-in failed. Please try again.')
+    }
   }, [loginWithGoogle])
 
   const handleTraded = useCallback(() => {
@@ -69,7 +75,7 @@ export default function TradingPage() {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-surface">
       {/* Modals & drawer */}
-      {authOpen    && <AuthModal onSuccess={handleGoogleLogin} />}
+      {authOpen    && <AuthModal onSuccess={handleGoogleLogin} error={authError} />}
       {profileOpen && user && <ProfileModal user={user} onClose={() => setProfileOpen(false)} />}
       <AppDrawer
         open={drawerOpen}
