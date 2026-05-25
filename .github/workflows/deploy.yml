@@ -198,6 +198,11 @@ jobs:
           strip_components: 1
 
       # ── DB schema (wallet PostgreSQL) ─────────────────────────────────────────
+      # NOTE: target must be the *directory*, not the filename. If target ends in
+      # the leaf name and that path doesn't yet exist, scp-action creates it as
+      # an empty DIRECTORY and extracts into it (broken). strip_components: 4
+      # removes "go-services/wallet/internal/db/" so the bare "schema.sql" lands
+      # at /opt/otuburu/backend/schema.sql as a file.
       - name: Copy schema.sql to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -206,8 +211,8 @@ jobs:
           key:      ${{ secrets.LINODE_SSH_KEY }}
           port:     ${{ secrets.LINODE_SSH_PORT }}
           source:   "go-services/wallet/internal/db/schema.sql"
-          target:   "/opt/otuburu/backend/schema.sql"
-          strip_components: 5
+          target:   "/opt/otuburu/backend"
+          strip_components: 4
 
       # ── Apache vhost (now includes /api/stake/ + /staking proxy) ─────────────
       - name: Copy Apache config to server
