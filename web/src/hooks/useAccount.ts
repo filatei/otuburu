@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
-import type { AccountState, Position, BinaryOption, SettledTrade } from '@/types'
+import type { AccountState, Position, BinaryOption, SettledTrade, SpotPosition } from '@/types'
 import { authFetch } from '@/lib/api'
 
 const API_BASE    = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
@@ -29,6 +29,7 @@ export interface GameState {
   account:        AccountState | null
   positions:      Position[]
   binaries:       BinaryOption[]
+  spots:          SpotPosition[]
   settledHistory: SettledTrade[]
   loading:        boolean
   refresh:        () => void       // one-shot HTTP fetch (post-trade fallback)
@@ -39,6 +40,7 @@ export function useAccount(accountId: string): GameState {
   const [account,        setAccount]        = useState<AccountState | null>(null)
   const [positions,      setPositions]      = useState<Position[]>([])
   const [binaries,       setBinaries]       = useState<BinaryOption[]>([])
+  const [spots,          setSpots]          = useState<SpotPosition[]>([])
   const [settledHistory, setSettledHistory] = useState<SettledTrade[]>([])
   const [loading,        setLoading]        = useState(true)
 
@@ -60,9 +62,10 @@ export function useAccount(accountId: string): GameState {
   // ── Core state application — shared by both WebSocket push and HTTP fetch ──
   const applyState = useCallback((data: unknown) => {
     const d = data as Record<string, unknown>
-    const newAccount:   AccountState   = (d.account   as AccountState)   ?? null
-    const newPositions: Position[]     = (d.positions as Position[])     ?? []
-    const newBinaries:  BinaryOption[] = (d.binaries  as BinaryOption[]) ?? []
+    const newAccount:   AccountState    = (d.account   as AccountState)    ?? null
+    const newPositions: Position[]      = (d.positions as Position[])      ?? []
+    const newBinaries:  BinaryOption[]  = (d.binaries  as BinaryOption[])  ?? []
+    const newSpots:     SpotPosition[]  = (d.spots     as SpotPosition[])  ?? []
     const newBalance = newAccount?.balance ?? null
 
     // Detect settled binaries (disappeared from live list since last update)
@@ -104,6 +107,7 @@ export function useAccount(accountId: string): GameState {
     setAccount(newAccount)
     setPositions(newPositions)
     setBinaries(newBinaries)
+    setSpots(newSpots)
     setLoading(false)
   }, [accountId])
 
@@ -126,15 +130,45 @@ export function useAccount(accountId: string): GameState {
     refresh()
   }, [refresh])
 
-  return { account, positions, binaries, settledHistory, loading, refresh, applyState }
+  return { account, positions, binaries, spots, settledHistory, loading, refresh, applyState }
 }
 
 // ─── Trade actions ────────────────────────────────────────────────────────────
 
-export async function placeCFD(accountId: string, symbol: string, side: 'BUY' | 'SELL', lots: number) {
+export async function placeCFD(
+  accountId: string,
+  symbol: string,
+  side: 'BUY' | 'SELL',
+  lots: number,
+  tp_profit?: number,
+  sl_loss?: number,
+) {
   const res = await authFetch(`${API_BASE}/api/order`, {
     method: 'POST',
-    body: JSON.stringify({ account_id: accountId, symbol, side, lots }),
+    body: JSON.stringify({ account_id: accountId, symbol, side, lots, tp_profit, sl_loss }),
+  })
+  return res.json()
+}
+
+export async function placeSpot(
+  accountId: string,
+  symbol: string,
+  side: 'BUY' | 'SELL',
+  stake: number,
+  tp_profit?: number,
+  sl_loss?: number,
+) {
+  const res = await authFetch(`${API_BASE}/api/spot`, {
+    method: 'POST',
+    body: JSON.stringify({ account_id: accountId, symbol, side, stake, tp_profit, sl_loss }),
+  })
+  return res.json()
+}
+
+export async function closeSpot(accountId: string, spotId: string) {
+  const res = await authFetch(`${API_BASE}/api/spot/${spotId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ account_id: accountId }),
   })
   return res.json()
 }

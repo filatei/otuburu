@@ -1,4 +1,4 @@
-//! Order book — CFD positions + Digital options book.
+//! Order book — CFD positions + Digital options + Spot positions.
 //!
 //! Production port of `../../engine/engine.js`.
 //! All state is in-memory in this crate; persistence (WAL + Postgres)
@@ -72,6 +72,13 @@ pub fn default_contract_specs() -> HashMap<String, ContractSpec> {
                 leverage: 50,
             },
         ),
+        (
+            "cryXAUUSD",
+            ContractSpec {
+                contract_size: 1.0, // 1 troy-ounce per lot
+                leverage: 20,
+            },
+        ),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v))
@@ -88,6 +95,20 @@ pub enum Side {
     Sell,
 }
 
+/// Why a position was auto-closed by the engine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AutoCloseReason {
+    TakeProfit,
+    StopLoss,
+    StopOut,
+    SpotTakeProfit,
+    SpotStopLoss,
+}
+
+/// A CFD position with optional take-profit / stop-loss.
+///
+/// `tp_profit` — close when unrealised_pnl ≥ tp_profit (USD amount).
+/// `sl_loss`   — close when unrealised_pnl ≤ −sl_loss  (positive magnitude, USD).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CfdPosition {
     pub id: Uuid,
@@ -100,6 +121,52 @@ pub struct CfdPosition {
     pub notional: f64,
     pub unrealised_pnl: f64,
     pub opened_at_ms: i64,
+    /// Optional take-profit: auto-close when profit ≥ this value (USD).
+    pub tp_profit: Option<f64>,
+    /// Optional stop-loss: auto-close when loss ≥ this value (positive, USD).
+    pub sl_loss: Option<f64>,
+}
+
+/// Result of an auto-close triggered by TP / SL / stop-out.
+#[derive(Debug, Clone)]
+pub struct AutoClosed {
+    pub position: CfdPosition,
+    pub exit: f64,
+    pub pnl: f64,
+    pub reason: AutoCloseReason,
+}
+
+// ──────────────────────────────────────────────────────────────
+// Spot Position
+// ──────────────────────────────────────────────────────────────
+
+/// Fractional spot position — 1:1 leverage, balance debited upfront.
+///
+/// `stake`     — USD amount committed (full value, no leverage).
+/// `units`     — asset units owned (stake / entry).
+/// `tp_profit` — optional: auto-close when profit ≥ this USD amount.
+/// `sl_loss`   — optional: auto-close when loss   ≥ this USD amount (positive magnitude).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpotPosition {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub symbol: String,
+    pub side: Side,
+    pub stake: f64,
+    pub units: f64,
+    pub entry: f64,
+    pub unrealised_pnl: f64,
+    pub opened_at_ms: i64,
+    pub tp_profit: Option<f64>,
+    pub sl_loss: Option<f64>,
+}
+
+/// Result of closing a spot position.
+#[derive(Debug, Clone)]
+pub struct SpotClosed {
+    pub position: SpotPosition,
+    pub exit: f64,
+    pub pnl: f64,
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -184,6 +251,7 @@ pub struct HouseStats {
     pub binary_count: u64,
     pub binary_wins: u64,
     pub cfd_count: u64,
+    pub spot_count: u64,
 }
 
 impl HouseStats {
@@ -197,6 +265,16 @@ impl HouseStats {
             Some(self.binary_wins as f64 / self.binary_count as f64)
         }
     }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Tick result from on_tick()
+// ──────────────────────────────────────────────────────────────
+
+pub struct TickResult {
+    pub binary_settlements: Vec<BinarySettlement>,
+    pub auto_closed_cfds: Vec<AutoClosed>,
+    pub auto_closed_spots: Vec<SpotClosed>,
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -231,6 +309,7 @@ pub struct Book {
     pub account: Account,
     pub specs: HashMap<String, ContractSpec>,
     positions: HashMap<Uuid, CfdPosition>,
+    spots: HashMap<Uuid, SpotPosition>,
     binaries: HashMap<Uuid, BinaryOption>,
     quotes: HashMap<String, Tick>,
     pub house: HouseStats,
@@ -242,6 +321,7 @@ impl Book {
             account,
             specs,
             positions: HashMap::new(),
+            spots: HashMap::new(),
             binaries: HashMap::new(),
             quotes: HashMap::new(),
             house: HouseStats::default(),
@@ -258,6 +338,16 @@ impl Book {
     /// Restores CFD positions from a persisted snapshot (called once on startup).
     pub fn restore_positions(&mut self, positions: Vec<CfdPosition>) {
         self.positions = positions.into_iter().map(|p| (p.id, p)).collect();
+    }
+
+    /// Returns a snapshot of all open spot positions for serialisation.
+    pub fn spots_snapshot(&self) -> Vec<SpotPosition> {
+        self.spots.values().cloned().collect()
+    }
+
+    /// Restores spot positions from a persisted snapshot (called once on startup).
+    pub fn restore_spots(&mut self, spots: Vec<SpotPosition>) {
+        self.spots = spots.into_iter().map(|p| (p.id, p)).collect();
     }
 
     // ── margin helpers ──────────────────────────────────────
@@ -285,12 +375,18 @@ impl Book {
 
     // ── CFD ────────────────────────────────────────────────
 
+    /// Open a CFD position.
+    ///
+    /// `tp_profit` — optional take-profit in USD (positive = profit target).
+    /// `sl_loss`   — optional stop-loss in USD (positive magnitude; max you're willing to lose).
     pub fn open_cfd(
         &mut self,
         account_id: Uuid,
         symbol: &str,
         side: Side,
         lots: f64,
+        tp_profit: Option<f64>,
+        sl_loss: Option<f64>,
     ) -> Result<CfdPosition, BookError> {
         if lots <= 0.0 || !lots.is_finite() {
             return Err(BookError::InvalidLots(lots));
@@ -331,6 +427,8 @@ impl Book {
             notional,
             unrealised_pnl: 0.0,
             opened_at_ms: chrono::Utc::now().timestamp_millis(),
+            tp_profit,
+            sl_loss,
         };
         self.positions.insert(pos.id, pos.clone());
         Ok(pos)
@@ -362,6 +460,104 @@ impl Book {
             .map(|s| s.contract_size)
             .unwrap_or(1.0);
         dir * (mark - p.entry) * p.lots * cs
+    }
+
+    // ── Spot ────────────────────────────────────────────────
+
+    /// Open a fractional spot position.
+    ///
+    /// The full `stake` is debited from balance immediately (no leverage).
+    /// `units` = stake / entry_price.
+    /// `tp_profit` / `sl_loss` work like CFD — in USD profit/loss magnitude.
+    pub fn open_spot(
+        &mut self,
+        account_id: Uuid,
+        symbol: &str,
+        side: Side,
+        stake: f64,
+        tp_profit: Option<f64>,
+        sl_loss: Option<f64>,
+    ) -> Result<SpotPosition, BookError> {
+        if stake <= 0.0 || !stake.is_finite() {
+            return Err(BookError::InvalidStake(stake));
+        }
+        if stake > self.account.balance {
+            return Err(BookError::InsufficientBalance {
+                need: stake,
+                have: self.account.balance,
+            });
+        }
+        let q = self
+            .quotes
+            .get(symbol)
+            .ok_or_else(|| BookError::NoQuote(symbol.into()))?
+            .clone();
+
+        // Use ask for buys, bid for sells (market-order fill)
+        let entry = if side == Side::Buy { q.ask } else { q.bid };
+        let units = stake / entry;
+
+        self.account.balance -= stake;
+        self.house.spot_count += 1;
+
+        let pos = SpotPosition {
+            id: Uuid::new_v4(),
+            account_id,
+            symbol: symbol.into(),
+            side,
+            stake,
+            units,
+            entry,
+            unrealised_pnl: 0.0,
+            opened_at_ms: chrono::Utc::now().timestamp_millis(),
+            tp_profit,
+            sl_loss,
+        };
+        self.spots.insert(pos.id, pos.clone());
+        Ok(pos)
+    }
+
+    /// Close a spot position at the current market price.
+    /// Returns the position, exit price, and P&L.
+    pub fn close_spot(&mut self, id: Uuid) -> Result<SpotClosed, BookError> {
+        let p = self
+            .spots
+            .remove(&id)
+            .ok_or(BookError::PositionNotFound(id))?;
+        let q = self
+            .quotes
+            .get(&p.symbol)
+            .ok_or_else(|| BookError::NoQuote(p.symbol.clone()))?
+            .clone();
+
+        // Close at bid for buys, ask for sells
+        let exit = if p.side == Side::Buy { q.bid } else { q.ask };
+        let current_value = p.units * exit;
+        let pnl = if p.side == Side::Buy {
+            current_value - p.stake
+        } else {
+            p.stake - current_value
+        };
+
+        // Credit back stake + PnL (pnl can be negative if a loss)
+        self.account.balance += p.stake + pnl;
+        self.account.realised_pnl += pnl;
+        self.house.total_client_pnl += pnl;
+
+        Ok(SpotClosed {
+            position: p,
+            exit,
+            pnl,
+        })
+    }
+
+    fn spot_pnl(p: &SpotPosition, mark: f64) -> f64 {
+        let current_value = p.units * mark;
+        if p.side == Side::Buy {
+            current_value - p.stake
+        } else {
+            p.stake - current_value
+        }
     }
 
     // ── Digital options ────────────────────────────────────
@@ -413,11 +609,13 @@ impl Book {
 
     // ── Tick processing ─────────────────────────────────────
 
-    /// Called on every incoming tick. Returns settled binary options.
-    pub fn on_tick(&mut self, tick: &Tick) -> Vec<BinarySettlement> {
+    /// Called on every incoming tick.
+    /// Returns a `TickResult` containing settled binaries, auto-closed CFDs,
+    /// and auto-closed spot positions.
+    pub fn on_tick(&mut self, tick: &Tick) -> TickResult {
         self.quotes.insert(tick.symbol.clone(), tick.clone());
 
-        // Mark-to-market open CFDs on this symbol
+        // ── Mark-to-market CFDs ─────────────────────────────
         let specs = &self.specs;
         for p in self
             .positions
@@ -434,7 +632,50 @@ impl Book {
             p.unrealised_pnl = dir * (mark - p.entry) * p.lots * cs;
         }
 
-        // Stop-out at 50% margin level (close worst position)
+        // ── Mark-to-market Spot ─────────────────────────────
+        for p in self
+            .spots
+            .values_mut()
+            .filter(|p| p.symbol == tick.symbol)
+        {
+            let mark = if p.side == Side::Buy { tick.bid } else { tick.ask };
+            p.unrealised_pnl = Self::spot_pnl(p, mark);
+        }
+
+        // ── CFD TP / SL auto-close ──────────────────────────
+        let tp_sl_ids: Vec<(Uuid, AutoCloseReason)> = self
+            .positions
+            .values()
+            .filter(|p| p.symbol == tick.symbol)
+            .filter_map(|p| {
+                if let Some(tp) = p.tp_profit {
+                    if p.unrealised_pnl >= tp {
+                        return Some((p.id, AutoCloseReason::TakeProfit));
+                    }
+                }
+                if let Some(sl) = p.sl_loss {
+                    if p.unrealised_pnl <= -sl {
+                        return Some((p.id, AutoCloseReason::StopLoss));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        let mut auto_closed_cfds: Vec<AutoClosed> = Vec::new();
+        for (id, reason) in tp_sl_ids {
+            if let Ok((pos, pnl)) = self.close_cfd(id) {
+                let exit = if pos.side == Side::Buy { tick.bid } else { tick.ask };
+                auto_closed_cfds.push(AutoClosed {
+                    position: pos,
+                    exit,
+                    pnl,
+                    reason,
+                });
+            }
+        }
+
+        // ── Stop-out at 50% margin level ────────────────────
         if self.margin_level() < 50.0 {
             if let Some(worst_id) = self
                 .positions
@@ -442,12 +683,47 @@ impl Book {
                 .min_by(|a, b| a.unrealised_pnl.partial_cmp(&b.unrealised_pnl).unwrap())
                 .map(|p| p.id)
             {
-                let _ = self.close_cfd(worst_id);
+                if let Ok((pos, pnl)) = self.close_cfd(worst_id) {
+                    let exit = if pos.side == Side::Buy { tick.bid } else { tick.ask };
+                    auto_closed_cfds.push(AutoClosed {
+                        position: pos,
+                        exit,
+                        pnl,
+                        reason: AutoCloseReason::StopOut,
+                    });
+                }
             }
         }
 
-        // Settle expiring binaries
-        let mut settled = Vec::new();
+        // ── Spot TP / SL auto-close ─────────────────────────
+        let spot_tp_sl_ids: Vec<(Uuid, AutoCloseReason)> = self
+            .spots
+            .values()
+            .filter(|p| p.symbol == tick.symbol)
+            .filter_map(|p| {
+                if let Some(tp) = p.tp_profit {
+                    if p.unrealised_pnl >= tp {
+                        return Some((p.id, AutoCloseReason::SpotTakeProfit));
+                    }
+                }
+                if let Some(sl) = p.sl_loss {
+                    if p.unrealised_pnl <= -sl {
+                        return Some((p.id, AutoCloseReason::SpotStopLoss));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        let mut auto_closed_spots: Vec<SpotClosed> = Vec::new();
+        for (id, _) in spot_tp_sl_ids {
+            if let Ok(closed) = self.close_spot(id) {
+                auto_closed_spots.push(closed);
+            }
+        }
+
+        // ── Settle expiring binaries ────────────────────────
+        let mut binary_settlements = Vec::new();
         let to_settle: Vec<Uuid> = self
             .binaries
             .values()
@@ -474,7 +750,7 @@ impl Book {
                     if won {
                         self.house.binary_wins += 1;
                     }
-                    settled.push(BinarySettlement {
+                    binary_settlements.push(BinarySettlement {
                         option: b,
                         exit_mid: tick.mid,
                         won,
@@ -483,13 +759,21 @@ impl Book {
                 }
             }
         }
-        settled
+
+        TickResult {
+            binary_settlements,
+            auto_closed_cfds,
+            auto_closed_spots,
+        }
     }
 
     // ── Snapshot ─────────────────────────────────────────────
 
     pub fn positions(&self) -> Vec<&CfdPosition> {
         self.positions.values().collect()
+    }
+    pub fn spots(&self) -> Vec<&SpotPosition> {
+        self.spots.values().collect()
     }
     pub fn binaries(&self) -> Vec<&BinaryOption> {
         self.binaries.values().collect()

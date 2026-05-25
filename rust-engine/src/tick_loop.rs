@@ -14,8 +14,15 @@ use crate::state::SharedState;
 use feed_generator::default_generators;
 
 pub fn start(state: SharedState) {
-    // ── Per-symbol tick tasks ─────────────────────────────────────────────────
-    for mut gen in default_generators() {
+    // ── Live price feeds (BTC/ETH/XAU) ───────────────────────────────────────
+    // These override the synthetic generators for the three live symbols.
+    // Synthetic generators still run for BOOM/CRASH and FX.
+    crate::live_feed::start(state.clone());
+
+    // ── Per-symbol tick tasks (synthetic) ────────────────────────────────────
+    // Skip symbols that are handled by live_feed to avoid duplicate ticks.
+    const LIVE_SYMBOLS: &[&str] = &["cryBTCUSD", "cryETHUSD", "cryXAUUSD"];
+    for mut gen in default_generators().into_iter().filter(|g| !LIVE_SYMBOLS.contains(&g.symbol())) {
         let state = state.clone();
         let cadence = crate::state::symbol_cadence_ms(gen.symbol());
 
@@ -38,9 +45,11 @@ pub fn start(state: SharedState) {
 
                     // Tick every account book.
                     let mut all_settled = Vec::new();
+                    let mut any_auto_close = false;
                     for book in inner.books.values_mut() {
-                        let settled = book.on_tick(&tick);
-                        for s in &settled {
+                        let result = book.on_tick(&tick);
+
+                        for s in &result.binary_settlements {
                             tracing::info!(
                                 binary_id = %s.option.id,
                                 account_id = %s.option.account_id,
@@ -49,17 +58,38 @@ pub fn start(state: SharedState) {
                                 "binary settled"
                             );
                         }
-                        all_settled.extend(settled);
+                        for ac in &result.auto_closed_cfds {
+                            tracing::info!(
+                                position_id = %ac.position.id,
+                                account_id = %ac.position.account_id,
+                                reason = ?ac.reason,
+                                pnl = ac.pnl,
+                                "CFD auto-closed"
+                            );
+                            any_auto_close = true;
+                        }
+                        for ac in &result.auto_closed_spots {
+                            tracing::info!(
+                                spot_id = %ac.position.id,
+                                account_id = %ac.position.account_id,
+                                pnl = ac.pnl,
+                                "spot auto-closed"
+                            );
+                            any_auto_close = true;
+                        }
+
+                        all_settled.extend(result.binary_settlements);
                     }
 
-                    // Snapshot only when something settled (balance changed).
-                    let maybe_snap = if !all_settled.is_empty() {
+                    // Snapshot when something changed balance.
+                    let maybe_snap = if !all_settled.is_empty() || any_auto_close {
                         let snap_books = inner
                             .books
                             .values()
                             .map(|book| crate::persistence::BookSnapshot {
                                 account: book.account.clone(),
                                 positions: book.positions_snapshot(),
+                                spots: book.spots_snapshot(),
                             })
                             .collect();
                         Some(crate::persistence::build(snap_books))
@@ -123,6 +153,7 @@ pub fn start(state: SharedState) {
                         .map(|book| crate::persistence::BookSnapshot {
                             account: book.account.clone(),
                             positions: book.positions_snapshot(),
+                            spots: book.spots_snapshot(),
                         })
                         .collect();
                     crate::persistence::build(snap_books)

@@ -273,7 +273,9 @@ func (h *Handler) Withdrawals(c *gin.Context) {
 	c.JSON(200, gin.H{"withdrawals": wds, "count": len(wds)})
 }
 
-// ApproveWithdrawal deducts from user account, broadcasts USDT from treasury, marks sent.
+// ApproveWithdrawal broadcasts USDT from treasury and marks the withdrawal sent.
+// NOTE: the user's balance was already deducted at request time (in Withdraw handler).
+// We must NOT deduct it again here.
 func (h *Handler) ApproveWithdrawal(c *gin.Context) {
 	ctx := c.Request.Context()
 	wid := c.Param("id")
@@ -292,14 +294,7 @@ func (h *Handler) ApproveWithdrawal(c *gin.Context) {
 		return
 	}
 
-	var balance float64
-	h.db.QueryRow(ctx, `SELECT balance FROM accounts WHERE id=$1`, accountID).Scan(&balance) //nolint:errcheck
-	if balance < amount {
-		c.JSON(400, gin.H{"error": "insufficient account balance"})
-		return
-	}
-
-	// Lock — set to approved to prevent double-spend
+	// Atomic lock — prevents double-processing a concurrent approval click.
 	if ct, err := h.db.Exec(ctx,
 		`UPDATE withdrawals SET status='approved' WHERE id=$1 AND status='pending'`, wid,
 	); err != nil || ct.RowsAffected() == 0 {
@@ -309,21 +304,20 @@ func (h *Handler) ApproveWithdrawal(c *gin.Context) {
 
 	txid, err := h.sendUSDTFromTreasury(ctx, toAddr, amount)
 	if err != nil {
-		// Rollback
+		// Roll the status back so the admin can retry.
 		h.db.Exec(ctx, `UPDATE withdrawals SET status='pending' WHERE id=$1`, wid) //nolint:errcheck
 		slog.Error("withdrawal broadcast failed", "id", wid, "err", err)
 		c.JSON(500, gin.H{"error": fmt.Sprintf("broadcast failed: %v", err)})
 		return
 	}
 
-	// Commit to DB atomically
+	// Mark sent + write ledger entry.  Balance was already deducted at request time.
 	tx, _ := h.db.Begin(ctx)
 	defer tx.Rollback(ctx) //nolint:errcheck
-	tx.Exec(ctx, `UPDATE accounts    SET balance = balance - $1 WHERE id = $2`, amount, accountID)
-	tx.Exec(ctx, `UPDATE withdrawals SET status='sent', txid=$1  WHERE id = $2`, txid, wid)
+	tx.Exec(ctx, `UPDATE withdrawals SET status='sent', txid=$1 WHERE id=$2`, txid, wid)
 	tx.Exec(ctx,
 		`INSERT INTO ledger (account_id, type, amount, status, ref, note)
-		 VALUES ($1,'withdrawal',$2,'confirmed',$3,'Withdrawal to external address')`,
+		 VALUES ($1,'withdrawal',$2,'confirmed',$3,'Withdrawal sent to external address')`,
 		accountID, -amount, txid,
 	)
 	tx.Commit(ctx) //nolint:errcheck
@@ -332,19 +326,57 @@ func (h *Handler) ApproveWithdrawal(c *gin.Context) {
 	c.JSON(200, gin.H{"status": "sent", "txid": txid})
 }
 
-// RejectWithdrawal marks a pending withdrawal as rejected (no funds moved).
+// RejectWithdrawal marks a pending withdrawal as rejected and refunds the reserved balance.
+// The balance was deducted at request time (in Withdraw), so we must return it here.
 func (h *Handler) RejectWithdrawal(c *gin.Context) {
+	ctx := c.Request.Context()
 	wid := c.Param("id")
+
 	var body struct {
 		Reason string `json:"reason"`
 	}
 	c.ShouldBindJSON(&body) //nolint:errcheck
 
-	h.db.Exec(c.Request.Context(), //nolint:errcheck
-		`UPDATE withdrawals SET status='rejected', txid=$1 WHERE id=$2 AND status='pending'`,
-		"Rejected: "+body.Reason, wid,
+	var accountID string
+	var amount float64
+	err := h.db.QueryRow(ctx,
+		`SELECT account_id, amount FROM withdrawals WHERE id=$1 AND status='pending'`, wid,
+	).Scan(&accountID, &amount)
+	if err != nil {
+		c.JSON(404, gin.H{"error": "pending withdrawal not found"})
+		return
+	}
+
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "db error"})
+		return
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Refund the reserved balance.
+	tx.Exec(ctx, `UPDATE accounts SET balance = balance + $1 WHERE id = $2`, amount, accountID)
+
+	// Mark rejected (use note column for reason; txid stays NULL).
+	reason := body.Reason
+	if reason == "" {
+		reason = "No reason given"
+	}
+	tx.Exec(ctx,
+		`UPDATE withdrawals SET status='rejected' WHERE id=$1 AND status='pending'`, wid)
+	tx.Exec(ctx,
+		`INSERT INTO ledger (account_id, type, amount, status, ref, note)
+		 VALUES ($1,'withdrawal_refund',$2,'confirmed',$3,$4)`,
+		accountID, amount, wid, "Withdrawal rejected: "+reason,
 	)
-	c.JSON(200, gin.H{"status": "rejected"})
+
+	if err := tx.Commit(ctx); err != nil {
+		c.JSON(500, gin.H{"error": "commit failed"})
+		return
+	}
+
+	slog.Info("withdrawal rejected + refunded", "id", wid, "amount", amount, "reason", reason)
+	c.JSON(200, gin.H{"status": "rejected", "refunded": amount})
 }
 
 // ManualSweep triggers an immediate sweep cycle.

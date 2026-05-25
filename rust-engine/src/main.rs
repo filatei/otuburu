@@ -11,6 +11,7 @@
 
 mod db;
 mod engine_service;
+mod live_feed;
 mod ohlc;
 mod persistence;
 mod state;

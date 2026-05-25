@@ -53,10 +53,12 @@ func Init(client *engine.Client) {
 //
 // Protected routes (valid JWT required, account_id must belong to the caller):
 //   - GET  /state           — account state
-//   - POST /order           — place CFD order
+//   - POST /order           — place CFD order (supports tp_profit, sl_loss)
 //   - POST /close           — close position (legacy)
 //   - DELETE /position/:id  — close position
 //   - POST /binary          — place binary option
+//   - POST /spot            — place fractional spot position
+//   - DELETE /spot/:id      — close spot position
 //   - POST /account         — provision engine account
 //   - GET  /accounts        — list accounts (own only)
 //   - GET  /history         — trade history
@@ -73,6 +75,8 @@ func RegisterRoutes(rg *gin.RouterGroup) {
 		protected.POST("/close", handleClose)
 		protected.DELETE("/position/:id", handleDeletePos)
 		protected.POST("/binary", handleBinary)
+		protected.POST("/spot", handleSpot)
+		protected.DELETE("/spot/:id", handleDeleteSpot)
 		protected.POST("/account", handleCreateAccount)
 		protected.GET("/accounts", handleListAccounts)
 		protected.GET("/history", handleTradeHistory)
@@ -140,6 +144,9 @@ type placeOrderReq struct {
 	Symbol    string  `json:"symbol"     binding:"required"`
 	Side      string  `json:"side"       binding:"required"`
 	Lots      float64 `json:"lots"       binding:"required"`
+	// Optional TP/SL — 0 or omitted means not set
+	TpProfit float64 `json:"tp_profit"`
+	SlLoss   float64 `json:"sl_loss"`
 }
 
 func handleOrder(c *gin.Context) {
@@ -160,6 +167,73 @@ func handleOrder(c *gin.Context) {
 		Symbol:    req.Symbol,
 		Side:      req.Side,
 		Lots:      req.Lots,
+		TpProfit:  req.TpProfit,
+		SlLoss:    req.SlLoss,
+	})
+	if err != nil {
+		engineErr(c, err)
+		return
+	}
+	writeProtoJSON(c, http.StatusOK, resp)
+}
+
+// ── Spot trading ──────────────────────────────────────────────────────────────
+
+type placeSpotReq struct {
+	AccountID string  `json:"account_id" binding:"required"`
+	Symbol    string  `json:"symbol"     binding:"required"`
+	Side      string  `json:"side"       binding:"required"`
+	Stake     float64 `json:"stake"      binding:"required"`
+	TpProfit  float64 `json:"tp_profit"`
+	SlLoss    float64 `json:"sl_loss"`
+}
+
+func handleSpot(c *gin.Context) {
+	var req placeSpotReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if forbiddenAccount(c, req.AccountID) {
+		return
+	}
+
+	ctx, cancel := rpcCtx()
+	defer cancel()
+
+	resp, err := engineClient.Service().PlaceSpot(ctx, &enginepb.PlaceSpotRequest{
+		AccountId: req.AccountID,
+		Symbol:    req.Symbol,
+		Side:      req.Side,
+		Stake:     req.Stake,
+		TpProfit:  req.TpProfit,
+		SlLoss:    req.SlLoss,
+	})
+	if err != nil {
+		engineErr(c, err)
+		return
+	}
+	writeProtoJSON(c, http.StatusOK, resp)
+}
+
+func handleDeleteSpot(c *gin.Context) {
+	spotID := c.Param("id")
+
+	var body struct {
+		AccountID string `json:"account_id"`
+	}
+	_ = c.ShouldBindJSON(&body)
+
+	if forbiddenAccount(c, body.AccountID) {
+		return
+	}
+
+	ctx, cancel := rpcCtx()
+	defer cancel()
+
+	resp, err := engineClient.Service().CloseSpot(ctx, &enginepb.CloseSpotRequest{
+		AccountId: body.AccountID,
+		SpotId:    spotID,
 	})
 	if err != nil {
 		engineErr(c, err)

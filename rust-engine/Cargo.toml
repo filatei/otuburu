@@ -18,6 +18,8 @@ license     = "UNLICENSED"
 # async runtime
 tokio        = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }   # "sync" needed for BroadcastStream wrapper
+# HTTP client (live price feeds)
+reqwest      = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 # serialisation
 serde        = { version = "1", features = ["derive"] }
 serde_json   = "1"
@@ -74,6 +76,7 @@ config.workspace            = true
 uuid.workspace              = true
 chrono.workspace            = true
 sqlx.workspace              = true
+reqwest.workspace           = true
 
 [build-dependencies]
 tonic-build = "0.12"

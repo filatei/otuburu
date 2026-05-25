@@ -2,6 +2,7 @@ package wallet
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,51 +19,85 @@ func NewHandler(db *pgxpool.Pool, hd *HDWallet) *Handler {
 	return &Handler{db: db, hd: hd}
 }
 
-// GET /wallet/deposit-address — returns (or creates) the user's TRC20 deposit address
+// GET /wallet/deposit-address — returns (or creates) the user's TRC20 deposit address.
+// Uses a table-level lock to avoid a TOCTOU race on hd_index allocation.
 func (h *Handler) DepositAddress(c *gin.Context) {
 	claims := c.MustGet("claims").(*auth.Claims)
 	ctx := c.Request.Context()
 
+	// Fast path: address already allocated.
 	var address string
 	err := h.db.QueryRow(ctx,
 		`SELECT address FROM deposit_addresses WHERE user_id=$1`, claims.UserID,
 	).Scan(&address)
-
-	if err != nil {
-		// Allocate a new HD index
-		var hdIndex int
-		err2 := h.db.QueryRow(ctx,
-			`SELECT COALESCE(MAX(hd_index)+1, 0) FROM deposit_addresses`,
-		).Scan(&hdIndex)
-		if err2 != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "index error"})
-			return
-		}
-
-		addr, err3 := h.hd.Address(uint32(hdIndex))
-		if err3 != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "address derivation failed"})
-			return
-		}
-
-		_, err4 := h.db.Exec(ctx,
-			`INSERT INTO deposit_addresses (user_id, address, hd_index) VALUES ($1,$2,$3)`,
-			claims.UserID, addr, hdIndex,
-		)
-		if err4 != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "store failed"})
-			return
-		}
-		address = addr
+	if err == nil {
+		c.JSON(http.StatusOK, depositAddressResponse(address))
+		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	// Slow path: allocate a new HD index under an exclusive lock so two concurrent
+	// requests can't get the same index.
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Lock the table for the duration of this transaction.
+	if _, err = tx.Exec(ctx, `LOCK TABLE deposit_addresses IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "lock failed"})
+		return
+	}
+
+	// Re-check inside the lock (another goroutine may have inserted already).
+	lockErr := tx.QueryRow(ctx,
+		`SELECT address FROM deposit_addresses WHERE user_id=$1`, claims.UserID,
+	).Scan(&address)
+	if lockErr == nil {
+		tx.Rollback(ctx) //nolint:errcheck
+		c.JSON(http.StatusOK, depositAddressResponse(address))
+		return
+	}
+
+	var hdIndex int
+	if err = tx.QueryRow(ctx,
+		`SELECT COALESCE(MAX(hd_index)+1, 0) FROM deposit_addresses`,
+	).Scan(&hdIndex); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "index error"})
+		return
+	}
+
+	addr, err := h.hd.Address(uint32(hdIndex))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "address derivation failed"})
+		return
+	}
+
+	if _, err = tx.Exec(ctx,
+		`INSERT INTO deposit_addresses (user_id, address, hd_index) VALUES ($1,$2,$3)`,
+		claims.UserID, addr, hdIndex,
+	); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "store failed"})
+		return
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "commit failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, depositAddressResponse(addr))
+}
+
+func depositAddressResponse(address string) gin.H {
+	return gin.H{
 		"address":  address,
 		"network":  "TRC20",
 		"token":    "USDT",
 		"contract": USDTContract,
 		"note":     "Send USDT (TRC20) to this address. Balance credited after 1 confirmation (~1 min).",
-	})
+	}
 }
 
 // GET /wallet/balance — real + demo balances
@@ -113,13 +148,13 @@ func (h *Handler) Transactions(c *gin.Context) {
 	for rows.Next() {
 		var r txRow
 		var ref, note *string
-		var createdAt interface{}
-		rows.Scan(&r.ID, &r.Type, &r.Amount, &r.Status, &ref, &note, &createdAt) //nolint:errcheck
+		var createdAt time.Time
+		if err := rows.Scan(&r.ID, &r.Type, &r.Amount, &r.Status, &ref, &note, &createdAt); err != nil {
+			continue
+		}
 		r.Ref = ref
 		r.Note = note
-		if createdAt != nil {
-			r.CreatedAt = ""
-		}
+		r.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 		txns = append(txns, r)
 	}
 

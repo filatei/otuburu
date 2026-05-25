@@ -21,7 +21,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -38,28 +37,25 @@ const (
 // Handler processes Paystack payment events.
 type Handler struct {
 	db             *pgxpool.Pool
-	secretKey      string  // PAYSTACK_SECRET_KEY env var
-	usdToNGN       float64 // USD_TO_NGN_RATE env var (e.g. 1600)
-	gatewayURL     string  // GATEWAY_URL — for post-deposit engine sync
-	internalSecret string  // INTERNAL_SECRET
+	secretKey      string       // PAYSTACK_SECRET_KEY env var
+	rates          *RateFetcher // live USD→NGN rate (never nil)
+	gatewayURL     string       // GATEWAY_URL — for post-deposit engine sync
+	internalSecret string       // INTERNAL_SECRET
 	client         *http.Client
 }
 
 // New creates a Paystack handler.  Returns nil if PAYSTACK_SECRET_KEY is not set.
-func New(db *pgxpool.Pool) *Handler {
+// The supplied RateFetcher (already Started) provides the live USD/NGN rate.
+func New(db *pgxpool.Pool, rates *RateFetcher) *Handler {
 	secret := os.Getenv("PAYSTACK_SECRET_KEY")
 	if secret == "" {
 		slog.Warn("PAYSTACK_SECRET_KEY not set — Paystack payments disabled")
 		return nil
 	}
-	rate, _ := strconv.ParseFloat(os.Getenv("USD_TO_NGN_RATE"), 64)
-	if rate <= 0 {
-		rate = 1600.0 // sensible default
-	}
 	return &Handler{
 		db:             db,
 		secretKey:      secret,
-		usdToNGN:       rate,
+		rates:          rates,
 		gatewayURL:     os.Getenv("GATEWAY_URL"),
 		internalSecret: os.Getenv("INTERNAL_SECRET"),
 		client:         &http.Client{Timeout: 15 * time.Second},
@@ -102,7 +98,7 @@ func (h *Handler) Initiate(c *gin.Context) {
 		return
 	}
 
-	amountKobo := int64(req.AmountUSD * h.usdToNGN * 100) // Paystack uses kobo (1/100 NGN)
+	amountKobo := int64(req.AmountUSD * h.rates.GetUSDToNGN() * 100) // Paystack uses kobo (1/100 NGN)
 	ref := fmt.Sprintf("OTU-%d-%x", time.Now().UnixMilli(), rand.Int31()) //nolint:gosec
 
 	callbackURL := os.Getenv("APP_URL") // e.g. https://otuburu.torama.money
@@ -161,7 +157,7 @@ func (h *Handler) Initiate(c *gin.Context) {
 		"authorization_url": ps.Data.AuthorizationURL,
 		"reference":         ref,
 		"amount_usd":        req.AmountUSD,
-		"amount_ngn":        req.AmountUSD * h.usdToNGN,
+		"amount_ngn":        req.AmountUSD * h.rates.GetUSDToNGN(),
 	})
 }
 
@@ -235,7 +231,7 @@ func (h *Handler) creditPaystack(ctx context.Context, ref, accountID string, amo
 	}
 
 	// Recompute USD amount from kobo in case metadata was tampered
-	amountUSDSafe := float64(amountKobo) / 100.0 / h.usdToNGN
+	amountUSDSafe := float64(amountKobo) / 100.0 / h.rates.GetUSDToNGN()
 
 	tx, err := h.db.Begin(ctx)
 	if err != nil {

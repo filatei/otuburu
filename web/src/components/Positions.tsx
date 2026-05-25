@@ -1,12 +1,13 @@
 'use client'
 import { useState } from 'react'
 import clsx from 'clsx'
-import type { Position, BinaryOption, Tick, SettledTrade } from '@/types'
-import { closePosition } from '@/hooks/useAccount'
+import type { Position, BinaryOption, SpotPosition, Tick, SettledTrade } from '@/types'
+import { closePosition, closeSpot } from '@/hooks/useAccount'
 
 interface Props {
   positions:      Position[]
   binaries:       BinaryOption[]
+  spots:          SpotPosition[]
   settledHistory: SettledTrade[]
   ticks:          Record<string, Tick>
   accountId:      string
@@ -17,11 +18,11 @@ interface Props {
 type Tab = 'open' | 'recent' | 'history'
 
 export default function Positions({
-  positions, binaries, settledHistory, ticks, accountId, onRefresh, mobile,
+  positions, binaries, spots, settledHistory, ticks, accountId, onRefresh, mobile,
 }: Props) {
   const [tab, setTab] = useState<Tab>('open')
 
-  const openCount    = positions.length + binaries.length
+  const openCount    = positions.length + binaries.length + spots.length
   const recentTrades = settledHistory.slice(0, 10)
   const winCount     = settledHistory.filter(t => t.outcome === 'win').length
   // Net P&L: payout received minus stake paid. Win = payout − stake; Loss = −stake.
@@ -129,6 +130,41 @@ export default function Positions({
                       <td className="px-3 py-1.5 text-dim text-[10px]">Settling…</td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            )}
+
+            {spots.length > 0 && (
+              <table className="w-full text-xs mt-1">
+                <thead>
+                  <tr className="text-dim border-b border-border">
+                    {['Symbol','Side','Stake','Units','Entry','P&L',''].map(h => (
+                      <th key={h} className="px-3 py-1 text-left font-normal">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {spots.map(s => {
+                    const pnl = s.unrealised_pnl
+                    return (
+                      <tr key={s.id} className="border-b border-border/50 hover:bg-surface/50">
+                        <td className="px-3 py-1.5 font-semibold">{s.symbol}</td>
+                        <td className={clsx('px-3 py-1.5 font-semibold', s.side === 'BUY' ? 'text-up' : 'text-down')}>{s.side}</td>
+                        <td className="px-3 py-1.5 num">${s.stake.toFixed(2)}</td>
+                        <td className="px-3 py-1.5 num">{s.units.toFixed(6)}</td>
+                        <td className="px-3 py-1.5 num">{s.entry.toFixed(2)}</td>
+                        <td className={clsx('px-3 py-1.5 num font-semibold', pnl >= 0 ? 'text-up' : 'text-down')}>
+                          {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <button
+                            onClick={async () => { await closeSpot(accountId, s.id); onRefresh() }}
+                            className="px-2 py-0.5 text-[10px] rounded border border-down/30 text-down hover:bg-down/10"
+                          >Close</button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             )}

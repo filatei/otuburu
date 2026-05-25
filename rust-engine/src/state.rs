@@ -29,6 +29,7 @@ pub fn symbol_cadence_ms(symbol: &str) -> u64 {
         "frxGBPUSD" => 500,
         "cryBTCUSD" => 500,
         "cryETHUSD" => 500,
+        "cryXAUUSD" => 1000,
         _ => 1000, // BOOM1000, CRASH1000
     }
 }
@@ -49,6 +50,8 @@ pub fn symbol_meta(specs: &HashMap<String, ContractSpec>) -> Vec<SymbolMeta> {
         .map(|(sym, spec)| {
             let kind = if sym.starts_with("frx") {
                 "FX"
+            } else if *sym == "cryXAUUSD" {
+                "METAL"
             } else if sym.starts_with("cry") {
                 "CRYPTO"
             } else {
@@ -130,7 +133,8 @@ impl SharedState {
         let metas = symbol_meta(&specs);
 
         // ── Restore or create books ───────────────────────────────────────────
-        // Snapshot v2 holds a Vec<BookSnapshot>; v1 or missing → start fresh.
+        // Snapshot v3 holds Vec<BookSnapshot> with positions + spots.
+        // v2/v1 or missing → start fresh (spots defaults to empty via serde default).
         let books: HashMap<Uuid, Book> = match crate::persistence::load() {
             Some(snap) => snap
                 .books
@@ -139,6 +143,7 @@ impl SharedState {
                     let id = bs.account.id;
                     let mut book = Book::new(bs.account, specs.clone());
                     book.restore_positions(bs.positions);
+                    book.restore_spots(bs.spots);
                     (id, book)
                 })
                 .collect(),

@@ -13,16 +13,19 @@
 
 use anyhow::Result;
 use chrono::Utc;
-use order_book::{Account, CfdPosition};
+use order_book::{Account, CfdPosition, SpotPosition};
 use serde::{Deserialize, Serialize};
 
-pub const SNAPSHOT_VERSION: u32 = 2;
+pub const SNAPSHOT_VERSION: u32 = 3;
 
-/// One account and its open CFD positions.
+/// One account, its open CFD positions, and its open spot positions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BookSnapshot {
     pub account: Account,
     pub positions: Vec<CfdPosition>,
+    /// Spot positions — defaults to empty vec on older snapshot versions.
+    #[serde(default)]
+    pub spots: Vec<SpotPosition>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

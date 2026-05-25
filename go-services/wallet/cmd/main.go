@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -81,7 +82,12 @@ func main() {
 	protected.POST("/wallet/withdraw", walletH.Withdraw)
 
 	// ── Payment channels ──────────────────────────────────────────────────────
-	paystackH := payments.New(pool)
+	// Seed rate from env; RateFetcher will override with live data within seconds.
+	seedRate, _ := strconv.ParseFloat(os.Getenv("USD_TO_NGN_RATE"), 64)
+	rateFetcher := payments.NewRateFetcher(seedRate)
+	rateFetcher.Start(ctx)
+
+	paystackH := payments.New(pool, rateFetcher)
 	paystackH.RegisterRoutes(protected, r.Group("/"))
 
 	// ── Admin: back-office dashboard ──────────────────────────────────────────

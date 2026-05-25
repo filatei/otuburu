@@ -14,6 +14,7 @@ message Tick {
   uint64 tick_index = 6;
 }
 
+// CFD position (with optional TP / SL)
 message Position {
   string id             = 1;  // UUID
   string account_id     = 2;
@@ -25,6 +26,24 @@ message Position {
   double notional       = 8;
   double unrealised_pnl = 9;
   int64  opened_at_ms   = 10;
+  // Optional TP/SL — 0 means not set
+  double tp_profit      = 11;  // close when profit ≥ this USD amount
+  double sl_loss        = 12;  // close when loss   ≥ this USD amount (positive)
+}
+
+// Fractional spot position (1:1 leverage, balance debited upfront)
+message SpotPosition {
+  string id             = 1;
+  string account_id     = 2;
+  string symbol         = 3;
+  string side           = 4;  // "BUY" | "SELL"
+  double stake          = 5;  // USD committed
+  double units          = 6;  // asset units owned
+  double entry          = 7;
+  double unrealised_pnl = 8;
+  int64  opened_at_ms   = 9;
+  double tp_profit      = 10;
+  double sl_loss        = 11;
 }
 
 message BinaryOption {
@@ -63,6 +82,7 @@ message HouseStats {
   double binary_win_rate       = 8;
   double payout_multiplier     = 9;
   double expected_house_edge   = 10;
+  uint64 spot_count            = 11;
 }
 
 // Candle for chart history
@@ -90,13 +110,20 @@ message SettledTrade {
   int64  settled_at_ms = 12;
 }
 
+// Closed spot position (auto-closed by TP/SL or manual close)
+message ClosedSpot {
+  SpotPosition position = 1;
+  double       exit     = 2;
+  double       pnl      = 3;
+}
+
 // ─── EngineService ───────────────────────────────────────────────────────────
 
 service EngineService {
   // Stream of live ticks for all symbols
   rpc SubscribeTicks (SubscribeTicksRequest)  returns (stream Tick);
 
-  // Full state snapshot (account + positions + binaries + quotes + house)
+  // Full state snapshot (account + positions + binaries + spots + quotes + house)
   rpc GetState       (GetStateRequest)        returns (StateSnapshot);
 
   // CFD order management
@@ -105,6 +132,10 @@ service EngineService {
 
   // Digital options
   rpc PlaceBinary    (PlaceBinaryRequest)     returns (PlaceBinaryResponse);
+
+  // Fractional spot trading
+  rpc PlaceSpot      (PlaceSpotRequest)       returns (PlaceSpotResponse);
+  rpc CloseSpot      (CloseSpotRequest)       returns (CloseSpotResponse);
 
   // Symbol catalogue
   rpc GetSymbols     (GetSymbolsRequest)      returns (GetSymbolsResponse);
@@ -132,18 +163,22 @@ message GetStateRequest {
 }
 
 message StateSnapshot {
-  AccountState          account   = 1;
-  repeated Position     positions = 2;
-  repeated BinaryOption binaries  = 3;
-  map<string, Tick>     quotes    = 4;
-  HouseStats            house     = 5;
+  AccountState              account   = 1;
+  repeated Position         positions = 2;
+  repeated BinaryOption     binaries  = 3;
+  map<string, Tick>         quotes    = 4;
+  HouseStats                house     = 5;
+  repeated SpotPosition     spots     = 6;
 }
 
 message PlaceOrderRequest {
   string account_id = 1;
   string symbol     = 2;
-  string side       = 3;  // "BUY" | "SELL"
+  string side       = 3;   // "BUY" | "SELL"
   double lots       = 4;
+  // Optional TP/SL — omit or set to 0 to disable
+  double tp_profit  = 5;
+  double sl_loss    = 6;
 }
 
 message PlaceOrderResponse {
@@ -186,6 +221,38 @@ message PlaceBinaryResponse {
   }
 }
 
+// ── Spot trading ───────────────────────────────────────────────────────────────
+
+message PlaceSpotRequest {
+  string account_id = 1;
+  string symbol     = 2;
+  string side       = 3;   // "BUY" | "SELL"
+  double stake      = 4;   // USD amount to commit
+  double tp_profit  = 5;   // optional take-profit in USD profit (0 = disabled)
+  double sl_loss    = 6;   // optional stop-loss in USD loss magnitude (0 = disabled)
+}
+
+message PlaceSpotResponse {
+  oneof result {
+    SpotPosition spot  = 1;
+    string       error = 2;
+  }
+}
+
+message CloseSpotRequest {
+  string account_id = 1;
+  string spot_id    = 2;
+}
+
+message CloseSpotResponse {
+  oneof result {
+    ClosedSpot closed = 1;
+    string     error  = 2;
+  }
+}
+
+// ── Symbols ────────────────────────────────────────────────────────────────────
+
 message GetSymbolsRequest {}
 
 message GetSymbolsResponse {
@@ -194,7 +261,7 @@ message GetSymbolsResponse {
 
 message SymbolInfo {
   string symbol        = 1;
-  string type          = 2;  // "BOOM_CRASH" | "FX" | "CRYPTO"
+  string type          = 2;  // "BOOM_CRASH" | "FX" | "CRYPTO" | "METAL"
   uint32 leverage      = 3;
   double contract_size = 4;
   uint32 cadence_ms    = 5;  // tick interval

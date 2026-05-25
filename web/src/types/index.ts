@@ -9,7 +9,7 @@ export interface Tick {
 
 export interface SymbolInfo {
   symbol:        string
-  type:          'BOOM_CRASH' | 'FX' | 'CRYPTO'
+  type:          'BOOM_CRASH' | 'FX' | 'CRYPTO' | 'METAL'
   leverage:      number
   contract_size: number
   cadence_ms:    number
@@ -26,6 +26,23 @@ export interface Position {
   notional:       number
   unrealised_pnl: number
   opened_at_ms:   number
+  tp_profit?:     number   // 0 = not set
+  sl_loss?:       number   // 0 = not set
+}
+
+/** Fractional spot position (1:1 leverage, stake debited upfront) */
+export interface SpotPosition {
+  id:             string
+  account_id:     string
+  symbol:         string
+  side:           'BUY' | 'SELL'
+  stake:          number   // USD committed
+  units:          number   // asset units
+  entry:          number
+  unrealised_pnl: number
+  opened_at_ms:   number
+  tp_profit?:     number
+  sl_loss?:       number
 }
 
 export interface BinaryOption {

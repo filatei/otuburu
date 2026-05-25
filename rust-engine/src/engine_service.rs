@@ -11,12 +11,14 @@ use order_book::{Direction, Side};
 use crate::pb::{
     engine_service_server::EngineService, AccountState, BinaryOption as PbBinary,
     Candle as PbCandle, ClosePositionRequest, ClosePositionResponse, ClosedPosition,
+    CloseSpotRequest, CloseSpotResponse, ClosedSpot,
     CreateAccountRequest, CreateAccountResponse, GetCandlesRequest, GetCandlesResponse,
     GetStateRequest, GetSymbolsRequest, GetSymbolsResponse, GetTradeHistoryRequest,
     GetTradeHistoryResponse, HouseStats, ListAccountsRequest, ListAccountsResponse,
     PlaceBinaryRequest, PlaceBinaryResponse, PlaceOrderRequest, PlaceOrderResponse,
-    Position as PbPosition, SettledTrade as PbSettledTrade, StateSnapshot, SubscribeTicksRequest,
-    SymbolInfo, Tick as PbTick,
+    PlaceSpotRequest, PlaceSpotResponse,
+    Position as PbPosition, SettledTrade as PbSettledTrade, SpotPosition as PbSpot,
+    StateSnapshot, SubscribeTicksRequest, SymbolInfo, Tick as PbTick,
 };
 use crate::state::SharedState;
 
@@ -49,6 +51,28 @@ fn to_pb_position(p: &order_book::CfdPosition) -> PbPosition {
         notional: p.notional,
         unrealised_pnl: p.unrealised_pnl,
         opened_at_ms: p.opened_at_ms,
+        tp_profit: p.tp_profit.unwrap_or(0.0),
+        sl_loss: p.sl_loss.unwrap_or(0.0),
+    }
+}
+
+fn to_pb_spot(p: &order_book::SpotPosition) -> PbSpot {
+    PbSpot {
+        id: p.id.to_string(),
+        account_id: p.account_id.to_string(),
+        symbol: p.symbol.clone(),
+        side: if p.side == Side::Buy {
+            "BUY".into()
+        } else {
+            "SELL".into()
+        },
+        stake: p.stake,
+        units: p.units,
+        entry: p.entry,
+        unrealised_pnl: p.unrealised_pnl,
+        opened_at_ms: p.opened_at_ms,
+        tp_profit: p.tp_profit.unwrap_or(0.0),
+        sl_loss: p.sl_loss.unwrap_or(0.0),
     }
 }
 
@@ -98,6 +122,7 @@ fn to_pb_house(book: &order_book::Book) -> HouseStats {
         binary_win_rate: h.binary_win_rate().unwrap_or(0.0),
         payout_multiplier: order_book::PAYOUT_MULTIPLIER,
         expected_house_edge: order_book::BINARY_HOUSE_EDGE,
+        spot_count: h.spot_count,
     }
 }
 
@@ -170,6 +195,7 @@ impl EngineService for EngineServiceImpl {
                 let account = to_pb_account(book);
                 let positions = book.positions().iter().map(|p| to_pb_position(p)).collect();
                 let binaries = book.binaries().iter().map(|b| to_pb_binary(b)).collect();
+                let spots = book.spots().iter().map(|s| to_pb_spot(s)).collect();
                 let quotes = book
                     .quotes()
                     .iter()
@@ -180,6 +206,7 @@ impl EngineService for EngineServiceImpl {
                     account: Some(account),
                     positions,
                     binaries,
+                    spots,
                     quotes,
                     house: Some(house),
                 }));
@@ -192,6 +219,7 @@ impl EngineService for EngineServiceImpl {
         let account = to_pb_account(book);
         let positions = book.positions().iter().map(|p| to_pb_position(p)).collect();
         let binaries = book.binaries().iter().map(|b| to_pb_binary(b)).collect();
+        let spots = book.spots().iter().map(|s| to_pb_spot(s)).collect();
         let quotes = book
             .quotes()
             .iter()
@@ -202,6 +230,7 @@ impl EngineService for EngineServiceImpl {
             account: Some(account),
             positions,
             binaries,
+            spots,
             quotes,
             house: Some(house),
         }))
@@ -220,9 +249,12 @@ impl EngineService for EngineServiceImpl {
         };
         let account_id = parse_account_id(&r.account_id)?;
 
+        let tp = if r.tp_profit > 0.0 { Some(r.tp_profit) } else { None };
+        let sl = if r.sl_loss > 0.0 { Some(r.sl_loss) } else { None };
+
         let mut inner = self.state.inner.write().await;
         let book = inner.get_or_create_book(account_id, "Demo", true, 0.0);
-        let result = book.open_cfd(account_id, &r.symbol, side, r.lots);
+        let result = book.open_cfd(account_id, &r.symbol, side, r.lots, tp, sl);
 
         let resp = match result {
             Ok(pos) => PlaceOrderResponse {
@@ -313,6 +345,67 @@ impl EngineService for EngineServiceImpl {
                 result: Some(crate::pb::place_binary_response::Result::Error(
                     e.to_string(),
                 )),
+            },
+        };
+        Ok(Response::new(resp))
+    }
+
+    // ── Place spot position ──────────────────────────────────────────────────
+    async fn place_spot(
+        &self,
+        req: Request<PlaceSpotRequest>,
+    ) -> Result<Response<PlaceSpotResponse>, Status> {
+        let r = req.into_inner();
+        let side = match r.side.as_str() {
+            "BUY" => Side::Buy,
+            "SELL" => Side::Sell,
+            other => return Err(Status::invalid_argument(format!("invalid side: {other}"))),
+        };
+        let account_id = parse_account_id(&r.account_id)?;
+        let tp = if r.tp_profit > 0.0 { Some(r.tp_profit) } else { None };
+        let sl = if r.sl_loss > 0.0 { Some(r.sl_loss) } else { None };
+
+        let mut inner = self.state.inner.write().await;
+        let book = inner.get_or_create_book(account_id, "Demo", true, 0.0);
+        let result = book.open_spot(account_id, &r.symbol, side, r.stake, tp, sl);
+
+        let resp = match result {
+            Ok(pos) => PlaceSpotResponse {
+                result: Some(crate::pb::place_spot_response::Result::Spot(to_pb_spot(&pos))),
+            },
+            Err(e) => PlaceSpotResponse {
+                result: Some(crate::pb::place_spot_response::Result::Error(e.to_string())),
+            },
+        };
+        Ok(Response::new(resp))
+    }
+
+    // ── Close spot position ──────────────────────────────────────────────────
+    async fn close_spot(
+        &self,
+        req: Request<CloseSpotRequest>,
+    ) -> Result<Response<CloseSpotResponse>, Status> {
+        let r = req.into_inner();
+        let spot_id = Uuid::parse_str(&r.spot_id)
+            .map_err(|_| Status::invalid_argument("invalid spot_id"))?;
+        let account_id = parse_account_id(&r.account_id)?;
+
+        let mut inner = self.state.inner.write().await;
+        let book = inner
+            .books
+            .get_mut(&account_id)
+            .ok_or_else(|| Status::not_found("account not found"))?;
+
+        let resp = match book.close_spot(spot_id) {
+            Ok(closed) => CloseSpotResponse {
+                result: Some(crate::pb::close_spot_response::Result::Closed(ClosedSpot {
+                    position: Some(to_pb_spot(&closed.position)),
+                    exit: closed.exit,
+                    pnl: closed.pnl,
+                })),
+            },
+            Err(e) => CloseSpotResponse {
+                result: Some(crate::pb::close_spot_response::Result::Error(e.to_string())),
             },
         };
         Ok(Response::new(resp))

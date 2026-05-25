@@ -53,7 +53,7 @@ export default function TradingPage() {
 
   // applyState is passed to useTicks so WebSocket state pushes update account
   // without any HTTP polling — eliminates the mod_evasive rate-limit trigger.
-  const { account, positions, binaries, settledHistory, refresh, applyState } = useAccount(accountId)
+  const { account, positions, binaries, spots, settledHistory, refresh, applyState } = useAccount(accountId)
 
   const { lastTick, allTicks, candles, connected } = useTicks(selected, applyState, accountId)
 
@@ -80,7 +80,7 @@ export default function TradingPage() {
     refreshBalances()
   }, [refresh, refreshBalances])
 
-  const openCount = positions.length + binaries.length
+  const openCount = positions.length + binaries.length + spots.length
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-surface">
@@ -130,6 +130,7 @@ export default function TradingPage() {
           <Positions
             positions={positions}
             binaries={binaries}
+            spots={spots}
             settledHistory={settledHistory}
             ticks={allTicks}
             accountId={accountId}
@@ -173,6 +174,7 @@ export default function TradingPage() {
               <Positions
                 positions={positions}
                 binaries={binaries}
+                spots={spots}
                 settledHistory={settledHistory}
                 ticks={allTicks}
                 accountId={accountId}
