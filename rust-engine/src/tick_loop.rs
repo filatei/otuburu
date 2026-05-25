@@ -22,7 +22,10 @@ pub fn start(state: SharedState) {
     // ── Per-symbol tick tasks (synthetic) ────────────────────────────────────
     // Skip symbols that are handled by live_feed to avoid duplicate ticks.
     const LIVE_SYMBOLS: &[&str] = &["cryBTCUSD", "cryETHUSD", "cryXAUUSD"];
-    for mut gen in default_generators().into_iter().filter(|g| !LIVE_SYMBOLS.contains(&g.symbol())) {
+    for mut gen in default_generators()
+        .into_iter()
+        .filter(|g| !LIVE_SYMBOLS.contains(&g.symbol()))
+    {
         let state = state.clone();
         let cadence = crate::state::symbol_cadence_ms(gen.symbol());
 

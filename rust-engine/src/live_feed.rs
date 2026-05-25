@@ -59,7 +59,11 @@ async fn fetch_binance(
     let bt: BinanceBookTicker = resp.json().await.ok()?;
     let bid: f64 = bt.bid_price.parse().ok()?;
     let ask: f64 = bt.ask_price.parse().ok()?;
-    if bid > 0.0 && ask > bid { Some((bid, ask)) } else { None }
+    if bid > 0.0 && ask > bid {
+        Some((bid, ask))
+    } else {
+        None
+    }
 }
 
 // ── Frankfurter (XAU/USD) ─────────────────────────────────────────────────────
@@ -81,7 +85,11 @@ async fn fetch_xauusd(client: &reqwest::Client) -> Option<f64> {
         .ok()?;
     let fr: FrankfurterResp = resp.json().await.ok()?;
     let price = *fr.rates.get("USD")?;
-    if price > 0.0 { Some(price) } else { None }
+    if price > 0.0 {
+        Some(price)
+    } else {
+        None
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
