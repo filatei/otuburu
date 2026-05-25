@@ -28,9 +28,9 @@ use crate::state::SharedState;
 
 // ── Spread constants (all in % of mid) ───────────────────────────────────────
 
-/// BTC / ETH: 0.05% half-spread (5 bps each side)
-const CRYPTO_HALF_SPREAD_PCT: f64 = 0.0005;
-/// Gold: 0.15% half-spread (15 bps each side)
+/// Gold: 0.15% half-spread (15 bps each side). Used to synthesise bid/ask from
+/// Frankfurter's mid-price. BTC/ETH come from Binance bookTicker with real
+/// bid/ask, so no synthetic spread is needed there.
 const GOLD_HALF_SPREAD_PCT: f64 = 0.0015;
 
 // ── Binance book ticker ───────────────────────────────────────────────────────
