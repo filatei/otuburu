@@ -201,7 +201,13 @@ impl OhlcStore {
     }
 
     /// Return candles for a symbol + resolution in `[from_s, to_s]` (unix seconds).
-    pub fn get_candles(&self, symbol: &str, res: Resolution, from_s: i64, to_s: i64) -> Vec<Candle> {
+    pub fn get_candles(
+        &self,
+        symbol: &str,
+        res: Resolution,
+        from_s: i64,
+        to_s: i64,
+    ) -> Vec<Candle> {
         match self.symbols.get(symbol) {
             Some(sym) => match sym.buffers.get(&res) {
                 Some(buf) => buf.candles_in_range(from_s, to_s),

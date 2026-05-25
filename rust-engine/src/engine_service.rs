@@ -10,13 +10,13 @@ use order_book::{Direction, Side};
 
 use crate::pb::{
     engine_service_server::EngineService, AccountState, BinaryOption as PbBinary,
-    ClosePositionRequest, ClosePositionResponse, ClosedPosition, Candle as PbCandle,
+    Candle as PbCandle, ClosePositionRequest, ClosePositionResponse, ClosedPosition,
     CreateAccountRequest, CreateAccountResponse, GetCandlesRequest, GetCandlesResponse,
     GetStateRequest, GetSymbolsRequest, GetSymbolsResponse, GetTradeHistoryRequest,
     GetTradeHistoryResponse, HouseStats, ListAccountsRequest, ListAccountsResponse,
     PlaceBinaryRequest, PlaceBinaryResponse, PlaceOrderRequest, PlaceOrderResponse,
-    Position as PbPosition, SettledTrade as PbSettledTrade, StateSnapshot,
-    SubscribeTicksRequest, SymbolInfo, Tick as PbTick,
+    Position as PbPosition, SettledTrade as PbSettledTrade, StateSnapshot, SubscribeTicksRequest,
+    SymbolInfo, Tick as PbTick,
 };
 use crate::state::SharedState;
 
@@ -228,7 +228,9 @@ impl EngineService for EngineServiceImpl {
                 )),
             },
             Err(e) => PlaceOrderResponse {
-                result: Some(crate::pb::place_order_response::Result::Error(e.to_string())),
+                result: Some(crate::pb::place_order_response::Result::Error(
+                    e.to_string(),
+                )),
             },
         };
         Ok(Response::new(resp))
@@ -305,7 +307,9 @@ impl EngineService for EngineServiceImpl {
                 )),
             },
             Err(e) => PlaceBinaryResponse {
-                result: Some(crate::pb::place_binary_response::Result::Error(e.to_string())),
+                result: Some(crate::pb::place_binary_response::Result::Error(
+                    e.to_string(),
+                )),
             },
         };
         Ok(Response::new(resp))
@@ -395,8 +399,9 @@ impl EngineService for EngineServiceImpl {
         req: Request<GetCandlesRequest>,
     ) -> Result<Response<GetCandlesResponse>, Status> {
         let r = req.into_inner();
-        let res = crate::ohlc::Resolution::from_str(&r.resolution)
-            .ok_or_else(|| Status::invalid_argument(format!("unknown resolution: {}", r.resolution)))?;
+        let res = crate::ohlc::Resolution::from_str(&r.resolution).ok_or_else(|| {
+            Status::invalid_argument(format!("unknown resolution: {}", r.resolution))
+        })?;
 
         let from_s = r.from_ms / 1000;
         let to_s = if r.to_ms == 0 {
