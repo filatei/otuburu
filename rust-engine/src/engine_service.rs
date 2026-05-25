@@ -444,6 +444,7 @@ impl EngineService for EngineServiceImpl {
                 contract_size: m.contract_size,
                 cadence_ms: m.cadence_ms as u32,
                 display_divisor: m.display_divisor,
+                display_symbol: m.display_symbol.clone(),
             })
             .collect();
         Ok(Response::new(GetSymbolsResponse { symbols }))

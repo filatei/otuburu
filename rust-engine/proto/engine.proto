@@ -260,7 +260,7 @@ message GetSymbolsResponse {
 }
 
 message SymbolInfo {
-  string symbol          = 1;
+  string symbol          = 1;  // internal id, e.g. "cryBTCUSD" — used in API calls
   string type            = 2;  // "BOOM_CRASH" | "FX" | "CRYPTO" | "METAL"
   uint32 leverage        = 3;
   double contract_size   = 4;
@@ -270,6 +270,10 @@ message SymbolInfo {
   // assets (e.g. BTC=1000 shows $108 instead of $108k). PnL is always in real
   // USD and never divided. Default 1.0 = no scaling.
   double display_divisor = 6;
+  // User-facing symbol name, e.g. "BTCUSD" for internal "cryBTCUSD". Frontends
+  // should use this for all rendering; `symbol` (field 1) is the internal id
+  // used in API calls. Defaults to `symbol` unchanged when no rename applies.
+  string display_symbol  = 7;
 }
 
 // ── Account management ────────────────────────────────────────────────────────

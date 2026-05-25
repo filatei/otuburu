@@ -46,14 +46,40 @@ pub struct SymbolMeta {
     /// the proto. Storage and math always use true prices; this is applied at
     /// render time. Default 1.0 = no scaling.
     pub display_divisor: f64,
+    /// User-facing symbol name (e.g. "BTCUSD" for internal "cryBTCUSD").
+    /// Frontends render this; internal id stays in `symbol`.
+    pub display_symbol: String,
+}
+
+/// Strip the historical `cry`/`frx` namespace prefix to produce the
+/// user-facing symbol name. Returns the input unchanged when no prefix
+/// applies (e.g. BOOM500, CRASH1000). XAU keeps its three-letter code (no
+/// longer mislabelled as "crypto").
+pub fn symbol_display_name(symbol: &str) -> &str {
+    symbol
+        .strip_prefix("cry")
+        .or_else(|| symbol.strip_prefix("frx"))
+        .unwrap_or(symbol)
 }
 
 /// Display divisor used to scale high-priced assets for retail UX. Engine
-/// stores true prices; frontends divide for presentation. Returns 1.0 for
-/// symbols where no scaling is wanted. Per-symbol values are filled in by
-/// the fractional-spot rollout.
-pub fn symbol_display_divisor(_symbol: &str) -> f64 {
-    1.0
+/// stores true prices; frontends divide for presentation. PnL is in real USD
+/// and never divided. Returns 1.0 when no scaling is wanted.
+///
+/// Tuned for typical mid-2026 spot prices so display values land in a
+/// retail-friendly $10–$500 range:
+///   - cryBTCUSD ÷ 1000 → BTC ~$108k shows as ~$108
+///   - cryETHUSD ÷ 10   → ETH ~$3.9k shows as ~$390
+///   - cryXAUUSD ÷ 10   → XAU ~$3.3k shows as ~$330
+///
+/// Adjust if prices drift far enough that the display values leave the band.
+pub fn symbol_display_divisor(symbol: &str) -> f64 {
+    match symbol {
+        "cryBTCUSD" => 1000.0,
+        "cryETHUSD" => 10.0,
+        "cryXAUUSD" => 10.0,
+        _ => 1.0,
+    }
 }
 
 pub fn symbol_meta(specs: &HashMap<String, ContractSpec>) -> Vec<SymbolMeta> {
@@ -76,6 +102,7 @@ pub fn symbol_meta(specs: &HashMap<String, ContractSpec>) -> Vec<SymbolMeta> {
                 leverage: spec.leverage,
                 cadence_ms: symbol_cadence_ms(sym),
                 display_divisor: symbol_display_divisor(sym),
+                display_symbol: symbol_display_name(sym).to_string(),
             }
         })
         .collect()
