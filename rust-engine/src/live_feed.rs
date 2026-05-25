@@ -4,8 +4,12 @@
 //!   - cryBTCUSD → BTCUSDT
 //!   - cryETHUSD → ETHUSDT
 //!
-//! Frankfurter REST `https://api.frankfurter.app/latest?from=XAU&to=USD` (free):
-//!   - cryXAUUSD (Gold spot)
+//! Yahoo Finance chart endpoint `query1.finance.yahoo.com/v8/finance/chart/GC=F`
+//! (no API key, unofficial but widely used):
+//!   - cryXAUUSD → COMEX gold futures (GC=F) as a proxy for spot XAU/USD.
+//!     Futures basis vs spot is small (~$0.50–$5 per oz) and acceptable for
+//!     a display-only synthetic feed. Frankfurter was tried first but it
+//!     doesn't carry metals — every fetch failed.
 //!
 //! Each task polls on a fixed cadence (500 ms for crypto, 2 s for gold), builds a
 //! synthetic-width spread around the mid, and fires the resulting `Tick` into every
@@ -64,25 +68,46 @@ async fn fetch_binance(
     }
 }
 
-// ── Frankfurter (XAU/USD) ─────────────────────────────────────────────────────
+// ── Yahoo Finance (XAU/USD via COMEX gold futures GC=F) ──────────────────────
+
+/// Mozilla-style User-Agent override for Yahoo. Their chart endpoint sometimes
+/// rejects custom UA strings, so we masquerade as a browser on this one call.
+const YAHOO_UA: &str = "Mozilla/5.0 (otuburu-engine)";
 
 #[derive(serde::Deserialize)]
-struct FrankfurterResp {
-    rates: std::collections::HashMap<String, f64>,
+struct YahooChartResp {
+    chart: YahooChart,
+}
+
+#[derive(serde::Deserialize)]
+struct YahooChart {
+    result: Option<Vec<YahooResult>>,
+}
+
+#[derive(serde::Deserialize)]
+struct YahooResult {
+    meta: YahooMeta,
+}
+
+#[derive(serde::Deserialize)]
+struct YahooMeta {
+    #[serde(rename = "regularMarketPrice")]
+    regular_market_price: Option<f64>,
 }
 
 async fn fetch_xauusd(client: &reqwest::Client) -> Option<f64> {
-    // XAU is priced in USD per troy ounce; Frankfurter gives us USD/XAU.
-    // We want XAU/USD (how many USD per ounce), so we take the reciprocal.
-    // However Frankfurter's `from=XAU&to=USD` actually returns 1 XAU = N USD directly.
+    // COMEX gold futures (GC=F) as a proxy for spot XAU/USD. Trades roughly
+    // Sun 18:00 ET → Fri 17:00 ET; outside those hours the price stays at
+    // the last close (which is fine for our display purposes).
     let resp = client
-        .get("https://api.frankfurter.app/latest?from=XAU&to=USD")
+        .get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F")
+        .header(reqwest::header::USER_AGENT, YAHOO_UA)
         .timeout(Duration::from_secs(8))
         .send()
         .await
         .ok()?;
-    let fr: FrankfurterResp = resp.json().await.ok()?;
-    let price = *fr.rates.get("USD")?;
+    let yc: YahooChartResp = resp.json().await.ok()?;
+    let price = yc.chart.result?.into_iter().next()?.meta.regular_market_price?;
     if price > 0.0 {
         Some(price)
     } else {
@@ -259,7 +284,12 @@ fn spawn_gold(state: SharedState, client: Arc<reqwest::Client>, cadence_ms: u64)
                     *last.lock().await = Some(mid);
                 }
                 None => {
-                    warn!("gold fetch failed — using last known price");
+                    let have_last = last.lock().await.is_some();
+                    if have_last {
+                        warn!("gold fetch failed — using last known price");
+                    } else {
+                        warn!("gold fetch failed — no price yet, symbol will be silent until first success");
+                    }
                 }
             }
 
