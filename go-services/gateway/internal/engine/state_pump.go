@@ -1,9 +1,12 @@
-// state_pump.go — periodically fetches engine state and broadcasts it over
-// the WebSocket hub as a {"type":"state","data":{...}} message.
+// state_pump.go — periodically fetches per-account engine state and routes it
+// to the correct WebSocket clients via the hub.
 //
-// This replaces the frontend's HTTP polling of GET /api/state, eliminating
-// the repeated requests that trigger mod_evasive rate limiting and
-// causing the "stuck after trade" / Forbidden bug.
+// Each connected client registers its account_id when it opens the WebSocket
+// (/ws?account_id=<uuid>).  The pump collects the distinct set of connected
+// account IDs every second, fetches a StateSnapshot for each one, and delivers
+// it only to the clients that belong to that account.
+//
+// Tick messages continue to be broadcast to all clients (fan-out).
 package engine
 
 import (
@@ -22,9 +25,20 @@ var stateMarshaler = protojson.MarshalOptions{
 	EmitUnpopulated: true, // include balance:0, positions:[] etc.
 }
 
-// RunStatePump fetches the full engine state every second and broadcasts it
-// to all connected WebSocket clients. Blocks until ctx is cancelled.
-func RunStatePump(ctx context.Context, client *Client, hub Broadcaster) {
+// StateHub is the subset of the ws.Hub interface the state pump needs.
+type StateHub interface {
+	// Broadcast fans a message out to every connected client (used for ticks).
+	Broadcast(msg []byte)
+	// AccountIDs returns the distinct non-empty account IDs currently connected.
+	AccountIDs() []string
+	// BroadcastToAccount delivers a message only to clients registered under accountID.
+	BroadcastToAccount(accountID string, msg []byte)
+}
+
+// RunStatePump fetches per-account engine state every second and routes each
+// snapshot only to the WebSocket clients that own that account.
+// Blocks until ctx is cancelled.
+func RunStatePump(ctx context.Context, client *Client, hub StateHub) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -33,23 +47,28 @@ func RunStatePump(ctx context.Context, client *Client, hub Broadcaster) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			msg, err := fetchStateMsg(ctx, client)
-			if err != nil {
-				slog.Warn("state pump: fetch failed", "err", err)
-				continue
+			accountIDs := hub.AccountIDs()
+			for _, accountID := range accountIDs {
+				msg, err := fetchStateMsg(ctx, client, accountID)
+				if err != nil {
+					slog.Warn("state pump: fetch failed", "account_id", accountID, "err", err)
+					continue
+				}
+				hub.BroadcastToAccount(accountID, msg)
 			}
-			hub.Broadcast(msg)
 		}
 	}
 }
 
-// fetchStateMsg calls GetState on the engine and returns a JSON-encoded
-// WebSocket message: {"type":"state","data":{...StateSnapshot...}}
-func fetchStateMsg(ctx context.Context, client *Client) ([]byte, error) {
+// fetchStateMsg calls GetState on the engine for the given accountID and returns
+// a JSON-encoded WebSocket message: {"type":"state","data":{...StateSnapshot...}}
+func fetchStateMsg(ctx context.Context, client *Client, accountID string) ([]byte, error) {
 	rpcCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	snap, err := client.svc.GetState(rpcCtx, &enginepb.GetStateRequest{})
+	snap, err := client.svc.GetState(rpcCtx, &enginepb.GetStateRequest{
+		AccountId: accountID,
+	})
 	if err != nil {
 		return nil, err
 	}

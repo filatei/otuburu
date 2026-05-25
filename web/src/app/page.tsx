@@ -52,7 +52,7 @@ export default function TradingPage() {
   // without any HTTP polling — eliminates the mod_evasive rate-limit trigger.
   const { account, positions, binaries, settledHistory, refresh, applyState } = useAccount(accountId)
 
-  const { lastTick, allTicks, candles, connected } = useTicks(selected, applyState)
+  const { lastTick, allTicks, candles, connected } = useTicks(selected, applyState, accountId)
 
   const selectedInfo = symbols.find(s => s.symbol === selected) ?? null
 

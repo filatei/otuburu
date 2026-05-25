@@ -11,8 +11,9 @@ const CANDLE_SECONDS = 5  // aggregate ticks into 5-second candles
 // useAccount passes its applyState here so it receives engine state via WebSocket
 // instead of polling GET /api/state every second.
 export function useTicks(
-  symbol:   string,
-  onState?: (data: unknown) => void,
+  symbol:    string,
+  onState?:  (data: unknown) => void,
+  accountId?: string,
 ) {
   const [lastTick,  setLastTick]  = useState<Tick | null>(null)
   const [allTicks,  setAllTicks]  = useState<Record<string, Tick>>({})
@@ -47,19 +48,20 @@ export function useTicks(
     })
   }, [])
 
-  const connect = useCallback(() => {
+  const connect = useCallback((acctId?: string) => {
     if (wsRef.current) {
       wsRef.current.onclose = null
       wsRef.current.close()
     }
 
-    const ws = new WebSocket(WS_URL)
+    const url = acctId ? `${WS_URL}?account_id=${encodeURIComponent(acctId)}` : WS_URL
+    const ws = new WebSocket(url)
     wsRef.current = ws
 
     ws.onopen  = () => setConnected(true)
     ws.onclose = () => {
       setConnected(false)
-      retryTimer.current = setTimeout(connect, 2000)
+      retryTimer.current = setTimeout(() => connect(acctId), 2000)
     }
     ws.onerror = () => ws.close()
 
@@ -86,18 +88,18 @@ export function useTicks(
     }
   }, [symbol, buildCandle])
 
-  // Reconnect when symbol changes (reset candles)
+  // Reconnect when symbol OR accountId changes (accountId change = new state route)
   useEffect(() => {
     setCandles([])
     candleRef.current = null
     setLastTick(null)
-    connect()
+    connect(accountId)
     return () => {
       retryTimer.current && clearTimeout(retryTimer.current)
       wsRef.current && wsRef.current.close()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol])
+  }, [symbol, accountId])
 
   return { lastTick, allTicks, candles, connected }
 }
