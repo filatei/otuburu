@@ -143,6 +143,7 @@ export default function TradingPage() {
           symbol={selected}
           info={selectedInfo}
           lastTick={lastTick}
+          account={account}
           accountId={accountId}
           onTraded={handleTraded}
         />
@@ -166,6 +167,7 @@ export default function TradingPage() {
                 symbol={selected}
                 info={selectedInfo}
                 lastTick={lastTick}
+                account={account}
                 accountId={accountId}
                 onTraded={() => { handleTraded(); setMobileTab('positions') }}
                 mobile

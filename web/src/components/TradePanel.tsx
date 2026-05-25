@@ -1,24 +1,28 @@
 'use client'
 import { useState } from 'react'
 import clsx from 'clsx'
-import type { Tick, SymbolInfo } from '@/types'
+import type { Tick, SymbolInfo, AccountState } from '@/types'
 import { placeCFD, placeBinary, placeSpot } from '@/hooks/useAccount'
-import { displayNameOf, divisorOf, formatPrice, priceDecimals } from '@/lib/symbols'
+import { displayNameOf, divisorOf, formatPrice, priceDecimals, MIN_SPOT_STAKE_USD } from '@/lib/symbols'
 
 interface Props {
   symbol:    string
   info:      SymbolInfo | null
   lastTick:  Tick | null
+  account:   AccountState | null
   accountId: string
   onTraded:  () => void
   mobile?:   boolean
 }
 
+/** Quick-stake chip values in USD. MAX is computed from balance. */
+const QUICK_STAKES = [10, 50, 100, 500]
+
 type Mode = 'binary' | 'cfd' | 'spot'
 
 const PAYOUT = 0.85  // house pays 85 % on binary wins
 
-export default function TradePanel({ symbol, info, lastTick, accountId, onTraded, mobile }: Props) {
+export default function TradePanel({ symbol, info, lastTick, account, accountId, onTraded, mobile }: Props) {
   const [mode,      setMode]      = useState<Mode>('binary')
   const [stake,     setStake]     = useState('10')
   const [lots,      setLots]      = useState('0.01')
@@ -70,12 +74,6 @@ export default function TradePanel({ symbol, info, lastTick, accountId, onTraded
   const decimals    = priceDecimals(info)
   const displaySym  = displayNameOf(info, symbol)
   const divisor     = divisorOf(info)
-  // Spot units are shown in DISPLAY units so the user sees a meaningful count
-  // (e.g. 0.46 BTC-units at $108 each, not 0.000460 BTC at $108,000 each).
-  // Engine still computes true units = stake / true_ask on the backend.
-  const spotUnits   = lastTick && spotNum > 0
-    ? ((spotNum * divisor) / lastTick.ask).toFixed(info?.type === 'FX' ? 4 : 4)
-    : '—'
 
   // Auto-switch away from Spot if symbol doesn't support it
   const activeMode: Mode = mode === 'spot' && !isSpotSym ? 'cfd' : mode
@@ -183,20 +181,64 @@ export default function TradePanel({ symbol, info, lastTick, accountId, onTraded
           </>
 
         ) : (
-          /* Spot tab */
+          /* ── Fractional Spot tab ─────────────────────────────────────────────
+           * Buy-only opening. Sell happens by closing an existing position from
+           * the Positions table. Balance-aware quick chips + prominent fractional
+           * preview + +1% profit hint + min-stake warning.
+           */
           <>
-            <Field label="Stake (USD)">
-              <NumberInput value={spotStake} onChange={setSpotStake} min={1} step={10} />
+            <Field label="Investment ($)">
+              <NumberInput value={spotStake} onChange={setSpotStake} min={MIN_SPOT_STAKE_USD} step={10} />
+              <QuickChips
+                value={spotNum}
+                balance={account?.balance ?? null}
+                onPick={(v) => setSpotStake(String(v))}
+              />
             </Field>
 
-            {lastTick && (
-              <div className="bg-surface rounded-lg p-3 text-sm">
-                <Row label="You pay"  val={`$${spotNum.toFixed(2)}`} />
-                <Row label="You get"  val={`${spotUnits} ${displaySym}`} color="text-up" />
-                <Row label="Leverage" val="1:1" color="text-dim" />
-                <Row label="Max loss" val={`$${spotNum.toFixed(2)}`} color="text-dim" />
-              </div>
-            )}
+            {lastTick && (() => {
+              const displayPrice = lastTick.ask / divisor
+              const displayUnits = spotNum > 0 ? (spotNum * divisor) / lastTick.ask : 0
+              const profitOn1pct = spotNum * 0.01
+              const belowMin     = spotNum > 0 && spotNum < MIN_SPOT_STAKE_USD
+              const overBalance  = account ? spotNum > account.balance : false
+
+              return (
+                <div className="flex flex-col gap-3">
+                  {/* Prominent fractional preview */}
+                  <div className="bg-surface rounded-lg p-3">
+                    <div className="text-dim text-[10px] uppercase tracking-wider mb-1">You'll receive</div>
+                    <div className="num text-2xl font-bold text-up">
+                      {displayUnits > 0 ? displayUnits.toFixed(4) : '—'} <span className="text-text text-sm font-medium">{displaySym}</span>
+                    </div>
+                    <div className="text-dim text-[11px] num mt-0.5">
+                      at {displayPrice.toFixed(decimals)} each
+                    </div>
+                  </div>
+
+                  {/* +1% profit hint */}
+                  {spotNum > 0 && (
+                    <div className="text-[11px] text-dim leading-relaxed">
+                      A +1% move in {displaySym} = <span className="text-up font-semibold num">+${profitOn1pct.toFixed(2)}</span> profit
+                      {' · '}
+                      <span className="text-dim">balance ${account?.balance.toFixed(2) ?? '—'}</span>
+                    </div>
+                  )}
+
+                  {/* Validation hints */}
+                  {belowMin && (
+                    <div className="text-[11px] text-down/90 bg-down/10 rounded px-2 py-1">
+                      Minimum investment is ${MIN_SPOT_STAKE_USD.toFixed(2)}
+                    </div>
+                  )}
+                  {overBalance && (
+                    <div className="text-[11px] text-down/90 bg-down/10 rounded px-2 py-1">
+                      Exceeds available balance
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* TP / SL toggle */}
             <button
@@ -217,9 +259,12 @@ export default function TradePanel({ symbol, info, lastTick, accountId, onTraded
               </div>
             )}
 
-            <div className="flex gap-2 pt-2">
-              <TradeBtn label="▲ Buy"  color="up"   onClick={() => doTrade('BUY')}  busy={busy} />
-              <TradeBtn label="▼ Sell" color="down" onClick={() => doTrade('SELL')} busy={busy} />
+            {/* Single Buy CTA — Sell is done by closing from Positions */}
+            <div className="pt-2">
+              <TradeBtn label={`Buy ${displaySym}`} color="up" onClick={() => doTrade('BUY')} busy={busy} />
+            </div>
+            <div className="text-[10px] text-dim text-center -mt-2 leading-tight">
+              To sell, close your position from the Positions tab.
             </div>
           </>
         )}
@@ -294,6 +339,49 @@ function Row({ label, val, color = 'text-text' }: { label: string; val: string; 
     <div className="flex justify-between items-center py-0.5">
       <span className="text-dim text-xs">{label}</span>
       <span className={clsx('num text-xs font-medium', color)}>{val}</span>
+    </div>
+  )
+}
+
+/** Quick-pick stake chips: $10 / $50 / $100 / $500 / MAX (=balance, floored). */
+function QuickChips({ value, balance, onPick }: {
+  value:   number
+  balance: number | null
+  onPick:  (v: number) => void
+}) {
+  const max = balance !== null && balance > 0 ? Math.floor(balance) : null
+  return (
+    <div className="flex gap-1 mt-1 flex-wrap">
+      {QUICK_STAKES.map(v => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onPick(v)}
+          disabled={max !== null && v > max}
+          className={clsx(
+            'px-2 py-0.5 text-[10px] num rounded border transition-colors disabled:opacity-30 disabled:cursor-not-allowed',
+            value === v
+              ? 'border-brand text-brand bg-brand/10'
+              : 'border-border text-dim hover:text-text hover:border-text/40',
+          )}
+        >
+          ${v}
+        </button>
+      ))}
+      {max !== null && max > 0 && (
+        <button
+          type="button"
+          onClick={() => onPick(max)}
+          className={clsx(
+            'px-2 py-0.5 text-[10px] uppercase rounded border transition-colors',
+            value === max
+              ? 'border-brand text-brand bg-brand/10'
+              : 'border-border text-dim hover:text-text hover:border-text/40',
+          )}
+        >
+          Max
+        </button>
+      )}
     </div>
   )
 }

@@ -36,10 +36,14 @@ export function toDisplayPrice(info: SymbolInfo | null | undefined, truePrice: n
 
 /**
  * Decimal-place rule for price formatting. Bumps up by log10(divisor) so
- * divided values keep useful precision (BTC display $108.42 vs $108).
+ * divided values keep useful precision — but capped so we don't emit retail
+ * noise like "77.52699".
  *
- * Defaults by type: FX=5, METAL=2, CRYPTO=2, BOOM_CRASH=3. Override with
- * the explicit `decimals` argument if a callsite has stronger preferences.
+ * Type defaults: FX=5, METAL=2, CRYPTO=2, BOOM_CRASH=3. The divisor bump is
+ * capped at +2 decimals — enough to show typical bid/ask spreads at the
+ * display scale (BTC ÷1000 → 4 dp shows spread of 0.0025; ETH ÷10 → 3 dp).
+ * Override with the explicit `decimals` argument when a callsite has
+ * stronger preferences.
  */
 export function priceDecimals(info: SymbolInfo | null | undefined): number {
   if (!info) return 3
@@ -48,11 +52,13 @@ export function priceDecimals(info: SymbolInfo | null | undefined): number {
     info.type === 'METAL'      ? 2 :
     info.type === 'CRYPTO'     ? 2 :
     /* BOOM_CRASH */             3
-  // Each ÷10 of the price needs roughly one more decimal to show the same
-  // resolution. Keep it bounded so we don't emit "0.000000123".
-  const bumped = base + Math.max(0, Math.round(Math.log10(divisorOf(info))))
-  return Math.min(bumped, 6)
+  const divisorBump = Math.min(2, Math.max(0, Math.round(Math.log10(divisorOf(info)))))
+  return base + divisorBump
 }
+
+/** Minimum stake (USD) for a spot trade. Currently a flat $1 across symbols;
+ *  could later vary per symbol if a venue has higher floors. */
+export const MIN_SPOT_STAKE_USD = 1
 
 /** Format a true price as a display string with divisor + decimals applied. */
 export function formatPrice(
