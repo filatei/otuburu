@@ -633,12 +633,12 @@ impl Book {
         }
 
         // ── Mark-to-market Spot ─────────────────────────────
-        for p in self
-            .spots
-            .values_mut()
-            .filter(|p| p.symbol == tick.symbol)
-        {
-            let mark = if p.side == Side::Buy { tick.bid } else { tick.ask };
+        for p in self.spots.values_mut().filter(|p| p.symbol == tick.symbol) {
+            let mark = if p.side == Side::Buy {
+                tick.bid
+            } else {
+                tick.ask
+            };
             p.unrealised_pnl = Self::spot_pnl(p, mark);
         }
 
@@ -665,7 +665,11 @@ impl Book {
         let mut auto_closed_cfds: Vec<AutoClosed> = Vec::new();
         for (id, reason) in tp_sl_ids {
             if let Ok((pos, pnl)) = self.close_cfd(id) {
-                let exit = if pos.side == Side::Buy { tick.bid } else { tick.ask };
+                let exit = if pos.side == Side::Buy {
+                    tick.bid
+                } else {
+                    tick.ask
+                };
                 auto_closed_cfds.push(AutoClosed {
                     position: pos,
                     exit,
@@ -684,7 +688,11 @@ impl Book {
                 .map(|p| p.id)
             {
                 if let Ok((pos, pnl)) = self.close_cfd(worst_id) {
-                    let exit = if pos.side == Side::Buy { tick.bid } else { tick.ask };
+                    let exit = if pos.side == Side::Buy {
+                        tick.bid
+                    } else {
+                        tick.ask
+                    };
                     auto_closed_cfds.push(AutoClosed {
                         position: pos,
                         exit,

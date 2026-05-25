@@ -10,15 +10,14 @@ use order_book::{Direction, Side};
 
 use crate::pb::{
     engine_service_server::EngineService, AccountState, BinaryOption as PbBinary,
-    Candle as PbCandle, ClosePositionRequest, ClosePositionResponse, ClosedPosition,
-    CloseSpotRequest, CloseSpotResponse, ClosedSpot,
-    CreateAccountRequest, CreateAccountResponse, GetCandlesRequest, GetCandlesResponse,
-    GetStateRequest, GetSymbolsRequest, GetSymbolsResponse, GetTradeHistoryRequest,
-    GetTradeHistoryResponse, HouseStats, ListAccountsRequest, ListAccountsResponse,
-    PlaceBinaryRequest, PlaceBinaryResponse, PlaceOrderRequest, PlaceOrderResponse,
-    PlaceSpotRequest, PlaceSpotResponse,
-    Position as PbPosition, SettledTrade as PbSettledTrade, SpotPosition as PbSpot,
-    StateSnapshot, SubscribeTicksRequest, SymbolInfo, Tick as PbTick,
+    Candle as PbCandle, ClosePositionRequest, ClosePositionResponse, CloseSpotRequest,
+    CloseSpotResponse, ClosedPosition, ClosedSpot, CreateAccountRequest, CreateAccountResponse,
+    GetCandlesRequest, GetCandlesResponse, GetStateRequest, GetSymbolsRequest, GetSymbolsResponse,
+    GetTradeHistoryRequest, GetTradeHistoryResponse, HouseStats, ListAccountsRequest,
+    ListAccountsResponse, PlaceBinaryRequest, PlaceBinaryResponse, PlaceOrderRequest,
+    PlaceOrderResponse, PlaceSpotRequest, PlaceSpotResponse, Position as PbPosition,
+    SettledTrade as PbSettledTrade, SpotPosition as PbSpot, StateSnapshot, SubscribeTicksRequest,
+    SymbolInfo, Tick as PbTick,
 };
 use crate::state::SharedState;
 
