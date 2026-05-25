@@ -1,20 +1,22 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import type { Candle, Tick, BinaryOption, SettledTrade, Resolution, ApiSettledTrade } from '@/types'
+import type { Candle, Tick, BinaryOption, SettledTrade, Resolution, ApiSettledTrade, SymbolInfo } from '@/types'
 import { RESOLUTIONS } from '@/types'
 import { useChartHistory } from '@/hooks/useChartHistory'
+import { displayNameOf, divisorOf, toDisplayPrice } from '@/lib/symbols'
 
 interface Props {
   candles:          Candle[]
   lastTick:         Tick | null
   symbol:           string
+  info?:            SymbolInfo | null  // optional, for display divisor + display name
   accountId?:       string
   binaries?:        BinaryOption[]      // open trades → entry-price dashed lines (LIVE only)
   settledHistory?:  SettledTrade[]      // settled trades → ▲/▼ markers (LIVE only)
 }
 
 export default function Chart({
-  candles, lastTick, symbol, accountId = 'demo',
+  candles, lastTick, symbol, info = null, accountId = 'demo',
   binaries = [], settledHistory = [],
 }: Props) {
   const [resolution, setResolution] = useState<Resolution>('LIVE')
@@ -38,12 +40,14 @@ export default function Chart({
           candles={candles}
           lastTick={lastTick}
           symbol={symbol}
+          info={info}
           binaries={binaries}
           settledHistory={settledHistory}
         />
       ) : (
         <HistoricalChart
           symbol={symbol}
+          info={info}
           resolution={resolution}
           candles={histCandles}
           trades={histTrades}
@@ -81,13 +85,15 @@ function TimeframeBar({ resolution, onSelect }: {
 
 // ─── Live line chart (existing behaviour) ─────────────────────────────────────
 
-function LiveChart({ candles, lastTick, symbol, binaries, settledHistory }: {
+function LiveChart({ candles, lastTick, symbol, info, binaries, settledHistory }: {
   candles:         Candle[]
   lastTick:        Tick | null
   symbol:          string
+  info:            SymbolInfo | null
   binaries:        BinaryOption[]
   settledHistory:  SettledTrade[]
 }) {
+  const divisor = divisorOf(info)
   const containerRef  = useRef<HTMLDivElement>(null)
   const chartRef      = useRef<import('lightweight-charts').IChartApi | null>(null)
   const seriesRef     = useRef<import('lightweight-charts').ISeriesApi<'Line'> | null>(null)
@@ -141,22 +147,25 @@ function LiveChart({ candles, lastTick, symbol, binaries, settledHistory }: {
     }
   }, []) // eslint-disable-line
 
-  // Load full series when symbol changes
+  // Load full series when symbol changes — values divided for display.
   useEffect(() => {
     if (!seriesRef.current || candles.length === 0) return
     seriesRef.current.setData(
-      candles.map(c => ({ time: c.time as import('lightweight-charts').Time, value: c.close }))
+      candles.map(c => ({
+        time: c.time as import('lightweight-charts').Time,
+        value: c.close / divisor,
+      }))
     )
     chartRef.current?.timeScale().fitContent()
-  }, [symbol, candles.length === 0]) // eslint-disable-line
+  }, [symbol, candles.length === 0, divisor]) // eslint-disable-line
 
-  // Tick-by-tick update
+  // Tick-by-tick update — divisor applied.
   useEffect(() => {
     if (!seriesRef.current || candles.length === 0) return
     const last = candles[candles.length - 1]
     seriesRef.current.update({
       time:  last.time as import('lightweight-charts').Time,
-      value: last.close,
+      value: last.close / divisor,
     })
   }, [lastTick]) // eslint-disable-line
 
@@ -180,7 +189,7 @@ function LiveChart({ candles, lastTick, symbol, binaries, settledHistory }: {
         const isUp  = b.direction === 'UP'
         const color = isUp ? '#4bb4b4' : '#cc2e3d'
         const line  = series.createPriceLine({
-          price:            b.entry_mid,
+          price:            b.entry_mid / divisor,
           color,
           lineWidth:        1,
           lineStyle:        LineStyle.Dashed,
@@ -190,7 +199,7 @@ function LiveChart({ candles, lastTick, symbol, binaries, settledHistory }: {
         priceLinesRef.current.set(b.id, line)
       }
     })
-  }, [binaries, symbol])
+  }, [binaries, symbol, divisor])
 
   // Settled trade markers
   useEffect(() => {
@@ -215,14 +224,17 @@ function LiveChart({ candles, lastTick, symbol, binaries, settledHistory }: {
     seriesRef.current.setMarkers(markers)
   }, [settledHistory, symbol])
 
+  const displayName = displayNameOf(info, symbol)
+  const displayMid  = lastTick ? toDisplayPrice(info, lastTick.mid) : null
+
   return (
     <div className="relative flex-1 overflow-hidden">
       {/* Symbol + live price overlay */}
       <div className="absolute top-3 left-4 z-10 flex items-center gap-3 pointer-events-none">
-        <span className="text-text font-bold text-lg">{symbol}</span>
-        {lastTick && (
+        <span className="text-text font-bold text-lg">{displayName}</span>
+        {displayMid !== null && (
           <span className="num text-2xl font-semibold text-text">
-            {lastTick.mid.toFixed(lastTick.mid < 10 ? 3 : 2)}
+            {displayMid.toFixed(displayMid < 10 ? 3 : 2)}
           </span>
         )}
       </div>
@@ -256,13 +268,16 @@ function LiveChart({ candles, lastTick, symbol, binaries, settledHistory }: {
 
 // ─── Historical candlestick chart ─────────────────────────────────────────────
 
-function HistoricalChart({ symbol, resolution, candles, trades, loading }: {
+function HistoricalChart({ symbol, info, resolution, candles, trades, loading }: {
   symbol:     string
+  info:       SymbolInfo | null
   resolution: Resolution
   candles:    { ts_s: number; open: number; high: number; low: number; close: number }[]
   trades:     ApiSettledTrade[]
   loading:    boolean
 }) {
+  const divisor     = divisorOf(info)
+  const displayName = displayNameOf(info, symbol)
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef     = useRef<import('lightweight-charts').IChartApi | null>(null)
   const seriesRef    = useRef<import('lightweight-charts').ISeriesApi<'Candlestick'> | null>(null)
@@ -312,20 +327,20 @@ function HistoricalChart({ symbol, resolution, candles, trades, loading }: {
     return () => { chart?.remove() }
   }, []) // eslint-disable-line
 
-  // Reload candles when data changes
+  // Reload candles when data changes — OHLC divided for display.
   useEffect(() => {
     if (!seriesRef.current || candles.length === 0) return
     seriesRef.current.setData(
       candles.map(c => ({
         time:  c.ts_s as import('lightweight-charts').Time,
-        open:  c.open,
-        high:  c.high,
-        low:   c.low,
-        close: c.close,
+        open:  c.open  / divisor,
+        high:  c.high  / divisor,
+        low:   c.low   / divisor,
+        close: c.close / divisor,
       }))
     )
     chartRef.current?.timeScale().fitContent()
-  }, [candles])
+  }, [candles, divisor])
 
   // Trade markers from API history
   useEffect(() => {
@@ -353,7 +368,7 @@ function HistoricalChart({ symbol, resolution, candles, trades, loading }: {
     <div className="relative flex-1 overflow-hidden">
       {/* Symbol + resolution overlay */}
       <div className="absolute top-3 left-4 z-10 flex items-center gap-2 pointer-events-none">
-        <span className="text-text font-bold text-lg">{symbol}</span>
+        <span className="text-text font-bold text-lg">{displayName}</span>
         <span className="text-brand text-xs font-semibold bg-brand/10 px-1.5 py-0.5 rounded">
           {resolution}
         </span>

@@ -8,11 +8,17 @@ export interface Tick {
 }
 
 export interface SymbolInfo {
-  symbol:        string
-  type:          'BOOM_CRASH' | 'FX' | 'CRYPTO' | 'METAL'
-  leverage:      number
-  contract_size: number
-  cadence_ms:    number
+  symbol:          string                  // internal id, used in API calls (e.g. "cryBTCUSD")
+  type:            'BOOM_CRASH' | 'FX' | 'CRYPTO' | 'METAL'
+  leverage:        number
+  contract_size:   number
+  cadence_ms:      number
+  /** Display-only price divisor. Divide bid/ask/entry/mark by this at render
+   *  time. PnL is in real USD and is never divided. Defaults to 1.0. */
+  display_divisor: number
+  /** User-facing symbol name (e.g. "BTCUSD"). Use this everywhere visible to
+   *  the user. The `symbol` field stays the internal id used in API calls. */
+  display_symbol:  string
 }
 
 export interface Position {

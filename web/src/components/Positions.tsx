@@ -1,8 +1,9 @@
 'use client'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import clsx from 'clsx'
-import type { Position, BinaryOption, SpotPosition, Tick, SettledTrade } from '@/types'
+import type { Position, BinaryOption, SpotPosition, Tick, SettledTrade, SymbolInfo } from '@/types'
 import { closePosition, closeSpot } from '@/hooks/useAccount'
+import { buildSymbolMap, displayNameOf, formatPrice, toDisplayUnits } from '@/lib/symbols'
 
 interface Props {
   positions:      Position[]
@@ -10,6 +11,7 @@ interface Props {
   spots:          SpotPosition[]
   settledHistory: SettledTrade[]
   ticks:          Record<string, Tick>
+  symbols:        SymbolInfo[]
   accountId:      string
   onRefresh:      () => void
   mobile?:        boolean
@@ -18,10 +20,11 @@ interface Props {
 type Tab = 'open' | 'recent' | 'history'
 
 export default function Positions({
-  positions, binaries, spots, settledHistory, ticks, accountId, onRefresh, mobile,
+  positions, binaries, spots, settledHistory, ticks, symbols, accountId, onRefresh, mobile,
 }: Props) {
   const [tab, setTab] = useState<Tab>('open')
 
+  const symbolMap    = useMemo(() => buildSymbolMap(symbols), [symbols])
   const openCount    = positions.length + binaries.length + spots.length
   const recentTrades = settledHistory.slice(0, 10)
   const winCount     = settledHistory.filter(t => t.outcome === 'win').length
@@ -72,16 +75,17 @@ export default function Positions({
                 </thead>
                 <tbody>
                   {positions.map(p => {
+                    const info    = symbolMap.get(p.symbol) ?? null
                     const tick    = ticks[p.symbol]
                     const current = tick ? (p.side === 'BUY' ? tick.bid : tick.ask) : p.entry
                     const pnl     = p.unrealised_pnl
                     return (
                       <tr key={p.id} className="border-b border-border/50 hover:bg-surface/50">
-                        <td className="px-3 py-1.5 font-semibold">{p.symbol}</td>
+                        <td className="px-3 py-1.5 font-semibold">{displayNameOf(info, p.symbol)}</td>
                         <td className={clsx('px-3 py-1.5 font-semibold', p.side === 'BUY' ? 'text-up' : 'text-down')}>{p.side}</td>
                         <td className="px-3 py-1.5 num">{p.lots.toFixed(2)}</td>
-                        <td className="px-3 py-1.5 num">{p.entry.toFixed(5)}</td>
-                        <td className="px-3 py-1.5 num">{current.toFixed(5)}</td>
+                        <td className="px-3 py-1.5 num">{formatPrice(info, p.entry, 5)}</td>
+                        <td className="px-3 py-1.5 num">{formatPrice(info, current, 5)}</td>
                         <td className={clsx('px-3 py-1.5 num font-semibold', pnl >= 0 ? 'text-up' : 'text-down')}>
                           {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
                         </td>
@@ -108,14 +112,16 @@ export default function Positions({
                   </tr>
                 </thead>
                 <tbody>
-                  {binaries.map(b => (
+                  {binaries.map(b => {
+                    const info = symbolMap.get(b.symbol) ?? null
+                    return (
                     <tr key={b.id} className="border-b border-border/50 hover:bg-surface/50">
-                      <td className="px-3 py-1.5 font-semibold">{b.symbol}</td>
+                      <td className="px-3 py-1.5 font-semibold">{displayNameOf(info, b.symbol)}</td>
                       <td className={clsx('px-3 py-1.5 font-semibold', b.direction === 'UP' ? 'text-up' : 'text-down')}>
                         {b.direction === 'UP' ? '▲ Rise' : '▼ Fall'}
                       </td>
                       <td className="px-3 py-1.5 num">${b.stake.toFixed(2)}</td>
-                      <td className="px-3 py-1.5 num">{b.entry_mid.toFixed(5)}</td>
+                      <td className="px-3 py-1.5 num">{formatPrice(info, b.entry_mid, 5)}</td>
                       <td className="px-3 py-1.5">
                         <div className="flex items-center gap-2">
                           <div className="w-16 bg-muted rounded-full h-1">
@@ -129,7 +135,7 @@ export default function Positions({
                       </td>
                       <td className="px-3 py-1.5 text-dim text-[10px]">Settling…</td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table>
             )}
@@ -145,14 +151,16 @@ export default function Positions({
                 </thead>
                 <tbody>
                   {spots.map(s => {
-                    const pnl = s.unrealised_pnl
+                    const info  = symbolMap.get(s.symbol) ?? null
+                    const pnl   = s.unrealised_pnl
+                    const units = toDisplayUnits(info, s.units)
                     return (
                       <tr key={s.id} className="border-b border-border/50 hover:bg-surface/50">
-                        <td className="px-3 py-1.5 font-semibold">{s.symbol}</td>
+                        <td className="px-3 py-1.5 font-semibold">{displayNameOf(info, s.symbol)}</td>
                         <td className={clsx('px-3 py-1.5 font-semibold', s.side === 'BUY' ? 'text-up' : 'text-down')}>{s.side}</td>
                         <td className="px-3 py-1.5 num">${s.stake.toFixed(2)}</td>
-                        <td className="px-3 py-1.5 num">{s.units.toFixed(6)}</td>
-                        <td className="px-3 py-1.5 num">{s.entry.toFixed(2)}</td>
+                        <td className="px-3 py-1.5 num">{units.toFixed(4)}</td>
+                        <td className="px-3 py-1.5 num">{formatPrice(info, s.entry, 2)}</td>
                         <td className={clsx('px-3 py-1.5 num font-semibold', pnl >= 0 ? 'text-up' : 'text-down')}>
                           {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
                         </td>
@@ -175,14 +183,14 @@ export default function Positions({
         {tab === 'recent' && (
           recentTrades.length === 0
             ? <div className="flex items-center justify-center py-8 text-dim text-sm">No recent trades yet</div>
-            : <HistoryTable trades={recentTrades} />
+            : <HistoryTable trades={recentTrades} symbolMap={symbolMap} />
         )}
 
         {/* HISTORY ────────────────────────────────────────────────────────────── */}
         {tab === 'history' && (
           settledHistory.length === 0
             ? <div className="flex items-center justify-center py-8 text-dim text-sm">No trade history yet</div>
-            : <HistoryTable trades={settledHistory} />
+            : <HistoryTable trades={settledHistory} symbolMap={symbolMap} />
         )}
       </div>
     </div>
@@ -190,7 +198,10 @@ export default function Positions({
 }
 
 // ─── History table (shared by Recent + History tabs) ─────────────────────────
-function HistoryTable({ trades }: { trades: SettledTrade[] }) {
+function HistoryTable({ trades, symbolMap }: {
+  trades: SettledTrade[]
+  symbolMap: Map<string, SymbolInfo>
+}) {
   return (
     <table className="w-full text-xs">
       <thead>
@@ -201,13 +212,13 @@ function HistoryTable({ trades }: { trades: SettledTrade[] }) {
         </tr>
       </thead>
       <tbody>
-        {trades.map(t => <SettledRow key={t.id} trade={t} />)}
+        {trades.map(t => <SettledRow key={t.id} trade={t} info={symbolMap.get(t.symbol) ?? null} />)}
       </tbody>
     </table>
   )
 }
 
-function SettledRow({ trade: t }: { trade: SettledTrade }) {
+function SettledRow({ trade: t, info }: { trade: SettledTrade; info: SymbolInfo | null }) {
   // Net P&L: what the user actually gained or lost on this trade.
   // Win:  payout_received − stake_paid  (e.g. $18.50 − $10 = +$8.50)
   // Loss: −stake_paid                   (e.g. −$10.00)
@@ -215,12 +226,12 @@ function SettledRow({ trade: t }: { trade: SettledTrade }) {
 
   return (
     <tr className="border-b border-border/50 hover:bg-surface/50">
-      <td className="px-3 py-1.5 font-semibold">{t.symbol}</td>
+      <td className="px-3 py-1.5 font-semibold">{displayNameOf(info, t.symbol)}</td>
       <td className={clsx('px-3 py-1.5 font-semibold', t.direction === 'UP' ? 'text-up' : 'text-down')}>
         {t.direction === 'UP' ? '▲ Rise' : '▼ Fall'}
       </td>
       <td className="px-3 py-1.5 num">${t.stake.toFixed(2)}</td>
-      <td className="px-3 py-1.5 num">{t.entry_mid.toFixed(5)}</td>
+      <td className="px-3 py-1.5 num">{formatPrice(info, t.entry_mid, 5)}</td>
       <td className="px-3 py-1.5 num">{t.ticks_total}</td>
       <td className="px-3 py-1.5">
         <span className={clsx(

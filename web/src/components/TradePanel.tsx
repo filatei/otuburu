@@ -3,6 +3,7 @@ import { useState } from 'react'
 import clsx from 'clsx'
 import type { Tick, SymbolInfo } from '@/types'
 import { placeCFD, placeBinary, placeSpot } from '@/hooks/useAccount'
+import { displayNameOf, divisorOf, formatPrice, priceDecimals } from '@/lib/symbols'
 
 interface Props {
   symbol:    string
@@ -66,9 +67,14 @@ export default function TradePanel({ symbol, info, lastTick, accountId, onTraded
   const spotNum     = parseFloat(spotStake) || 0
   const notional    = info ? (lotsNum * info.contract_size * (lastTick?.mid ?? 0)).toFixed(2) : '—'
   const isSpotSym   = info?.type === 'CRYPTO' || info?.type === 'METAL'
-  const priceDecimals = info?.type === 'FX' ? 5 : (info?.type === 'METAL' ? 2 : 3)
+  const decimals    = priceDecimals(info)
+  const displaySym  = displayNameOf(info, symbol)
+  const divisor     = divisorOf(info)
+  // Spot units are shown in DISPLAY units so the user sees a meaningful count
+  // (e.g. 0.46 BTC-units at $108 each, not 0.000460 BTC at $108,000 each).
+  // Engine still computes true units = stake / true_ask on the backend.
   const spotUnits   = lastTick && spotNum > 0
-    ? (spotNum / lastTick.ask).toFixed(info?.type === 'FX' ? 4 : 6)
+    ? ((spotNum * divisor) / lastTick.ask).toFixed(info?.type === 'FX' ? 4 : 4)
     : '—'
 
   // Auto-switch away from Spot if symbol doesn't support it
@@ -89,13 +95,13 @@ export default function TradePanel({ symbol, info, lastTick, accountId, onTraded
         {/* Current price */}
         {lastTick && (
           <div className="bg-surface rounded-lg p-3">
-            <div className="text-dim text-[10px] uppercase mb-1">{symbol} · Mid price</div>
+            <div className="text-dim text-[10px] uppercase mb-1">{displaySym} · Mid price</div>
             <div className="num text-xl font-bold text-text">
-              {lastTick.mid.toFixed(priceDecimals)}
+              {formatPrice(info, lastTick.mid, decimals)}
             </div>
             <div className="flex gap-3 mt-1 num text-xs">
-              <span className="text-down">Bid {lastTick.bid.toFixed(priceDecimals)}</span>
-              <span className="text-up">Ask {lastTick.ask.toFixed(priceDecimals)}</span>
+              <span className="text-down">Bid {formatPrice(info, lastTick.bid, decimals)}</span>
+              <span className="text-up">Ask {formatPrice(info, lastTick.ask, decimals)}</span>
             </div>
           </div>
         )}
@@ -140,7 +146,14 @@ export default function TradePanel({ symbol, info, lastTick, accountId, onTraded
                 <Row label="Lots"     val={lotsNum.toFixed(2)} />
                 <Row label="Notional" val={`$${notional}`} />
                 <Row label="Leverage" val={`1:${info.leverage}`} />
-                <Row label="Spread"   val={lastTick ? ((lastTick.ask - lastTick.bid) * (info.type === 'FX' ? 10000 : 100)).toFixed(1) + ' pts' : '—'} />
+                <Row
+                  label="Spread"
+                  val={
+                    lastTick
+                      ? (((lastTick.ask - lastTick.bid) / divisor) * (info.type === 'FX' ? 10000 : 100)).toFixed(1) + ' pts'
+                      : '—'
+                  }
+                />
               </div>
             )}
 
@@ -179,7 +192,7 @@ export default function TradePanel({ symbol, info, lastTick, accountId, onTraded
             {lastTick && (
               <div className="bg-surface rounded-lg p-3 text-sm">
                 <Row label="You pay"  val={`$${spotNum.toFixed(2)}`} />
-                <Row label="You get"  val={`${spotUnits} ${symbol.replace('cry','')}`} color="text-up" />
+                <Row label="You get"  val={`${spotUnits} ${displaySym}`} color="text-up" />
                 <Row label="Leverage" val="1:1" color="text-dim" />
                 <Row label="Max loss" val={`$${spotNum.toFixed(2)}`} color="text-dim" />
               </div>

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import type { SymbolInfo, Tick } from '@/types'
+import { displayNameOf, formatPrice } from '@/lib/symbols'
 
 interface Props {
   symbols:  SymbolInfo[]
@@ -50,8 +51,6 @@ function SymbolChip({
     prevMid.current = tick.mid
   }, [tick?.ts_ms]) // eslint-disable-line
 
-  const decimals = info.type === 'FX' ? 5 : info.type === 'CRYPTO' ? 2 : 3
-
   return (
     <button
       onClick={() => onSelect(info.symbol)}
@@ -61,7 +60,7 @@ function SymbolChip({
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-text truncate">{info.symbol}</span>
+        <span className="text-xs font-semibold text-text truncate">{displayNameOf(info)}</span>
         <span className={clsx('text-[9px] uppercase', TYPE_BADGE[info.type] ?? 'text-dim')}>
           {info.type === 'BOOM_CRASH' ? 'B/C' : info.type}
         </span>
@@ -73,13 +72,13 @@ function SymbolChip({
           flash === 'down' ? 'flash-down text-down' : 'text-text',
         )}
       >
-        {tick ? tick.mid.toFixed(decimals) : '—'}
+        {formatPrice(info, tick?.mid)}
       </span>
       {tick && (
         <div className="flex gap-1 text-[10px] text-dim mt-0.5 num">
-          <span className="text-down">{tick.bid.toFixed(decimals)}</span>
+          <span className="text-down">{formatPrice(info, tick.bid)}</span>
           <span>/</span>
-          <span className="text-up">{tick.ask.toFixed(decimals)}</span>
+          <span className="text-up">{formatPrice(info, tick.ask)}</span>
         </div>
       )}
     </button>
