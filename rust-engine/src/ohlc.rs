@@ -189,6 +189,27 @@ impl OhlcStore {
             .on_tick(ts_ms, mid);
     }
 
+    /// Seed a symbol's resolution buffer with historical candles, e.g. from a
+    /// Yahoo Finance backfill. Existing candles for that resolution are
+    /// REPLACED. Other resolutions are unaffected. Only the latest `max_len`
+    /// candles are retained. Candles must be supplied in ascending ts_s order.
+    pub fn seed(&mut self, symbol: &str, res: Resolution, candles: Vec<Candle>) {
+        let sym = self
+            .symbols
+            .entry(symbol.to_owned())
+            .or_insert_with(SymbolOhlc::new);
+        // Replace, don't merge — live on_tick will keep the current bucket fresh.
+        let buf = sym
+            .buffers
+            .entry(res)
+            .or_insert_with(|| OhlcBuffer::new(res));
+        buf.candles.clear();
+        let skip = candles.len().saturating_sub(buf.max_len);
+        for c in candles.into_iter().skip(skip) {
+            buf.candles.push_back(c);
+        }
+    }
+
     /// Return candles for a symbol + resolution in `[from_s, to_s]` (unix seconds).
     pub fn get_candles(
         &self,

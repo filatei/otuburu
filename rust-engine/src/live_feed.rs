@@ -92,12 +92,78 @@ struct YahooChart {
 #[derive(serde::Deserialize)]
 struct YahooResult {
     meta: YahooMeta,
+    // Present only on historical (range/interval) responses, not the live one.
+    timestamp: Option<Vec<i64>>,
+    indicators: Option<YahooIndicators>,
 }
 
 #[derive(serde::Deserialize)]
 struct YahooMeta {
     #[serde(rename = "regularMarketPrice")]
     regular_market_price: Option<f64>,
+}
+
+#[derive(serde::Deserialize)]
+struct YahooIndicators {
+    quote: Vec<YahooQuote>,
+}
+
+#[derive(serde::Deserialize)]
+struct YahooQuote {
+    open: Vec<Option<f64>>,
+    high: Vec<Option<f64>>,
+    low: Vec<Option<f64>>,
+    close: Vec<Option<f64>>,
+}
+
+/// Fetch historical OHLC candles from Yahoo's chart endpoint. Used to backfill
+/// the OHLC ring buffers on engine startup so the chart isn't empty for new
+/// Yahoo-fed symbols.
+///
+/// `range` examples: `1d`, `5d`, `1mo`, `3mo`, `6mo`, `1y`, `2y`, `5y`, `max`.
+/// `interval` examples: `1m`, `5m`, `15m`, `30m`, `1h`, `1d`.
+/// Yahoo limits some combinations: 1m needs ≤7d, 5/15/30m need ≤60d,
+/// 1h needs ≤730d, 1d is unlimited.
+async fn fetch_yahoo_history(
+    client: &reqwest::Client,
+    yahoo_ticker: &str,
+    range: &str,
+    interval: &str,
+) -> Option<Vec<crate::ohlc::Candle>> {
+    let url = format!(
+        "https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_ticker}?range={range}&interval={interval}"
+    );
+    let resp = client
+        .get(&url)
+        .header(reqwest::header::USER_AGENT, YAHOO_UA)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .ok()?;
+    let yc: YahooChartResp = resp.json().await.ok()?;
+    let result = yc.chart.result?.into_iter().next()?;
+    let timestamps = result.timestamp?;
+    let quote = result.indicators?.quote.into_iter().next()?;
+
+    // Each parallel array is the same length; drop any element whose OHLC has
+    // a null (Yahoo's gap markers — happens around weekends/holidays).
+    let candles: Vec<crate::ohlc::Candle> = timestamps
+        .into_iter()
+        .zip(quote.open)
+        .zip(quote.high)
+        .zip(quote.low)
+        .zip(quote.close)
+        .filter_map(|((((ts, o), h), l), c)| {
+            Some(crate::ohlc::Candle {
+                ts_s: ts,
+                open: o?,
+                high: h?,
+                low: l?,
+                close: c?,
+            })
+        })
+        .collect();
+    Some(candles)
 }
 
 /// Fetch the latest regular-market price for any Yahoo Finance ticker via the
@@ -245,7 +311,7 @@ pub fn start(state: SharedState) {
     // ETH/USD — 500 ms (Binance bookTicker, real bid/ask)
     spawn_binance(state.clone(), client.clone(), "ETHUSDT", "cryETHUSD", 500);
 
-    // Yahoo-fed symbols — 2 s polling, synthetic bid/ask around the mid.
+    // Yahoo-fed symbols — 2 s live polling, synthetic bid/ask around the mid.
     spawn_yahoo(
         state.clone(),
         client.clone(),
@@ -270,7 +336,23 @@ pub fn start(state: SharedState) {
         INDEX_HALF_SPREAD_PCT,
         2_000,
     );
-    spawn_yahoo(state, client, "^IXIC", "NDX", INDEX_HALF_SPREAD_PCT, 2_000);
+    spawn_yahoo(
+        state.clone(),
+        client.clone(),
+        "^IXIC",
+        "NDX",
+        INDEX_HALF_SPREAD_PCT,
+        2_000,
+    );
+
+    // Historical OHLC backfill — fetch D1 + H1 from Yahoo for each Yahoo-fed
+    // symbol so the chart's historical timeframes have data immediately
+    // instead of waiting hours/days for live ticks to fill them. Refreshed
+    // hourly while the engine runs.
+    spawn_yahoo_history_refresh(state.clone(), client.clone(), "GC=F", "cryXAUUSD");
+    spawn_yahoo_history_refresh(state.clone(), client.clone(), "^GSPC", "SPX");
+    spawn_yahoo_history_refresh(state.clone(), client.clone(), "^DJI", "DJI");
+    spawn_yahoo_history_refresh(state, client, "^IXIC", "NDX");
 }
 
 fn spawn_binance(
@@ -349,6 +431,86 @@ fn spawn_yahoo(
             if let Some(mid) = *last.lock().await {
                 let tick = mid_to_tick(symbol, mid, half_spread_pct);
                 dispatch(&state, tick).await;
+            }
+        }
+    });
+}
+
+/// How often to re-fetch Yahoo history (D1 + H1). Hourly is plenty since
+/// neither resolution updates faster than that upstream.
+const HISTORY_REFRESH_SECS: u64 = 3600;
+
+/// Fetch D1 (2y) and H1 (1y) history from Yahoo and seed the OHLC store,
+/// then loop on `HISTORY_REFRESH_SECS` cadence to keep buffers fresh.
+/// Persists D1 candles to SQLite so they survive engine restarts; H1 is
+/// in-memory only (Yahoo re-fetches it every restart anyway).
+fn spawn_yahoo_history_refresh(
+    state: SharedState,
+    client: Arc<reqwest::Client>,
+    yahoo_ticker: &'static str,
+    symbol: &'static str,
+) {
+    tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_secs(HISTORY_REFRESH_SECS));
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await; // first tick fires immediately
+
+            // ── D1 history (2y daily candles) ────────────────────────────────
+            match fetch_yahoo_history(&client, yahoo_ticker, "2y", "1d").await {
+                Some(candles) if !candles.is_empty() => {
+                    tracing::info!(
+                        symbol,
+                        yahoo_ticker,
+                        count = candles.len(),
+                        "seeded D1 history from Yahoo"
+                    );
+                    // Persist to SQLite so the next engine boot has data even
+                    // before this refresh task fires.
+                    let db = state.db.clone();
+                    let to_persist = candles.clone();
+                    let sym_owned = symbol.to_string();
+                    tokio::spawn(async move {
+                        for c in &to_persist {
+                            if let Err(e) = crate::db::upsert_daily_candle(
+                                &db, &sym_owned, c.ts_s, c.open, c.high, c.low, c.close,
+                            )
+                            .await
+                            {
+                                tracing::error!(%e, "failed to upsert daily candle");
+                                break;
+                            }
+                        }
+                    });
+                    // Seed in-memory store.
+                    let mut inner = state.inner.write().await;
+                    inner
+                        .ohlc
+                        .seed(symbol, crate::ohlc::Resolution::D1, candles);
+                }
+                _ => {
+                    warn!(symbol, yahoo_ticker, "yahoo D1 history fetch failed");
+                }
+            }
+
+            // ── H1 history (1y hourly candles) ───────────────────────────────
+            match fetch_yahoo_history(&client, yahoo_ticker, "1y", "1h").await {
+                Some(candles) if !candles.is_empty() => {
+                    tracing::info!(
+                        symbol,
+                        yahoo_ticker,
+                        count = candles.len(),
+                        "seeded H1 history from Yahoo"
+                    );
+                    let mut inner = state.inner.write().await;
+                    inner
+                        .ohlc
+                        .seed(symbol, crate::ohlc::Resolution::H1, candles);
+                }
+                _ => {
+                    warn!(symbol, yahoo_ticker, "yahoo H1 history fetch failed");
+                }
             }
         }
     });
