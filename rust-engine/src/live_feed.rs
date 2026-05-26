@@ -104,9 +104,7 @@ struct YahooMeta {
 /// public chart endpoint. Works for `GC=F` (gold futures), `^GSPC`, `^DJI`,
 /// `^IXIC`, equities, etc. Outside trading hours Yahoo returns the last close.
 async fn fetch_yahoo_chart(client: &reqwest::Client, yahoo_ticker: &str) -> Option<f64> {
-    let url = format!(
-        "https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_ticker}"
-    );
+    let url = format!("https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_ticker}");
     let resp = client
         .get(&url)
         .header(reqwest::header::USER_AGENT, YAHOO_UA)
@@ -244,10 +242,17 @@ pub fn start(state: SharedState) {
     spawn_binance(state.clone(), client.clone(), "ETHUSDT", "cryETHUSD", 500);
 
     // Yahoo-fed symbols — 2 s polling, synthetic bid/ask around the mid.
-    spawn_yahoo(state.clone(), client.clone(), "GC=F",  "cryXAUUSD", GOLD_HALF_SPREAD_PCT,  2_000);
-    spawn_yahoo(state.clone(), client.clone(), "^GSPC", "SPX",       INDEX_HALF_SPREAD_PCT, 2_000);
-    spawn_yahoo(state.clone(), client.clone(), "^DJI",  "DJI",       INDEX_HALF_SPREAD_PCT, 2_000);
-    spawn_yahoo(state,         client,         "^IXIC", "NDX",       INDEX_HALF_SPREAD_PCT, 2_000);
+    spawn_yahoo(
+        state.clone(),
+        client.clone(),
+        "GC=F",
+        "cryXAUUSD",
+        GOLD_HALF_SPREAD_PCT,
+        2_000,
+    );
+    spawn_yahoo(state.clone(), client.clone(), "^GSPC", "SPX", INDEX_HALF_SPREAD_PCT, 2_000);
+    spawn_yahoo(state.clone(), client.clone(), "^DJI", "DJI", INDEX_HALF_SPREAD_PCT, 2_000);
+    spawn_yahoo(state, client, "^IXIC", "NDX", INDEX_HALF_SPREAD_PCT, 2_000);
 }
 
 fn spawn_binance(
@@ -309,7 +314,10 @@ fn spawn_yahoo(
                 None => {
                     let have_last = last.lock().await.is_some();
                     if have_last {
-                        warn!(symbol, yahoo_ticker, "yahoo fetch failed — using last known price");
+                        warn!(
+                            symbol,
+                            yahoo_ticker, "yahoo fetch failed — using last known price"
+                        );
                     } else {
                         warn!(
                             symbol,
