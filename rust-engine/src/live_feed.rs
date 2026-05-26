@@ -113,15 +113,19 @@ async fn fetch_yahoo_chart(client: &reqwest::Client, yahoo_ticker: &str) -> Opti
         .await
         .ok()?;
     let yc: YahooChartResp = resp.json().await.ok()?;
-    let price = yc.chart.result?.into_iter().next()?.meta.regular_market_price?;
+    let price = yc
+        .chart
+        .result?
+        .into_iter()
+        .next()?
+        .meta
+        .regular_market_price?;
     if price > 0.0 {
         Some(price)
     } else {
         None
     }
 }
-
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn make_tick(symbol: &str, bid: f64, ask: f64) -> Tick {
@@ -250,8 +254,22 @@ pub fn start(state: SharedState) {
         GOLD_HALF_SPREAD_PCT,
         2_000,
     );
-    spawn_yahoo(state.clone(), client.clone(), "^GSPC", "SPX", INDEX_HALF_SPREAD_PCT, 2_000);
-    spawn_yahoo(state.clone(), client.clone(), "^DJI", "DJI", INDEX_HALF_SPREAD_PCT, 2_000);
+    spawn_yahoo(
+        state.clone(),
+        client.clone(),
+        "^GSPC",
+        "SPX",
+        INDEX_HALF_SPREAD_PCT,
+        2_000,
+    );
+    spawn_yahoo(
+        state.clone(),
+        client.clone(),
+        "^DJI",
+        "DJI",
+        INDEX_HALF_SPREAD_PCT,
+        2_000,
+    );
     spawn_yahoo(state, client, "^IXIC", "NDX", INDEX_HALF_SPREAD_PCT, 2_000);
 }
 
