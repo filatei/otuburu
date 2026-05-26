@@ -70,10 +70,11 @@ pub fn symbol_display_name(symbol: &str) -> &str {
 /// and never divided. Returns 1.0 when no scaling is wanted.
 ///
 /// Tuned for typical mid-2026 spot prices so display values land in a
-/// retail-friendly $5–$500 range:
+/// retail-friendly $5–$500 range (or $1–$10 for the heavily-scaled ones so
+/// small-capital users can participate in single-unit movements):
 ///   - cryBTCUSD ÷ 1000 → BTC ~$77k  shows as ~$77
 ///   - cryETHUSD ÷ 10   → ETH ~$2.1k shows as ~$210
-///   - cryXAUUSD ÷ 10   → XAU ~$4.5k shows as ~$452
+///   - cryXAUUSD ÷ 1000 → XAU ~$4.5k shows as ~$4.53 (small-cap friendly)
 ///   - SPX       ÷ 1000 → S&P ~7400  shows as ~$7.40
 ///   - DJI       ÷ 1000 → Dow ~50.6k shows as ~$50.60
 ///   - NDX       ÷ 1000 → Nasdaq ~26k shows as ~$26.30
@@ -83,7 +84,7 @@ pub fn symbol_display_divisor(symbol: &str) -> f64 {
     match symbol {
         "cryBTCUSD" => 1000.0,
         "cryETHUSD" => 10.0,
-        "cryXAUUSD" => 10.0,
+        "cryXAUUSD" => 1000.0,
         "SPX" | "DJI" | "NDX" => 1000.0,
         _ => 1.0,
     }
