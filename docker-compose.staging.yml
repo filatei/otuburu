@@ -24,10 +24,12 @@ services:
     image: ghcr.io/filatei/otuburu-engine:staging
     restart: always
     environment:
-      ENGINE_GRPC_ADDR: "0.0.0.0:9090"
-      RUST_LOG: "otuburu_engine=info,warn"
-      SNAPSHOT_PATH: "/data/engine_snapshot.json"
-      DB_URL: "sqlite:///data/otuburu.db"
+      ENGINE_GRPC_ADDR:     "0.0.0.0:9090"
+      RUST_LOG:             "otuburu_engine=info,warn"
+      SNAPSHOT_PATH:        "/data/engine_snapshot.json"
+      DB_URL:               "sqlite:///data/otuburu.db"
+      APCA_API_KEY_ID:      ${APCA_API_KEY_ID:-}
+      APCA_API_SECRET_KEY:  ${APCA_API_SECRET_KEY:-}
     volumes:
       - enginedata:/data
     expose:

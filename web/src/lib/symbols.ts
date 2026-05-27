@@ -51,9 +51,13 @@ export function priceDecimals(info: SymbolInfo | null | undefined): number {
     info.type === 'FX'         ? 5 :
     info.type === 'METAL'      ? 2 :
     info.type === 'CRYPTO'     ? 2 :
-    info.type === 'INDEX'      ? 1 :  // +2 bump → 3 dp (e.g. SPX 7.473)
+    info.type === 'INDEX'      ? 1 :
     /* BOOM_CRASH */             3
-  const divisorBump = Math.min(2, Math.max(0, Math.round(Math.log10(divisorOf(info)))))
+  // Indices typically get a heavy divisor (÷1000) so a $720 ETF lands at
+  // $0.72 display. The standard +2 cap would show only $0.720 — too coarse
+  // to feel live. Bump cap to +3 for INDEX so we see 4 dp.
+  const cap = info.type === 'INDEX' ? 3 : 2
+  const divisorBump = Math.min(cap, Math.max(0, Math.round(Math.log10(divisorOf(info)))))
   return base + divisorBump
 }
 

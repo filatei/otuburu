@@ -42,6 +42,72 @@ const GOLD_HALF_SPREAD_PCT: f64 = 0.0015;
 /// spreads run 0.5–2 points on SPX (~3–10 bps); we sit at the tighter end.
 const INDEX_HALF_SPREAD_PCT: f64 = 0.0005;
 
+// ── Alpaca latest quotes (US equity ETFs as index proxies) ───────────────────
+//
+// Used to feed real-time bid/ask for SPX/DJI/NDX via the SPY/DIA/QQQ ETFs.
+// REST polling at 1s — Alpaca's WebSocket would give finer granularity, but
+// REST keeps the code simple and 1s is plenty for retail fractional UX.
+//
+// Free IEX feed is single-exchange data, real-time during regular market
+// hours (Mon–Fri 09:30–16:00 ET). Outside those hours the endpoint returns
+// the last known quote with a stale timestamp — engine keeps reusing it
+// (chart appears frozen). A market-hours indicator is a follow-up commit.
+
+/// Internal symbol id → Alpaca ETF ticker.
+const ALPACA_SYMBOL_MAP: &[(&str, &str)] = &[("SPX", "SPY"), ("DJI", "DIA"), ("NDX", "QQQ")];
+
+#[derive(serde::Deserialize)]
+struct AlpacaQuotesResp {
+    quotes: std::collections::HashMap<String, AlpacaQuote>,
+}
+
+#[derive(serde::Deserialize)]
+struct AlpacaQuote {
+    #[serde(rename = "bp")]
+    bid_price: f64,
+    #[serde(rename = "ap")]
+    ask_price: f64,
+}
+
+/// Fetch the latest bid/ask for a batch of Alpaca tickers. Returns a map keyed
+/// by Alpaca ticker (e.g. "SPY") to (bid, ask). None if the request fails
+/// outright; the caller falls back to the last known quote per symbol.
+async fn fetch_alpaca_quotes(
+    client: &reqwest::Client,
+    tickers: &[&str],
+    key_id: &str,
+    secret_key: &str,
+) -> Option<std::collections::HashMap<String, (f64, f64)>> {
+    let url = format!(
+        "https://data.alpaca.markets/v2/stocks/quotes/latest?symbols={}",
+        tickers.join(",")
+    );
+    let resp = client
+        .get(&url)
+        .header("APCA-API-KEY-ID", key_id)
+        .header("APCA-API-SECRET-KEY", secret_key)
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: AlpacaQuotesResp = resp.json().await.ok()?;
+    let result = body
+        .quotes
+        .into_iter()
+        .filter_map(|(sym, q)| {
+            if q.bid_price > 0.0 && q.ask_price > q.bid_price {
+                Some((sym, (q.bid_price, q.ask_price)))
+            } else {
+                None
+            }
+        })
+        .collect();
+    Some(result)
+}
+
 // ── Binance book ticker ───────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
@@ -311,7 +377,7 @@ pub fn start(state: SharedState) {
     // ETH/USD — 500 ms (Binance bookTicker, real bid/ask)
     spawn_binance(state.clone(), client.clone(), "ETHUSDT", "cryETHUSD", 500);
 
-    // Yahoo-fed symbols — 2 s live polling, synthetic bid/ask around the mid.
+    // Gold — Yahoo at 2 s, synthetic bid/ask around mid.
     spawn_yahoo(
         state.clone(),
         client.clone(),
@@ -320,39 +386,61 @@ pub fn start(state: SharedState) {
         GOLD_HALF_SPREAD_PCT,
         2_000,
     );
-    spawn_yahoo(
-        state.clone(),
-        client.clone(),
-        "^GSPC",
-        "SPX",
-        INDEX_HALF_SPREAD_PCT,
-        2_000,
-    );
-    spawn_yahoo(
-        state.clone(),
-        client.clone(),
-        "^DJI",
-        "DJI",
-        INDEX_HALF_SPREAD_PCT,
-        2_000,
-    );
-    spawn_yahoo(
-        state.clone(),
-        client.clone(),
-        "^IXIC",
-        "NDX",
-        INDEX_HALF_SPREAD_PCT,
-        2_000,
-    );
 
-    // Historical OHLC backfill — fetch D1 + H1 from Yahoo for each Yahoo-fed
-    // symbol so the chart's historical timeframes have data immediately
-    // instead of waiting hours/days for live ticks to fill them. Refreshed
-    // hourly while the engine runs.
+    // US indices — Alpaca real-time IEX feed via SPY/DIA/QQQ ETFs (preferred),
+    // or fall back to Yahoo polling (15-min delay) if Alpaca creds are missing.
+    // Either path uses the SPY/DIA/QQQ tickers so historical and live prices
+    // stay on the same scale.
+    let alpaca_key = std::env::var("APCA_API_KEY_ID").unwrap_or_default();
+    let alpaca_secret = std::env::var("APCA_API_SECRET_KEY").unwrap_or_default();
+    if !alpaca_key.is_empty() && !alpaca_secret.is_empty() {
+        tracing::info!("alpaca creds present — using Alpaca for SPX/DJI/NDX");
+        spawn_alpaca_indices(
+            state.clone(),
+            client.clone(),
+            alpaca_key,
+            alpaca_secret,
+            1_000,
+        );
+    } else {
+        tracing::warn!(
+            "alpaca creds missing — falling back to Yahoo for SPX/DJI/NDX (delayed quotes)"
+        );
+        spawn_yahoo(
+            state.clone(),
+            client.clone(),
+            "SPY",
+            "SPX",
+            INDEX_HALF_SPREAD_PCT,
+            2_000,
+        );
+        spawn_yahoo(
+            state.clone(),
+            client.clone(),
+            "DIA",
+            "DJI",
+            INDEX_HALF_SPREAD_PCT,
+            2_000,
+        );
+        spawn_yahoo(
+            state.clone(),
+            client.clone(),
+            "QQQ",
+            "NDX",
+            INDEX_HALF_SPREAD_PCT,
+            2_000,
+        );
+    }
+
+    // Historical OHLC backfill — fetch D1 + H1 from Yahoo for each symbol so
+    // the chart's historical timeframes have data immediately instead of
+    // waiting hours/days for live ticks to fill them. Refreshed hourly. We
+    // use SPY/DIA/QQQ tickers (not ^GSPC/^DJI/^IXIC) so historical prices
+    // match the ETF scale of the live feed.
     spawn_yahoo_history_refresh(state.clone(), client.clone(), "GC=F", "cryXAUUSD");
-    spawn_yahoo_history_refresh(state.clone(), client.clone(), "^GSPC", "SPX");
-    spawn_yahoo_history_refresh(state.clone(), client.clone(), "^DJI", "DJI");
-    spawn_yahoo_history_refresh(state, client, "^IXIC", "NDX");
+    spawn_yahoo_history_refresh(state.clone(), client.clone(), "SPY", "SPX");
+    spawn_yahoo_history_refresh(state.clone(), client.clone(), "DIA", "DJI");
+    spawn_yahoo_history_refresh(state, client, "QQQ", "NDX");
 }
 
 fn spawn_binance(
@@ -510,6 +598,67 @@ fn spawn_yahoo_history_refresh(
                 }
                 _ => {
                     warn!(symbol, yahoo_ticker, "yahoo H1 history fetch failed");
+                }
+            }
+        }
+    });
+}
+
+/// Alpaca real-time index feeder. Polls the batch latest-quotes endpoint for
+/// SPY/DIA/QQQ every `cadence_ms`, dispatches each as the matching internal
+/// symbol (SPX/DJI/NDX) using the real bid/ask Alpaca returns.
+fn spawn_alpaca_indices(
+    state: SharedState,
+    client: Arc<reqwest::Client>,
+    key_id: String,
+    secret_key: String,
+    cadence_ms: u64,
+) {
+    use std::collections::HashMap;
+    tokio::spawn(async move {
+        let tickers: Vec<&'static str> = ALPACA_SYMBOL_MAP.iter().map(|(_, alp)| *alp).collect();
+        let last: Arc<Mutex<HashMap<String, (f64, f64)>>> = Arc::new(Mutex::new(HashMap::new()));
+        let mut interval = time::interval(Duration::from_millis(cadence_ms));
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await;
+
+            match fetch_alpaca_quotes(&client, &tickers, &key_id, &secret_key).await {
+                Some(quotes) => {
+                    let mut last_guard = last.lock().await;
+                    for (sym, ba) in quotes {
+                        last_guard.insert(sym, ba);
+                    }
+                }
+                None => {
+                    let have_any = !last.lock().await.is_empty();
+                    if have_any {
+                        warn!("alpaca quote fetch failed — using last known");
+                    } else {
+                        warn!(
+                            "alpaca quote fetch failed — no prices yet, indices will be silent until first success"
+                        );
+                    }
+                }
+            }
+
+            // Dispatch a tick for every cached symbol on every interval. Even
+            // if the latest fetch failed, the previous good quote keeps the
+            // live chart updated visibly (no gaps).
+            let snap: Vec<(String, (f64, f64))> = last
+                .lock()
+                .await
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect();
+            for (alpaca_sym, (bid, ask)) in snap {
+                if let Some(&(_, internal_sym)) = ALPACA_SYMBOL_MAP
+                    .iter()
+                    .find(|(_, alp)| *alp == alpaca_sym.as_str())
+                {
+                    let tick = make_tick(internal_sym, bid, ask);
+                    dispatch(&state, tick).await;
                 }
             }
         }

@@ -265,6 +265,9 @@ jobs:
             TRONGRID_API_KEY=${{ secrets.TRONGRID_API_KEY }}
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             ADMIN_SECRET=${{ secrets.ADMIN_SECRET }}
+            # ── Alpaca real-time market data (engine) ─────────────────────────
+            APCA_API_KEY_ID=${{ secrets.APCA_API_KEY_ID }}
+            APCA_API_SECRET_KEY=${{ secrets.APCA_API_SECRET_KEY }}
             # ── Staking service ────────────────────────────────────────────────
             PAYSTACK_SECRET_KEY=${{ secrets.PAYSTACK_SECRET_KEY }}
             PAYSTACK_PUBLIC_KEY=${{ secrets.PAYSTACK_PUBLIC_KEY }}
