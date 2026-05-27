@@ -4,15 +4,16 @@ import type { SymbolInfo } from '@/types'
 import { useTicks }   from '@/hooks/useTicks'
 import { useAccount } from '@/hooks/useAccount'
 import { useAuth }    from '@/hooks/useAuth'
-import Header         from '@/components/Header'
-import SymbolBar      from '@/components/SymbolBar'
-import Chart          from '@/components/Chart'
-import TradePanel     from '@/components/TradePanel'
-import Positions      from '@/components/Positions'
-import AuthModal      from '@/components/AuthModal'
-import ProfileModal   from '@/components/ProfileModal'
-import AppDrawer      from '@/components/AppDrawer'
-import DepositModal   from '@/components/DepositModal'
+import Header           from '@/components/Header'
+import SymbolBar        from '@/components/SymbolBar'
+import Chart            from '@/components/Chart'
+import TradePanel       from '@/components/TradePanel'
+import MobileQuickTrade from '@/components/MobileQuickTrade'
+import Positions        from '@/components/Positions'
+import AuthModal        from '@/components/AuthModal'
+import ProfileModal     from '@/components/ProfileModal'
+import AppDrawer        from '@/components/AppDrawer'
+import DepositModal     from '@/components/DepositModal'
 import { provisionAccount } from '@/hooks/useAccount'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
@@ -83,7 +84,7 @@ export default function TradingPage() {
   const openCount = positions.length + binaries.length + spots.length
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-surface">
+    <div className="flex flex-col h-[100dvh] overflow-hidden bg-surface">
       {/* Modals & drawer */}
       {authOpen    && <AuthModal onSuccess={handleGoogleLogin} error={authError} />}
       {profileOpen && user && <ProfileModal user={user} onClose={() => setProfileOpen(false)} />}
@@ -152,14 +153,26 @@ export default function TradingPage() {
       {/* ── Mobile layout (<md): tab-switched panels ────────────────────────── */}
       <div className="flex flex-col flex-1 overflow-hidden md:hidden">
         {/* Content area */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden flex flex-col">
           {mobileTab === 'chart' && (
-            <Chart
-              candles={candles} lastTick={lastTick} symbol={selected}
-              info={selectedInfo}
-              accountId={accountId}
-              binaries={binaries} settledHistory={settledHistory}
-            />
+            <>
+              <div className="flex-1 overflow-hidden">
+                <Chart
+                  candles={candles} lastTick={lastTick} symbol={selected}
+                  info={selectedInfo}
+                  accountId={accountId}
+                  binaries={binaries} settledHistory={settledHistory}
+                />
+              </div>
+              <MobileQuickTrade
+                symbol={selected}
+                info={selectedInfo}
+                lastTick={lastTick}
+                account={account}
+                accountId={accountId}
+                onTraded={handleTraded}
+              />
+            </>
           )}
           {mobileTab === 'trade' && (
             <div className="h-full overflow-y-auto bg-panel">
