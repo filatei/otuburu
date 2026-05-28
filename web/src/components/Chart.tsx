@@ -268,6 +268,8 @@ function LiveChart({ candles, lastTick, symbol, info, binaries, settledHistory }
 
       <div ref={containerRef} className="w-full h-full" />
 
+      <ZoomControls chartRef={chartRef} />
+
       {candles.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center text-dim text-sm">
           Waiting for ticks…
@@ -387,6 +389,8 @@ function HistoricalChart({ symbol, info, resolution, candles, trades, loading }:
 
       <div ref={containerRef} className="w-full h-full" />
 
+      <ZoomControls chartRef={chartRef} />
+
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-surface/60 text-dim text-sm">
           Loading {resolution} history…
@@ -397,6 +401,74 @@ function HistoricalChart({ symbol, info, resolution, candles, trades, loading }:
           No {resolution} data yet — trade data builds over time.
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Zoom controls ───────────────────────────────────────────────────────────
+//
+// Three buttons stacked bottom-right of the chart: zoom in, zoom out, fit.
+// Zoom works by scaling barSpacing (pixel width per bar) — bigger means
+// fewer candles fit on screen (zoomed in); smaller means more candles fit
+// (zoomed out). lightweight-charts also handles wheel/pinch natively, but
+// explicit buttons help on mobile where pinch-to-zoom collides with the
+// page scroll, and on desktop for users who prefer click over scroll.
+
+const ZOOM_MIN_BAR_SPACING = 2
+const ZOOM_MAX_BAR_SPACING = 50
+const ZOOM_FACTOR = 1.3
+
+function ZoomControls({ chartRef }: {
+  chartRef: React.MutableRefObject<import('lightweight-charts').IChartApi | null>
+}) {
+  const zoom = (factor: number) => {
+    const chart = chartRef.current
+    if (!chart) return
+    const ts = chart.timeScale()
+    const current = ts.options().barSpacing ?? 6
+    const next = Math.max(
+      ZOOM_MIN_BAR_SPACING,
+      Math.min(ZOOM_MAX_BAR_SPACING, current * factor),
+    )
+    ts.applyOptions({ barSpacing: next })
+  }
+  const fit = () => chartRef.current?.timeScale().fitContent()
+
+  const btn =
+    'w-8 h-8 flex items-center justify-center rounded ' +
+    'bg-panel/90 border border-border text-text text-base font-semibold ' +
+    'hover:bg-surface hover:border-brand/60 active:scale-95 transition-all ' +
+    'shadow-lg backdrop-blur-sm'
+
+  return (
+    <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-1.5 pointer-events-auto">
+      <button
+        type="button"
+        onClick={() => zoom(ZOOM_FACTOR)}
+        aria-label="Zoom in"
+        title="Zoom in"
+        className={btn}
+      >
+        +
+      </button>
+      <button
+        type="button"
+        onClick={() => zoom(1 / ZOOM_FACTOR)}
+        aria-label="Zoom out"
+        title="Zoom out"
+        className={btn}
+      >
+        −
+      </button>
+      <button
+        type="button"
+        onClick={fit}
+        aria-label="Fit content"
+        title="Fit all candles"
+        className={btn + ' text-sm'}
+      >
+        ⤢
+      </button>
     </div>
   )
 }
