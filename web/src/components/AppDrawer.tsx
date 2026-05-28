@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AuthUser } from '@/hooks/useAuth'
 
 interface Props {
@@ -136,6 +136,10 @@ export default function AppDrawer({
             <Item icon="🔔" label="Notifications"      sub="Trade alerts & news"         badge="soon" />
           </Section>
 
+          <Section title="Display">
+            <FullscreenItem onClose={onClose} />
+          </Section>
+
           <Section title="Help">
             <Item icon="❓" label="Help Center" sub="How contracts work · FAQ" badge="soon" />
             <Item icon="📜" label="Terms & Legal" sub="Risk disclosure · privacy"   badge="soon" />
@@ -167,6 +171,66 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <p className="text-[10px] font-semibold text-dim uppercase tracking-widest px-1 mb-1.5">{title}</p>
       <div className="space-y-1">{children}</div>
     </div>
+  )
+}
+
+/** FullscreenItem — toggles document fullscreen so the browser URL bar
+ *  and tabs hide, giving a near-native trading view. Feature-detected:
+ *  iOS Safari doesn't expose the Fullscreen API on the document element
+ *  (only on <video>), so the item just doesn't render there — those users
+ *  get the same effect by installing the PWA via the Home Screen banner.
+ *
+ *  We listen for fullscreenchange to keep the label in sync if the user
+ *  exits with Esc or a system gesture.
+ */
+function FullscreenItem({ onClose }: { onClose: () => void }) {
+  const [supported, setSupported] = useState(false)
+  const [isFs,      setIsFs]      = useState(false)
+
+  useEffect(() => {
+    // requestFullscreen is undefined on iOS Safari (mobile + iPad). The
+    // double-bang covers prefixed implementations Chrome dropped years
+    // ago but doesn't hurt to keep.
+    const el = document.documentElement as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void>
+    }
+    const has = typeof el.requestFullscreen === 'function' || typeof el.webkitRequestFullscreen === 'function'
+    setSupported(has)
+    if (!has) return
+
+    const sync = () => setIsFs(!!document.fullscreenElement)
+    sync()
+    document.addEventListener('fullscreenchange', sync)
+    return () => document.removeEventListener('fullscreenchange', sync)
+  }, [])
+
+  if (!supported) return null
+
+  const toggle = async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen()
+      } else {
+        await document.documentElement.requestFullscreen()
+      }
+    } catch (err) {
+      // Some browsers reject the call if the gesture didn't originate from
+      // a "user activation" — uncommon for a tap inside the drawer, but
+      // log silently rather than alerting.
+      console.warn('fullscreen toggle failed', err)
+    } finally {
+      onClose()
+    }
+  }
+
+  return (
+    <Item
+      icon={isFs ? '⊟' : '⛶'}
+      label={isFs ? 'Exit fullscreen' : 'Hide browser URL'}
+      sub={isFs ? 'Show browser chrome again' : 'Maximise the trading view'}
+      badge="live"
+      onClick={toggle}
+    />
   )
 }
 

@@ -62,7 +62,8 @@ export default function Header({ user, connected, mode, engineBalance, onModeTog
             {mode === 'demo' ? 'DEMO' : 'REAL'}
           </button>
 
-          {/* Balance */}
+          {/* Balance — desktop only. Mobile sees balance in the drawer's
+              user card so the header stays MT5-lean. */}
           {balance !== null && (
             <div className="hidden sm:flex flex-col items-end">
               <span className="text-dim text-[10px] uppercase tracking-wider leading-none">Balance</span>
@@ -72,20 +73,10 @@ export default function Header({ user, connected, mode, engineBalance, onModeTog
             </div>
           )}
 
-          {/* Avatar — also opens drawer */}
-          <button
-            onClick={onMenuOpen}
-            className="flex items-center rounded-full hover:ring-1 hover:ring-brand/40 transition-all"
-            aria-label="Open menu"
-          >
-            {user.picture ? (
-              <img src={user.picture} alt={user.name} className="w-7 h-7 rounded-full border border-border" referrerPolicy="no-referrer" />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-text">
-                {user.name?.[0]?.toUpperCase() ?? '?'}
-              </div>
-            )}
-          </button>
+          {/* Avatar intentionally removed from the header — it was redundant
+              with the hamburger (both opened the same drawer) and MT5
+              doesn't show a user avatar on its main screens. Profile +
+              account info live inside the drawer's user card now. */}
         </div>
       ) : (
         <div className="px-3 py-1 rounded bg-surface border border-border text-dim text-xs">
