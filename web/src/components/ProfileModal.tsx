@@ -94,7 +94,7 @@ export default function ProfileModal({ user, onClose }: Props) {
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
               saved
                 ? 'bg-up/20 text-up border border-up/30'
-                : 'bg-brand text-white hover:bg-brand/90 border border-brand'
+                : 'bg-brand text-black hover:bg-brand/90 border border-brand'
             }`}
           >
             {saved ? '✓ Saved' : 'Save Changes'}

@@ -18,6 +18,39 @@ import { provisionAccount } from '@/hooks/useAccount'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 
+/**
+ * Symbol display priority. Lower index = leftmost on the symbol bar.
+ * Anything not in this list is appended after, in API-returned order.
+ *
+ * Lead with metals (gold first, then silver — the headline retail assets),
+ * then majors (BTC, ETH), then indices (SPX/DJI/NDX), then forex (EUR/GBP),
+ * then synthetic indices at the end.
+ */
+const SYMBOL_ORDER: string[] = [
+  'cryXAUUSD',  // Gold
+  'XAGUSD',     // Silver
+  'cryBTCUSD',  // Bitcoin
+  'cryETHUSD',  // Ethereum
+  'SPX',        // S&P 500
+  'DJI',        // Dow Jones
+  'NDX',        // Nasdaq-100
+  'frxEURUSD',  // EUR/USD
+  'frxGBPUSD',  // GBP/USD
+  'BOOM500',
+  'BOOM1000',
+  'CRASH1000',
+]
+const SYMBOL_RANK = new Map(SYMBOL_ORDER.map((s, i) => [s, i]))
+
+function orderSymbols(symbols: SymbolInfo[]): SymbolInfo[] {
+  const FALLBACK = SYMBOL_ORDER.length
+  return [...symbols].sort((a, b) => {
+    const ra = SYMBOL_RANK.get(a.symbol) ?? FALLBACK
+    const rb = SYMBOL_RANK.get(b.symbol) ?? FALLBACK
+    return ra === rb ? a.symbol.localeCompare(b.symbol) : ra - rb
+  })
+}
+
 type MobileTab = 'chart' | 'trade' | 'positions'
 
 export default function TradingPage() {
@@ -42,8 +75,9 @@ export default function TradingPage() {
     fetch(`${API_BASE}/api/symbols`)
       .then(r => r.json())
       .then((d: { symbols: SymbolInfo[] }) => {
-        setSymbols(d.symbols ?? [])
-        if (d.symbols?.length) setSelected(d.symbols[0].symbol)
+        const ordered = orderSymbols(d.symbols ?? [])
+        setSymbols(ordered)
+        if (ordered.length) setSelected(ordered[0].symbol)
       })
       .catch(() => {})
   }, [])
@@ -252,7 +286,7 @@ function MobileTabBtn({ label, icon, active, onClick, accent, badge }: {
       <span className={`text-lg ${active ? (accent ? 'text-brand' : 'text-text') : 'text-dim'}`}>{icon}</span>
       <span>{label}</span>
       {badge !== undefined && (
-        <span className="absolute top-2 right-1/4 min-w-[16px] h-4 bg-brand text-white text-[9px] rounded-full flex items-center justify-center px-1">
+        <span className="absolute top-2 right-1/4 min-w-[16px] h-4 bg-brand text-black text-[9px] font-bold rounded-full flex items-center justify-center px-1">
           {badge}
         </span>
       )}

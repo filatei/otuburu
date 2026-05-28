@@ -19,14 +19,15 @@ export default function Chart({
   candles, lastTick, symbol, info = null, accountId = 'demo',
   binaries = [], settledHistory = [],
 }: Props) {
-  const [resolution, setResolution] = useState<Resolution>('LIVE')
+  const [resolution, setResolution] = useState<Resolution>('M1')
 
   const { candles: histCandles, trades: histTrades, loading } =
     useChartHistory(symbol, resolution, accountId)
 
-  // Reset to LIVE when symbol changes
+  // Reset to default (M1) when symbol changes — gives users actual candle
+  // history immediately instead of waiting for live ticks to accumulate.
   useEffect(() => {
-    setResolution('LIVE')
+    setResolution('M1')
   }, [symbol])
 
   return (
@@ -72,7 +73,7 @@ function TimeframeBar({ resolution, onSelect }: {
           onClick={() => onSelect(r)}
           className={`px-2.5 py-0.5 rounded text-[11px] font-semibold transition-colors shrink-0 ${
             resolution === r
-              ? 'bg-brand text-white'
+              ? 'bg-brand text-black'
               : 'text-dim hover:text-text hover:bg-surface'
           }`}
         >
