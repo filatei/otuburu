@@ -90,6 +90,9 @@ func main() {
 	protected.GET("/wallet/balance", walletH.Balance)
 	protected.GET("/wallet/transactions", walletH.Transactions)
 	protected.POST("/wallet/withdraw", walletH.Withdraw)
+	// Phase-2 multi-account: list + create real accounts for a user.
+	protected.GET("/wallet/accounts", walletH.ListAccounts)
+	protected.POST("/wallet/accounts", walletH.CreateAccount)
 
 	// ── Payment channels ──────────────────────────────────────────────────────
 	// Seed rate from env; RateFetcher will override with live data within seconds.

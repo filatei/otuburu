@@ -13,16 +13,47 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── Accounts (each user has demo + real) ─────────────────────────────────────
+-- ── Accounts (one demo + N labelled real per user) ────────────────────────────
+-- The old UNIQUE(user_id, type) limited users to exactly one real account.
+-- Phase 2 of the deposit refactor lifts that: a user can now have multiple
+-- real accounts (e.g. "Main", "Strategy A", "Experiment"), each USD-denominated.
+-- Demo stays singleton — there's no value in multiple demos for retail.
 CREATE TABLE IF NOT EXISTS accounts (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     type       TEXT NOT NULL CHECK (type IN ('demo','real')),
+    label      TEXT NOT NULL DEFAULT 'Account',  -- user-visible name e.g. "Main"
     currency   TEXT NOT NULL DEFAULT 'USDT',
     balance    NUMERIC(20,6) NOT NULL DEFAULT 0 CHECK (balance >= 0),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (user_id, type)
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ── Migration block: idempotent. Re-runs of schema.sql apply cleanly. ────────
+-- For installs that pre-date the label column / multi-real shape.
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='accounts' AND column_name='label'
+    ) THEN
+        ALTER TABLE accounts ADD COLUMN label TEXT;
+        UPDATE accounts SET label='Demo' WHERE type='demo' AND label IS NULL;
+        UPDATE accounts SET label='Main' WHERE type='real' AND label IS NULL;
+        ALTER TABLE accounts ALTER COLUMN label SET NOT NULL;
+        ALTER TABLE accounts ALTER COLUMN label SET DEFAULT 'Account';
+    END IF;
+END $$;
+
+-- Drop the old uniqueness that limited each user to one real account. Name is
+-- the Postgres-generated default for `UNIQUE (user_id, type)`.
+ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_user_id_type_key;
+
+-- Keep demo singleton via a partial unique index. Real accounts are now N:1.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_one_demo_per_user
+    ON accounts (user_id) WHERE type = 'demo';
+
+-- Lookup helper: list a user's accounts in creation order.
+CREATE INDEX IF NOT EXISTS idx_accounts_user_created
+    ON accounts (user_id, created_at);
 
 -- ── TRC20 deposit addresses (one per user, HD-derived) ────────────────────────
 CREATE TABLE IF NOT EXISTS deposit_addresses (

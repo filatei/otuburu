@@ -22,11 +22,16 @@ import (
 var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 
 // Claims mirrors the wallet service Claims so both services share one token format.
+// Phase 2 adds AccountIDs (slice) for multi-account users; AccountID stays as
+// a back-compat alias of "first real account" for tokens issued before the
+// upgrade. OwnsAccount honours both. Keep this struct byte-identical to
+// wallet/internal/auth/jwt.go Claims — gateway parses tokens minted there.
 type Claims struct {
-	UserID    string `json:"uid"`
-	AccountID string `json:"aid"` // real trading account UUID
-	DemoID    string `json:"did"` // demo trading account UUID
-	Email     string `json:"email"`
+	UserID     string   `json:"uid"`
+	AccountID  string   `json:"aid"`  // DEPRECATED: first real account; use AccountIDs
+	AccountIDs []string `json:"aids"` // all real accounts owned by the user
+	DemoID     string   `json:"did"`  // demo account id (singleton)
+	Email      string   `json:"email"`
 	jwt.RegisteredClaims
 }
 
@@ -77,7 +82,20 @@ func GetClaims(c *gin.Context) *Claims {
 	return claims
 }
 
-// OwnsAccount returns true when the accountID matches the user's real or demo account.
+// OwnsAccount returns true when accountID matches the demo, any real account
+// in AccountIDs, or the legacy AccountID field (back-compat for tokens issued
+// before AccountIDs landed). All trade/account-scoped handlers gate on this.
 func (cl *Claims) OwnsAccount(accountID string) bool {
-	return accountID == cl.AccountID || accountID == cl.DemoID
+	if accountID == "" {
+		return false
+	}
+	if accountID == cl.DemoID || accountID == cl.AccountID {
+		return true
+	}
+	for _, id := range cl.AccountIDs {
+		if id == accountID {
+			return true
+		}
+	}
+	return false
 }
