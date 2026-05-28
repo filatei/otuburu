@@ -639,9 +639,19 @@ fn spawn_alpaca_indices(
 
             match fetch_alpaca_quotes(&client, &tickers, &key_id, &secret_key).await {
                 Some(quotes) => {
-                    let mut last_guard = last.lock().await;
-                    for (sym, ba) in quotes {
-                        last_guard.insert(sym, ba);
+                    // Distinguish "got data" from "got an empty response after
+                    // filtering". Both used to be silent successes — that
+                    // silence is exactly what masked the dispatch bug below
+                    // when Alpaca briefly returned bid=0/ask=0 stubs.
+                    if quotes.is_empty() {
+                        warn!(
+                            "alpaca quote fetch returned 0 usable quotes (filtered by bid>0 && ask>bid)"
+                        );
+                    } else {
+                        let mut last_guard = last.lock().await;
+                        for (sym, ba) in quotes {
+                            last_guard.insert(sym, ba);
+                        }
                     }
                 }
                 None => {
@@ -666,7 +676,14 @@ fn spawn_alpaca_indices(
                 .map(|(k, v)| (k.clone(), *v))
                 .collect();
             for (alpaca_sym, (bid, ask)) in snap {
-                if let Some(&(_, internal_sym)) = ALPACA_SYMBOL_MAP
+                // ALPACA_SYMBOL_MAP entries are (internal, alpaca) so the
+                // FIRST slot is the engine-internal symbol we want to dispatch
+                // under. Earlier code bound `internal_sym` to the second slot
+                // (the Alpaca ticker) — ticks were sent as "SPY/DIA/QQQ", the
+                // engine doesn't know those, dispatch silently no-op'd, and
+                // SPX/DJI/NDX stayed blank in the UI despite Alpaca returning
+                // fresh quotes every second. Slot fix below.
+                if let Some(&(internal_sym, _)) = ALPACA_SYMBOL_MAP
                     .iter()
                     .find(|(_, alp)| *alp == alpaca_sym.as_str())
                 {
