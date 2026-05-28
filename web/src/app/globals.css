@@ -26,10 +26,13 @@ html, body {
   overflow: hidden;
 }
 
-/* Safe area inset for iOS notch / home indicator */
-.safe-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-}
+/* Safe area insets — iOS notch (top), home indicator (bottom), landscape
+   keep-out zones (left/right). Applied to fixed app chrome so content
+   doesn't hide under the device hardware. */
+.safe-top    { padding-top:    env(safe-area-inset-top,    0px); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.safe-left   { padding-left:   env(safe-area-inset-left,   0px); }
+.safe-right  { padding-right:  env(safe-area-inset-right,  0px); }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 4px; height: 4px; }

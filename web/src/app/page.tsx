@@ -267,8 +267,10 @@ export default function TradingPage() {
           )}
         </div>
 
-        {/* Bottom tab bar — MT5-style: Symbols / Chart / Trade / Positions */}
-        <nav className="shrink-0 bg-panel border-t border-border flex items-stretch h-14 safe-bottom">
+        {/* Bottom tab bar — MT5-style: Symbols / Chart / Trade / Positions.
+            h-16 (64px) for thumb-friendly touch targets (Apple/Material
+            both recommend 44–48px minimum; we go bigger for one-handed reach). */}
+        <nav className="shrink-0 bg-panel border-t border-border flex items-stretch h-16 safe-bottom">
           <MobileTabBtn
             label="Symbols"
             icon={<SymbolsIcon />}
@@ -309,19 +311,23 @@ function MobileTabBtn({ label, icon, active, onClick, accent, badge }: {
   return (
     <button
       onClick={onClick}
-      className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium relative transition-colors ${
+      className={`flex-1 flex flex-col items-center justify-center gap-1 text-[11px] font-medium relative transition-colors active:scale-95 ${
         active
           ? accent ? 'text-brand' : 'text-text'
-          : 'text-dim'
+          : 'text-dim hover:text-text'
       }`}
     >
       {active && (
-        <span className={`absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-b ${accent ? 'bg-brand' : 'bg-text'}`} />
+        <span className={`absolute top-0 left-1/2 -translate-x-1/2 w-10 h-[3px] rounded-b ${accent ? 'bg-brand' : 'bg-text'}`} />
       )}
-      <span className={`text-lg ${active ? (accent ? 'text-brand' : 'text-text') : 'text-dim'}`}>{icon}</span>
-      <span>{label}</span>
+      <span
+        className={`text-[22px] leading-none ${active ? (accent ? 'text-brand' : 'text-text') : 'text-dim'}`}
+      >
+        {icon}
+      </span>
+      <span className="leading-none">{label}</span>
       {badge !== undefined && (
-        <span className="absolute top-2 right-1/4 min-w-[16px] h-4 bg-brand text-black text-[9px] font-bold rounded-full flex items-center justify-center px-1">
+        <span className="absolute top-1.5 right-[22%] min-w-[18px] h-[18px] bg-brand text-black text-[10px] font-bold rounded-full flex items-center justify-center px-1">
           {badge}
         </span>
       )}
@@ -333,7 +339,7 @@ function MobileTabBtn({ label, icon, active, onClick, accent, badge }: {
 function SymbolsIcon() {
   // Grid-of-cards icon — represents the symbol watchlist
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="7" height="7" rx="1" />
       <rect x="14" y="3" width="7" height="7" rx="1" />
       <rect x="3" y="14" width="7" height="7" rx="1" />
@@ -343,21 +349,21 @@ function SymbolsIcon() {
 }
 function ChartIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
     </svg>
   )
 }
 function TradeIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" />
     </svg>
   )
 }
 function PositionsIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" />
       <line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" />
     </svg>

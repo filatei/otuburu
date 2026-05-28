@@ -42,6 +42,15 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        {/* iOS PWA startup image. iOS Safari shows this while the app is
+            launching from a Home Screen icon. A single fallback PNG is
+            stretched/scaled to fit — proper per-device sizing is a follow-up. */}
+        <link
+          rel="apple-touch-startup-image"
+          href="/icons/apple-splash.png"
+        />
+      </head>
       <body>
         {children}
         <InstallPwa />

@@ -17,7 +17,11 @@ export default function Header({ user, connected, mode, engineBalance, onModeTog
     : user ? (mode === 'demo' ? user.demo_balance : user.real_balance) : null
 
   return (
-    <header className="h-12 bg-panel border-b border-border flex items-center px-3 gap-3 shrink-0 z-10">
+    // Outer wrapper carries safe-top padding so the header content clears
+    // the iOS notch in PWA standalone mode (viewportFit: 'cover'). Inner
+    // div keeps the fixed 48px header height for the controls.
+    <header className="safe-top bg-panel border-b border-border shrink-0 z-10">
+    <div className="h-12 flex items-center px-3 gap-3">
 
       {/* Hamburger — always visible, opens the full drawer */}
       <button
@@ -88,6 +92,7 @@ export default function Header({ user, connected, mode, engineBalance, onModeTog
           Sign in
         </div>
       )}
+    </div>
     </header>
   )
 }
