@@ -203,7 +203,7 @@ export default function DepositModal({ user, onClose }: Props) {
               <button
                 onClick={handlePaystack}
                 disabled={psLoading || !amountUSD}
-                className="w-full py-3 bg-brand hover:bg-brand/90 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
+                className="w-full py-3 bg-brand hover:bg-brand/90 disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
               >
                 {psLoading ? (
                   <><span className="animate-spin">⟳</span> Redirecting…</>

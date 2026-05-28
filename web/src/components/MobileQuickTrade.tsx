@@ -189,7 +189,7 @@ function ModeChip({ label, active, onClick }: { label: string; active: boolean; 
       onClick={onClick}
       className={clsx(
         'px-2.5 py-1 rounded text-[10px] uppercase tracking-wider transition-colors',
-        active ? 'bg-brand text-bg' : 'text-dim',
+        active ? 'bg-brand text-black' : 'text-dim',
       )}
     >
       {label}
