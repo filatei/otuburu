@@ -40,6 +40,42 @@ interface Props {
  *  History triad was a misread — Recent was just the first 20 of History. */
 type Tab = 'trade' | 'history'
 
+/** History date-range filter. Preset chips cover the 99% case; Custom opens
+ *  a pair of date inputs. Stored as a discriminated union so the rendering
+ *  logic can show different controls without juggling nullable fields. */
+type HistoryFilter =
+  | { kind: 'today' }
+  | { kind: '7d' }
+  | { kind: '30d' }
+  | { kind: 'custom'; from: string; to: string } // yyyy-MM-dd inputs
+
+function filterCutoff(f: HistoryFilter): { fromMs: number; toMs: number } {
+  const now = Date.now()
+  const startOfTodayUTC = (() => {
+    const d = new Date()
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+  })()
+  switch (f.kind) {
+    case 'today': return { fromMs: startOfTodayUTC,            toMs: now }
+    case '7d':    return { fromMs: now - 7  * 86_400_000,      toMs: now }
+    case '30d':   return { fromMs: now - 30 * 86_400_000,      toMs: now }
+    case 'custom': {
+      // yyyy-MM-dd → UTC start of `from`, UTC end-of-day of `to`. Empty
+      // strings produce NaN which is clamped to a permissive range so the
+      // user sees results while they're still picking dates.
+      const fromMs = f.from ? Date.parse(f.from + 'T00:00:00Z') : 0
+      const toMs   = f.to   ? Date.parse(f.to   + 'T23:59:59Z') : now
+      return { fromMs: Number.isFinite(fromMs) ? fromMs : 0,
+               toMs:   Number.isFinite(toMs)   ? toMs   : now }
+    }
+  }
+}
+
+/** Net P&L per trade. Win: payout (pnl field) minus stake. Loss: -stake. */
+function netPnl(t: SettledTrade): number {
+  return t.outcome === 'win' ? t.pnl - t.stake : -t.stake
+}
+
 export default function MobilePositions(props: Props) {
   const {
     positions, binaries, spots, settledHistory, ticks, symbols,
@@ -47,8 +83,19 @@ export default function MobilePositions(props: Props) {
   } = props
 
   const [tab, setTab] = useState<Tab>('trade')
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>({ kind: '7d' })
   const symbolMap = useMemo(() => buildSymbolMap(symbols), [symbols])
   const openCount = positions.length + binaries.length + spots.length
+
+  // Filtered settled trades + their aggregate net P&L for the filter chip.
+  // Memoised on (history, filter) so chip switching is cheap even with a
+  // few thousand settled trades.
+  const { filteredHistory, filteredPnl } = useMemo(() => {
+    const { fromMs, toMs } = filterCutoff(historyFilter)
+    const list = settledHistory.filter(t => t.settled_at >= fromMs && t.settled_at <= toMs)
+    const pnl  = list.reduce((sum, t) => sum + netPnl(t), 0)
+    return { filteredHistory: list, filteredPnl: pnl }
+  }, [settledHistory, historyFilter])
 
   return (
     <div className="flex flex-col h-full">
@@ -135,11 +182,19 @@ export default function MobilePositions(props: Props) {
       )}
 
       {tab === 'history' && (
-        settledHistory.length === 0
-          ? <EmptyState text="No trade history" />
-          : settledHistory.map(t => (
-              <SettledRow key={t.id} trade={t} info={symbolMap.get(t.symbol) ?? null} />
-            ))
+        <>
+          <HistoryFilterBar
+            filter={historyFilter}
+            onChange={setHistoryFilter}
+            totalPnl={filteredPnl}
+            count={filteredHistory.length}
+          />
+          {filteredHistory.length === 0
+            ? <EmptyState text="No trades in this range" />
+            : filteredHistory.map(t => (
+                <SettledRow key={t.id} trade={t} info={symbolMap.get(t.symbol) ?? null} />
+              ))}
+        </>
       )}
       </div>
     </div>
@@ -366,4 +421,97 @@ function formatAgo(ms: number): string {
   if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
   return `${Math.floor(diff / 3_600_000)}h ago`
+}
+
+// ─── History filter bar ──────────────────────────────────────────────────────
+//
+// Preset date-range chips + custom range, plus an aggregate net P&L badge
+// for the filtered slice. Sticky-top inside the scroll container so the
+// user can scroll long histories without losing the totals.
+//
+// Custom uses native <input type="date"> which Mobile Safari and Chrome
+// render as the system date picker — no library needed, no calendar layout
+// to maintain. Range applies on the fly as the user picks each date.
+
+function HistoryFilterBar({ filter, onChange, totalPnl, count }: {
+  filter:   HistoryFilter
+  onChange: (f: HistoryFilter) => void
+  totalPnl: number
+  count:    number
+}) {
+  const isToday  = filter.kind === 'today'
+  const is7d     = filter.kind === '7d'
+  const is30d    = filter.kind === '30d'
+  const isCustom = filter.kind === 'custom'
+
+  const today = useMemo(() => {
+    const d = new Date()
+    return d.toISOString().slice(0, 10)
+  }, [])
+
+  return (
+    <div className="sticky top-0 z-10 bg-panel border-b border-border">
+      <div className="flex items-center gap-1.5 px-3 py-2">
+        <FilterChip label="Today" active={isToday}  onClick={() => onChange({ kind: 'today' })} />
+        <FilterChip label="7d"    active={is7d}     onClick={() => onChange({ kind: '7d' })} />
+        <FilterChip label="30d"   active={is30d}    onClick={() => onChange({ kind: '30d' })} />
+        <FilterChip label="Custom" active={isCustom} onClick={() =>
+          onChange({ kind: 'custom', from: '', to: today })
+        } />
+        <div className="flex-1" />
+        {/* Total P&L for the filtered slice. Tucked right of the chips so it
+            sits next to the time-range the number applies to. */}
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-[9px] uppercase tracking-wider text-dim">Net</span>
+          <span className={clsx(
+            'num text-sm font-bold',
+            totalPnl >= 0 ? 'text-up' : 'text-down',
+          )}>
+            {totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(2)}
+          </span>
+          <span className="text-[10px] text-dim/70">· {count}</span>
+        </div>
+      </div>
+      {isCustom && (
+        <div className="flex items-center gap-2 px-3 pb-2 text-xs">
+          <label className="text-dim shrink-0">From</label>
+          <input
+            type="date"
+            value={filter.from}
+            max={filter.to || today}
+            onChange={e => onChange({ kind: 'custom', from: e.target.value, to: filter.to })}
+            className="flex-1 bg-surface border border-border rounded-md px-2 py-1 text-text num"
+          />
+          <label className="text-dim shrink-0">To</label>
+          <input
+            type="date"
+            value={filter.to}
+            min={filter.from}
+            max={today}
+            onChange={e => onChange({ kind: 'custom', from: filter.from, to: e.target.value })}
+            className="flex-1 bg-surface border border-border rounded-md px-2 py-1 text-text num"
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FilterChip({ label, active, onClick }: {
+  label: string; active: boolean; onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={clsx(
+        'px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors',
+        active
+          ? 'bg-brand text-black'
+          : 'bg-surface/60 text-dim hover:text-text border border-border/60',
+      )}
+    >
+      {label}
+    </button>
+  )
 }
