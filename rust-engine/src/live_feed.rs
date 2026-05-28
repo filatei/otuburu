@@ -38,6 +38,9 @@ use crate::state::SharedState;
 
 /// Gold: 0.15% half-spread (15 bps each side).
 const GOLD_HALF_SPREAD_PCT: f64 = 0.0015;
+/// Silver: 0.20% half-spread (20 bps each side). Slightly wider than gold —
+/// silver is more volatile and has lower liquidity.
+const SILVER_HALF_SPREAD_PCT: f64 = 0.0020;
 /// US indices: 0.05% half-spread (5 bps each side). Real-world index CFD
 /// spreads run 0.5–2 points on SPX (~3–10 bps); we sit at the tighter end.
 const INDEX_HALF_SPREAD_PCT: f64 = 0.0005;
@@ -377,13 +380,22 @@ pub fn start(state: SharedState) {
     // ETH/USD — 500 ms (Binance bookTicker, real bid/ask)
     spawn_binance(state.clone(), client.clone(), "ETHUSDT", "cryETHUSD", 500);
 
-    // Gold — Yahoo at 2 s, synthetic bid/ask around mid.
+    // Gold — Yahoo GC=F at 2 s, synthetic bid/ask around mid.
     spawn_yahoo(
         state.clone(),
         client.clone(),
         "GC=F",
         "cryXAUUSD",
         GOLD_HALF_SPREAD_PCT,
+        2_000,
+    );
+    // Silver — Yahoo SI=F at 2 s, synthetic bid/ask around mid.
+    spawn_yahoo(
+        state.clone(),
+        client.clone(),
+        "SI=F",
+        "XAGUSD",
+        SILVER_HALF_SPREAD_PCT,
         2_000,
     );
 
@@ -438,6 +450,7 @@ pub fn start(state: SharedState) {
     // use SPY/DIA/QQQ tickers (not ^GSPC/^DJI/^IXIC) so historical prices
     // match the ETF scale of the live feed.
     spawn_yahoo_history_refresh(state.clone(), client.clone(), "GC=F", "cryXAUUSD");
+    spawn_yahoo_history_refresh(state.clone(), client.clone(), "SI=F", "XAGUSD");
     spawn_yahoo_history_refresh(state.clone(), client.clone(), "SPY", "SPX");
     spawn_yahoo_history_refresh(state.clone(), client.clone(), "DIA", "DJI");
     spawn_yahoo_history_refresh(state, client, "QQQ", "NDX");

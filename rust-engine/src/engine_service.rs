@@ -260,6 +260,56 @@ impl EngineService for EngineServiceImpl {
         };
 
         let mut inner = self.state.inner.write().await;
+
+        // ── Pre-trade risk checks ───────────────────────────────────────────
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let last_tick = inner
+            .books
+            .values()
+            .find_map(|b| b.quotes().get(&r.symbol).cloned());
+        let last_ts = last_tick.as_ref().map(|t| t.ts);
+        if let Err(e) = inner.risk.check_price_freshness(&r.symbol, last_ts, now_ms) {
+            return Ok(Response::new(PlaceOrderResponse {
+                result: Some(crate::pb::place_order_response::Result::Error(
+                    e.to_string(),
+                )),
+            }));
+        }
+        let mid = last_tick.map(|t| t.mid).unwrap_or(0.0);
+        let contract_size = inner
+            .specs
+            .get(&r.symbol)
+            .map(|s| s.contract_size)
+            .unwrap_or(1.0);
+        let estimated_notional = r.lots * contract_size * mid;
+        let symbol_exposure: f64 = inner
+            .books
+            .values()
+            .flat_map(|b| b.positions())
+            .filter(|p| p.symbol == r.symbol)
+            .map(|p| p.notional)
+            .sum();
+        let house_net_exposure: f64 = inner
+            .books
+            .values()
+            .flat_map(|b| b.positions())
+            .map(|p| p.notional)
+            .sum();
+        if let Err(e) = inner.risk.check_cfd(
+            estimated_notional,
+            &r.symbol,
+            symbol_exposure,
+            house_net_exposure,
+            0.0, // client_daily_loss: stub until persistence lands
+            account_id,
+        ) {
+            return Ok(Response::new(PlaceOrderResponse {
+                result: Some(crate::pb::place_order_response::Result::Error(
+                    e.to_string(),
+                )),
+            }));
+        }
+
         let book = inner.get_or_create_book(account_id, "Demo", true, 0.0);
         let result = book.open_cfd(account_id, &r.symbol, side, r.lots, tp, sl);
 
@@ -339,6 +389,28 @@ impl EngineService for EngineServiceImpl {
         let account_id = parse_account_id(&r.account_id)?;
 
         let mut inner = self.state.inner.write().await;
+
+        // ── Pre-trade risk checks ───────────────────────────────────────────
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let last_ts = inner
+            .books
+            .values()
+            .find_map(|b| b.quotes().get(&r.symbol).map(|t| t.ts));
+        if let Err(e) = inner.risk.check_price_freshness(&r.symbol, last_ts, now_ms) {
+            return Ok(Response::new(PlaceBinaryResponse {
+                result: Some(crate::pb::place_binary_response::Result::Error(
+                    e.to_string(),
+                )),
+            }));
+        }
+        if let Err(e) = inner.risk.check_binary(r.stake, 0.0, account_id) {
+            return Ok(Response::new(PlaceBinaryResponse {
+                result: Some(crate::pb::place_binary_response::Result::Error(
+                    e.to_string(),
+                )),
+            }));
+        }
+
         let book = inner.get_or_create_book(account_id, "Demo", true, 0.0);
         let result = book.open_binary(account_id, &r.symbol, direction, r.stake, r.ticks);
 
@@ -381,6 +453,24 @@ impl EngineService for EngineServiceImpl {
         };
 
         let mut inner = self.state.inner.write().await;
+
+        // ── Pre-trade risk checks ───────────────────────────────────────────
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let last_ts = inner
+            .books
+            .values()
+            .find_map(|b| b.quotes().get(&r.symbol).map(|t| t.ts));
+        if let Err(e) = inner.risk.check_price_freshness(&r.symbol, last_ts, now_ms) {
+            return Ok(Response::new(PlaceSpotResponse {
+                result: Some(crate::pb::place_spot_response::Result::Error(e.to_string())),
+            }));
+        }
+        if let Err(e) = inner.risk.check_spot(r.stake, 0.0, account_id) {
+            return Ok(Response::new(PlaceSpotResponse {
+                result: Some(crate::pb::place_spot_response::Result::Error(e.to_string())),
+            }));
+        }
+
         let book = inner.get_or_create_book(account_id, "Demo", true, 0.0);
         let result = book.open_spot(account_id, &r.symbol, side, r.stake, tp, sl);
 

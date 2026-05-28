@@ -30,6 +30,7 @@ pub fn symbol_cadence_ms(symbol: &str) -> u64 {
         "cryBTCUSD" => 500,
         "cryETHUSD" => 500,
         "cryXAUUSD" => 1000,
+        "XAGUSD" => 2000,
         // US indices polled from Yahoo at 2s — the upstream doesn't update
         // any faster anyway and we don't want to hammer them.
         "SPX" | "DJI" | "NDX" => 2000,
@@ -89,6 +90,7 @@ pub fn symbol_display_divisor(symbol: &str) -> f64 {
         "cryBTCUSD" => 1000.0,
         "cryETHUSD" => 10.0,
         "cryXAUUSD" => 1000.0,
+        "XAGUSD" => 100.0, // silver ~$40 → ~$0.40 display
         "SPX" | "DJI" | "NDX" => 1000.0,
         _ => 1.0,
     }
@@ -104,7 +106,7 @@ pub fn symbol_meta(specs: &HashMap<String, ContractSpec>) -> Vec<SymbolMeta> {
         .map(|(sym, spec)| {
             let kind = if sym.starts_with("frx") {
                 "FX"
-            } else if *sym == "cryXAUUSD" {
+            } else if *sym == "cryXAUUSD" || *sym == "XAGUSD" {
                 "METAL"
             } else if sym.starts_with("cry") {
                 "CRYPTO"

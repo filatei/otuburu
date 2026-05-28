@@ -79,6 +79,13 @@ pub fn default_contract_specs() -> HashMap<String, ContractSpec> {
                 leverage: 20,
             },
         ),
+        (
+            "XAGUSD", // Yahoo SI=F → Silver futures, COMEX
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 10,
+            },
+        ),
         // ── US equity indices (Yahoo Finance feeds, no leverage) ─────────────
         // Internal IDs match Yahoo tickers minus the `^` prefix so the symbol
         // map → fetcher mapping in live_feed.rs is straightforward.
