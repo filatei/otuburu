@@ -4,11 +4,12 @@ import type { SymbolInfo } from '@/types'
 import { useTicks }   from '@/hooks/useTicks'
 import { useAccount } from '@/hooks/useAccount'
 import { useAuth }    from '@/hooks/useAuth'
-import Header           from '@/components/Header'
-import SymbolBar        from '@/components/SymbolBar'
-import Chart            from '@/components/Chart'
-import TradePanel       from '@/components/TradePanel'
-import Positions        from '@/components/Positions'
+import Header            from '@/components/Header'
+import SymbolBar         from '@/components/SymbolBar'
+import Chart             from '@/components/Chart'
+import TradePanel        from '@/components/TradePanel'
+import Positions         from '@/components/Positions'
+import MobileSymbolsTab  from '@/components/MobileSymbolsTab'
 import AuthModal        from '@/components/AuthModal'
 import ProfileModal     from '@/components/ProfileModal'
 import AppDrawer        from '@/components/AppDrawer'
@@ -50,7 +51,7 @@ function orderSymbols(symbols: SymbolInfo[]): SymbolInfo[] {
   })
 }
 
-type MobileTab = 'chart' | 'trade' | 'positions'
+type MobileTab = 'symbols' | 'chart' | 'trade' | 'positions'
 
 export default function TradingPage() {
   const [symbols,       setSymbols]       = useState<SymbolInfo[]>([])
@@ -144,12 +145,17 @@ export default function TradingPage() {
         onMenuOpen={() => setDrawerOpen(true)}
       />
 
-      <SymbolBar
-        symbols={symbols}
-        ticks={allTicks}
-        selected={selected}
-        onSelect={sym => { setSelected(sym); setMobileTab('chart') }}
-      />
+      {/* SymbolBar — desktop only. Mobile users select symbols via the
+          dedicated Symbols tab (MT5-style) to keep the trading screens
+          uncluttered. */}
+      <div className="hidden md:block">
+        <SymbolBar
+          symbols={symbols}
+          ticks={allTicks}
+          selected={selected}
+          onSelect={sym => { setSelected(sym); setMobileTab('chart') }}
+        />
+      </div>
 
       {/* ── Desktop layout (md+): side-by-side ─────────────────────────────── */}
       <div className="hidden md:flex flex-1 overflow-hidden">
@@ -186,8 +192,16 @@ export default function TradingPage() {
       {/* ── Mobile layout (<md): tab-switched panels ────────────────────────── */}
       <div className="flex flex-col flex-1 overflow-hidden md:hidden">
         {/* Content area — each tab is a dedicated full-screen view
-            (Chart / Trade / Positions). MetaTrader-style separation. */}
+            (Symbols / Chart / Trade / Positions). MT5-style separation. */}
         <div className="flex-1 overflow-hidden">
+          {mobileTab === 'symbols' && (
+            <MobileSymbolsTab
+              symbols={symbols}
+              ticks={allTicks}
+              selected={selected}
+              onSelect={(s) => { setSelected(s); setMobileTab('chart') }}
+            />
+          )}
           {mobileTab === 'chart' && (
             <Chart
               candles={candles} lastTick={lastTick} symbol={selected}
@@ -226,8 +240,14 @@ export default function TradingPage() {
           )}
         </div>
 
-        {/* Bottom tab bar */}
+        {/* Bottom tab bar — MT5-style: Symbols / Chart / Trade / Positions */}
         <nav className="shrink-0 bg-panel border-t border-border flex items-stretch h-14 safe-bottom">
+          <MobileTabBtn
+            label="Symbols"
+            icon={<SymbolsIcon />}
+            active={mobileTab === 'symbols'}
+            onClick={() => setMobileTab('symbols')}
+          />
           <MobileTabBtn
             label="Chart"
             icon={<ChartIcon />}
@@ -242,7 +262,7 @@ export default function TradingPage() {
             accent
           />
           <MobileTabBtn
-            label={`Positions${openCount > 0 ? ` (${openCount})` : ''}`}
+            label="Positions"
             icon={<PositionsIcon />}
             active={mobileTab === 'positions'}
             onClick={() => setMobileTab('positions')}
@@ -283,6 +303,17 @@ function MobileTabBtn({ label, icon, active, onClick, accent, badge }: {
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
+function SymbolsIcon() {
+  // Grid-of-cards icon — represents the symbol watchlist
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+    </svg>
+  )
+}
 function ChartIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
