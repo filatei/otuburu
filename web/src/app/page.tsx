@@ -11,6 +11,8 @@ import TradePanel        from '@/components/TradePanel'
 import Positions         from '@/components/Positions'
 import MobileSymbolsTab  from '@/components/MobileSymbolsTab'
 import MobileChartTiles  from '@/components/MobileChartTiles'
+import MobilePositions   from '@/components/MobilePositions'
+import MobileTradeForm   from '@/components/MobileTradeForm'
 import AccountStatsPanel from '@/components/AccountStatsPanel'
 import AuthModal        from '@/components/AuthModal'
 import ProfileModal     from '@/components/ProfileModal'
@@ -232,19 +234,14 @@ export default function TradingPage() {
           )}
           {mobileTab === 'trade' && (
             <div className="h-full overflow-y-auto bg-panel">
-              <AccountStatsPanel
-                account={account}
-                floatingPnl={floatingPnl}
-                title="Trade"
-              />
-              <TradePanel
+              <MobileTradeForm
                 symbol={selected}
                 info={selectedInfo}
                 lastTick={lastTick}
                 account={account}
                 accountId={accountId}
+                floatingPnl={floatingPnl}
                 onTraded={() => { handleTraded(); setMobileTab('positions') }}
-                mobile
               />
             </div>
           )}
@@ -255,7 +252,7 @@ export default function TradingPage() {
                 floatingPnl={floatingPnl}
                 title="Positions"
               />
-              <Positions
+              <MobilePositions
                 positions={positions}
                 binaries={binaries}
                 spots={spots}
@@ -264,7 +261,7 @@ export default function TradingPage() {
                 symbols={symbols}
                 accountId={accountId}
                 onRefresh={refresh}
-                mobile
+                onNewTrade={() => setMobileTab('trade')}
               />
             </div>
           )}
