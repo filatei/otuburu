@@ -84,12 +84,33 @@ CREATE TABLE IF NOT EXISTS paystack_payments (
     reference        TEXT UNIQUE NOT NULL,   -- Paystack reference
     account_id       UUID NOT NULL REFERENCES accounts(id),
     user_id          UUID NOT NULL REFERENCES users(id),
-    amount_usd       NUMERIC(20,6) NOT NULL, -- requested USD equivalent
-    amount_usd_actual NUMERIC(20,6),         -- actual USD credited (computed from kobo)
+    amount_usd       NUMERIC(20,6) NOT NULL, -- requested USD equivalent (the QUOTE — what user gets credited)
+    amount_usd_actual NUMERIC(20,6),         -- actual USD credited (equals amount_usd unless re-priced)
     status           TEXT NOT NULL DEFAULT 'pending'
                      CHECK (status IN ('pending','processing','confirmed','failed')),
     created_at       TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ── FX quotes (audit trail per NGN deposit) ──────────────────────────────────
+-- One row per credited NGN deposit. Captures the interbank rate, the spread
+-- applied, the customer-facing rate, the NGN charged, and the USD credited.
+-- Lets us answer "I deposited X NGN and got $Y — what rate was used?"
+-- months after the fact. Also the source of truth for FX P&L on our side.
+CREATE TABLE IF NOT EXISTS fx_quotes (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    paystack_ref    TEXT UNIQUE NOT NULL REFERENCES paystack_payments(reference) ON DELETE CASCADE,
+    base_ccy        TEXT NOT NULL DEFAULT 'USD',
+    quote_ccy       TEXT NOT NULL DEFAULT 'NGN',
+    interbank_rate  NUMERIC(20,6) NOT NULL,   -- NGN per 1 USD, as fetched from rate source
+    spread_pct      NUMERIC(8,4)  NOT NULL,   -- e.g. 0.0200 = 2%
+    customer_rate   NUMERIC(20,6) NOT NULL,   -- interbank * (1 + spread_pct)
+    ngn_charged     NUMERIC(20,2) NOT NULL,   -- naira amount paid by customer (kobo / 100)
+    usd_credited    NUMERIC(20,6) NOT NULL,   -- USD posted to the account
+    source          TEXT NOT NULL DEFAULT 'open.er-api.com',
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fx_quotes_created ON fx_quotes(created_at DESC);
 
 -- ── Indices ───────────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_ledger_account      ON ledger(account_id);

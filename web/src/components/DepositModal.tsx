@@ -183,6 +183,21 @@ export default function DepositModal({ user: _user, onClose, open = true }: Prop
                 ))}
               </div>
 
+              {/* Conversion-fee disclosure. The NGN amount the user pays at
+                  Paystack includes a 2% FX spread over the interbank rate.
+                  The exact ₦ figure and the locked rate appear on the
+                  Paystack page itself; here we surface the fee so users
+                  aren't surprised. The audit trail per-deposit lives in
+                  the wallet's fx_quotes table. */}
+              <div className="bg-surface/60 rounded-xl px-3 py-2.5 border border-border/60">
+                <p className="text-[11px] text-dim leading-relaxed">
+                  <span className="text-text font-semibold">Conversion fee:</span>{' '}
+                  A 2% spread over the interbank NGN/USD rate is included in
+                  the amount you pay. The exact ₦ amount and locked rate are
+                  shown on the Paystack checkout page before you confirm.
+                </p>
+              </div>
+
               {psErr && (
                 <div className="bg-down/10 border border-down/30 rounded-xl px-4 py-3 text-down text-sm">
                   {psErr}

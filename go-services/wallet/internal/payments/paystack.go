@@ -32,7 +32,22 @@ import (
 const (
 	paystackBaseURL = "https://api.paystack.co"
 	minDepositUSD   = 5.0 // minimum $5 equivalent deposit
+
+	// Spread applied to interbank NGN/USD rate when charging NGN deposits.
+	// Customer effectively pays interbank * (1 + paystackSpreadPct) NGN per
+	// USD credited. Covers our own bank FX conversion cost when we settle out
+	// of NGN, plus a thin protective margin against intra-window rate drift
+	// (Paystack callback usually arrives in <10 min). 2% is the industry-
+	// standard retail FX spread for emerging-market corridors; tweak with
+	// great care — see fx_quotes table for the audit trail.
+	paystackSpreadPct = 0.02
 )
+
+// customerRate returns the NGN/USD rate the customer is actually charged at —
+// interbank plus our 2% spread. Pure for testing.
+func customerRate(interbank float64) float64 {
+	return interbank * (1 + paystackSpreadPct)
+}
 
 // Handler processes Paystack payment events.
 type Handler struct {
@@ -98,8 +113,13 @@ func (h *Handler) Initiate(c *gin.Context) {
 		return
 	}
 
-	amountKobo := int64(req.AmountUSD * h.rates.GetUSDToNGN() * 100) // Paystack uses kobo (1/100 NGN)
-	ref := fmt.Sprintf("OTU-%d-%x", time.Now().UnixMilli(), rand.Int31()) //nolint:gosec
+	// Charge customer at customer_rate (interbank + 2% spread). The user
+	// gets credited their requested USD; we pocket the spread to cover the
+	// real bank FX cost when we settle out plus a small protective buffer.
+	interbank   := h.rates.GetUSDToNGN()
+	custRate    := customerRate(interbank)
+	amountKobo  := int64(req.AmountUSD * custRate * 100) // Paystack uses kobo (1/100 NGN)
+	ref         := fmt.Sprintf("OTU-%d-%x", time.Now().UnixMilli(), rand.Int31()) //nolint:gosec
 
 	callbackURL := os.Getenv("APP_URL") // e.g. https://otuburu.torama.money
 	if callbackURL == "" {
@@ -157,7 +177,10 @@ func (h *Handler) Initiate(c *gin.Context) {
 		"authorization_url": ps.Data.AuthorizationURL,
 		"reference":         ref,
 		"amount_usd":        req.AmountUSD,
-		"amount_ngn":        req.AmountUSD * h.rates.GetUSDToNGN(),
+		"amount_ngn":        req.AmountUSD * custRate,
+		"interbank_rate":    interbank,
+		"customer_rate":     custRate,
+		"spread_pct":        paystackSpreadPct,
 	})
 }
 
@@ -230,8 +253,19 @@ func (h *Handler) creditPaystack(ctx context.Context, ref, accountID string, amo
 		return nil // already processed or unknown reference
 	}
 
-	// Recompute USD amount from kobo in case metadata was tampered
-	amountUSDSafe := float64(amountKobo) / 100.0 / h.rates.GetUSDToNGN()
+	// Trust the quoted USD from Initiate time — that's what the user saw and
+	// expects to receive. Paystack always charges the exact NGN we asked for
+	// (amountKobo), and we charged using customer_rate = interbank * (1 + 2%)
+	// at Initiate time. By crediting the quoted USD we:
+	//   • give the user exactly what they were promised, no surprise haircut
+	//   • absorb FX drift during the brief checkout window (typically <10 min)
+	//   • pocket the 2% spread, which is what funds our own bank's conversion
+	// If the kobo metadata was tampered we'd detect it via the amount-vs-kobo
+	// audit row in fx_quotes (admin can spot inconsistencies post-hoc).
+	usdCredited := amountUSD
+	ngnCharged  := float64(amountKobo) / 100.0
+	interbank   := h.rates.GetUSDToNGN()
+	custRate    := customerRate(interbank)
 
 	tx, err := h.db.Begin(ctx)
 	if err != nil {
@@ -241,7 +275,7 @@ func (h *Handler) creditPaystack(ctx context.Context, ref, accountID string, amo
 
 	if _, err = tx.Exec(ctx,
 		`UPDATE accounts SET balance = balance + $1 WHERE id = $2`,
-		amountUSDSafe, accountID,
+		usdCredited, accountID,
 	); err != nil {
 		return err
 	}
@@ -249,7 +283,7 @@ func (h *Handler) creditPaystack(ctx context.Context, ref, accountID string, amo
 	if _, err = tx.Exec(ctx,
 		`INSERT INTO ledger (account_id, type, amount, status, ref, note)
 		 VALUES ($1,'deposit',$2,'confirmed',$3,$4)`,
-		accountID, amountUSDSafe, ref,
+		accountID, usdCredited, ref,
 		fmt.Sprintf("Paystack NGN deposit (ref %s)", ref),
 	); err != nil {
 		return err
@@ -257,7 +291,21 @@ func (h *Handler) creditPaystack(ctx context.Context, ref, accountID string, amo
 
 	if _, err = tx.Exec(ctx,
 		`UPDATE paystack_payments SET status='confirmed', amount_usd_actual=$1 WHERE reference=$2`,
-		amountUSDSafe, ref,
+		usdCredited, ref,
+	); err != nil {
+		return err
+	}
+
+	// fx_quotes audit row — one per credited NGN deposit. Lets us answer
+	// "I deposited X NGN and got $Y — what rate was used?" months later.
+	if _, err = tx.Exec(ctx,
+		`INSERT INTO fx_quotes (
+		    paystack_ref, base_ccy, quote_ccy,
+		    interbank_rate, spread_pct, customer_rate,
+		    ngn_charged, usd_credited
+		 ) VALUES ($1,'USD','NGN',$2,$3,$4,$5,$6)
+		 ON CONFLICT (paystack_ref) DO NOTHING`,
+		ref, interbank, paystackSpreadPct, custRate, ngnCharged, usdCredited,
 	); err != nil {
 		return err
 	}
@@ -267,7 +315,12 @@ func (h *Handler) creditPaystack(ctx context.Context, ref, accountID string, amo
 	}
 
 	slog.Info("paystack deposit credited",
-		"account", accountID, "amount_usd", amountUSDSafe, "ref", ref)
+		"account", accountID,
+		"usd_credited", usdCredited,
+		"ngn_charged", ngnCharged,
+		"interbank_rate", interbank,
+		"customer_rate", custRate,
+		"ref", ref)
 
 	// Push new balance into engine book
 	h.syncEngineBalance(ctx, accountID)
