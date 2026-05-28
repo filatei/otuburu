@@ -6,6 +6,10 @@ import { closePosition, closeSpot } from '@/hooks/useAccount'
 import { displayNameOf, formatPrice, priceDecimals } from '@/lib/symbols'
 import BottomSheet from './BottomSheet'
 
+/* Properties intentionally lives in its own SymbolPropertiesModal that the
+ * parent (page.tsx) mounts/unmounts on demand — see SymbolPropertiesModal.tsx
+ * for why that matters. The "Properties" action here just bubbles up. */
+
 /**
  * SymbolActionsSheet — MT5-style context menu shown when a symbol row is
  * tapped on the Quotes screen. Replaces the previous behaviour where tap
@@ -26,25 +30,27 @@ import BottomSheet from './BottomSheet'
  */
 
 interface Props {
-  open:        boolean
-  onClose:     () => void
-  info:        SymbolInfo | null
-  tick:        Tick | null
-  positions:   Position[]
-  spots:       SpotPosition[]
-  accountId:   string
-  onOpenChart: () => void
-  onNewOrder:  () => void
+  open:             boolean
+  onClose:          () => void
+  info:             SymbolInfo | null
+  tick:             Tick | null
+  positions:        Position[]
+  spots:            SpotPosition[]
+  accountId:        string
+  onOpenChart:      () => void
+  onNewOrder:       () => void
+  /** Open the dedicated Properties modal for this symbol. Parent owns the
+   *  Properties lifecycle so each open is a fresh component instance. */
+  onOpenProperties: () => void
   /** Called after a successful close-batch so the parent can refresh. */
-  onTraded:    () => void
+  onTraded:         () => void
 }
 
 export default function SymbolActionsSheet({
   open, onClose, info, tick, positions, spots, accountId,
-  onOpenChart, onNewOrder, onTraded,
+  onOpenChart, onNewOrder, onOpenProperties, onTraded,
 }: Props) {
-  const [showProps, setShowProps] = useState(false)
-  const [busy,      setBusy]      = useState<null | 'profitable' | 'losers'>(null)
+  const [busy, setBusy] = useState<null | 'profitable' | 'losers'>(null)
 
   if (!info) {
     // Nothing to render but keep the sheet mountable so the open→null
@@ -144,22 +150,9 @@ export default function SymbolActionsSheet({
 
         <ActionRow
           icon="ⓘ"
-          label={showProps ? 'Hide Properties' : 'Properties'}
-          onClick={() => setShowProps(v => !v)}
+          label="Properties"
+          onClick={() => { onOpenProperties(); onClose() }}
         />
-
-        {showProps && (
-          <div className="mx-4 mb-2 mt-1 bg-surface/60 rounded-xl border border-border px-4 py-3 text-xs space-y-1.5">
-            <PropRow label="Symbol ID"     value={info.symbol} />
-            <PropRow label="Class"         value={info.type === 'BOOM_CRASH' ? 'Synthetic' : info.type} />
-            <PropRow label="Leverage"      value={`1:${info.leverage}`} />
-            <PropRow label="Contract size" value={info.contract_size.toLocaleString()} />
-            <PropRow label="Tick cadence"  value={`${info.cadence_ms} ms`} />
-            {info.display_divisor !== 1 && (
-              <PropRow label="Display ÷"   value={info.display_divisor.toLocaleString()} />
-            )}
-          </div>
-        )}
       </div>
     </BottomSheet>
   )
@@ -208,14 +201,5 @@ function ActionRow({ icon, label, count, tone, busy, disabled, onClick }: {
       )}
       {busy && <span className="text-dim text-xs">working…</span>}
     </button>
-  )
-}
-
-function PropRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-2">
-      <span className="text-dim">{label}</span>
-      <span className="text-text font-medium num text-right truncate">{value}</span>
-    </div>
   )
 }

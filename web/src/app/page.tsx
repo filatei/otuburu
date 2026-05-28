@@ -18,7 +18,8 @@ import AuthModal           from '@/components/AuthModal'
 import ProfileModal        from '@/components/ProfileModal'
 import AppDrawer           from '@/components/AppDrawer'
 import DepositModal        from '@/components/DepositModal'
-import SymbolActionsSheet  from '@/components/SymbolActionsSheet'
+import SymbolActionsSheet    from '@/components/SymbolActionsSheet'
+import SymbolPropertiesModal from '@/components/SymbolPropertiesModal'
 import { provisionAccount } from '@/hooks/useAccount'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
@@ -70,6 +71,10 @@ export default function TradingPage() {
   const [mobileTab,     setMobileTab]     = useState<MobileTab>('chart')
   /** Symbol whose MT5-style action sheet is currently open. null = closed. */
   const [actionsFor,    setActionsFor]    = useState<string | null>(null)
+  /** Symbol whose Specification/Properties modal is currently open. null = closed.
+   *  Tracked separately from `actionsFor` so the modal mounts fresh each time
+   *  and unmounts on close — no leaked open-state across symbol selections. */
+  const [propertiesFor, setPropertiesFor] = useState<string | null>(null)
 
   const { user, loading: authLoading, loginWithGoogle, logout, refreshBalances } = useAuth()
 
@@ -151,7 +156,18 @@ export default function TradingPage() {
         onTraded={handleTraded}
         onOpenChart={() => { if (actionsFor) { setSelected(actionsFor); setMobileTab('chart') } }}
         onNewOrder ={() => { if (actionsFor) { setSelected(actionsFor); setMobileTab('trade') } }}
+        onOpenProperties={() => { if (actionsFor) setPropertiesFor(actionsFor) }}
       />
+
+      {/* Symbol Specification (Properties) modal — mounted on demand so each
+          open is a fresh component instance with no leaked toggle state. */}
+      {propertiesFor && (
+        <SymbolPropertiesModal
+          open={true}
+          info={symbols.find(s => s.symbol === propertiesFor) ?? null}
+          onClose={() => setPropertiesFor(null)}
+        />
+      )}
       <AppDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
