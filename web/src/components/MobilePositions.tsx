@@ -35,7 +35,10 @@ interface Props {
   onNewTrade?:    () => void
 }
 
-type Tab = 'open' | 'recent' | 'history'
+/** MT5 mobile uses exactly two sub-tabs: Trade (anything currently open) and
+ *  History (settled trades, most recent first). The previous Open/Recent/
+ *  History triad was a misread — Recent was just the first 20 of History. */
+type Tab = 'trade' | 'history'
 
 export default function MobilePositions(props: Props) {
   const {
@@ -43,7 +46,7 @@ export default function MobilePositions(props: Props) {
     accountId, onRefresh, onNewTrade,
   } = props
 
-  const [tab, setTab] = useState<Tab>('open')
+  const [tab, setTab] = useState<Tab>('trade')
   const symbolMap = useMemo(() => buildSymbolMap(symbols), [symbols])
   const openCount = positions.length + binaries.length + spots.length
 
@@ -52,9 +55,8 @@ export default function MobilePositions(props: Props) {
       {/* Fixed header — tabs + "+" button (does NOT scroll with the list) */}
       <div className="shrink-0 bg-panel border-b border-border">
         <div className="flex items-center">
-          <TabBtn label="Open"    count={openCount}              active={tab === 'open'}    onClick={() => setTab('open')} />
-          <TabBtn label="Recent"  count={settledHistory.length}  active={tab === 'recent'}  onClick={() => setTab('recent')} />
-          <TabBtn label="History"                                active={tab === 'history'} onClick={() => setTab('history')} />
+          <TabBtn label="Trade"   count={openCount}              active={tab === 'trade'}   onClick={() => setTab('trade')} />
+          <TabBtn label="History" count={settledHistory.length}  active={tab === 'history'} onClick={() => setTab('history')} />
           <div className="flex-1" />
           {onNewTrade && (
             <button
@@ -72,7 +74,7 @@ export default function MobilePositions(props: Props) {
       {/* Scrollable list area. Engine pushes updates via the tick socket —
           no pull-to-refresh by design (MT5 doesn't have one either). */}
       <div className="flex-1 overflow-y-auto">
-      {tab === 'open' && (
+      {tab === 'trade' && (
         <>
           {openCount === 0 && (
             <EmptyState text="No open trades" subText="Tap + to place a trade" />
@@ -130,14 +132,6 @@ export default function MobilePositions(props: Props) {
             )
           })}
         </>
-      )}
-
-      {tab === 'recent' && (
-        settledHistory.slice(0, 20).length === 0
-          ? <EmptyState text="No recent trades" />
-          : settledHistory.slice(0, 20).map(t => (
-              <SettledRow key={t.id} trade={t} info={symbolMap.get(t.symbol) ?? null} />
-            ))
       )}
 
       {tab === 'history' && (

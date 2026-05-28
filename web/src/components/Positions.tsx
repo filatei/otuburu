@@ -17,17 +17,18 @@ interface Props {
   mobile?:        boolean
 }
 
-type Tab = 'open' | 'recent' | 'history'
+/** MT5 desktop also uses just Trade + History — Open/Recent was a redundant
+ *  earlier shape. Recent was always a window into History. */
+type Tab = 'trade' | 'history'
 
 export default function Positions({
   positions, binaries, spots, settledHistory, ticks, symbols, accountId, onRefresh, mobile,
 }: Props) {
-  const [tab, setTab] = useState<Tab>('open')
+  const [tab, setTab] = useState<Tab>('trade')
 
-  const symbolMap    = useMemo(() => buildSymbolMap(symbols), [symbols])
-  const openCount    = positions.length + binaries.length + spots.length
-  const recentTrades = settledHistory.slice(0, 10)
-  const winCount     = settledHistory.filter(t => t.outcome === 'win').length
+  const symbolMap = useMemo(() => buildSymbolMap(symbols), [symbols])
+  const openCount = positions.length + binaries.length + spots.length
+  const winCount  = settledHistory.filter(t => t.outcome === 'win').length
   // Net P&L: payout received minus stake paid. Win = payout − stake; Loss = −stake.
   const netPnl       = (t: { outcome: string; pnl: number; stake: number }) =>
     t.outcome === 'win' ? t.pnl - t.stake : -t.stake
@@ -40,9 +41,8 @@ export default function Positions({
     >
       {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center h-8 border-b border-border px-2 gap-1">
-        <TabBtn label="Open" count={openCount} active={tab === 'open'} onClick={() => setTab('open')} />
-        <TabBtn label="Recent" count={recentTrades.length} active={tab === 'recent'} onClick={() => setTab('recent')} />
-        <TabBtn label="History" active={tab === 'history'} onClick={() => setTab('history')} />
+        <TabBtn label="Trade"   count={openCount}             active={tab === 'trade'}   onClick={() => setTab('trade')} />
+        <TabBtn label="History" count={settledHistory.length} active={tab === 'history'} onClick={() => setTab('history')} />
 
         {settledHistory.length > 0 && (
           <div className="ml-auto flex items-center gap-3 text-[10px] text-dim pr-2">
@@ -57,8 +57,8 @@ export default function Positions({
       {/* ── Content ──────────────────────────────────────────────────────────── */}
       <div className={mobile ? 'overflow-y-auto' : 'overflow-y-auto'} style={mobile ? undefined : { height: '170px' }}>
 
-        {/* OPEN ──────────────────────────────────────────────────────────────── */}
-        {tab === 'open' && (
+        {/* TRADE ─────────────────────────────────────────────────────────────── */}
+        {tab === 'trade' && (
           <>
             {openCount === 0 && (
               <div className="flex items-center justify-center py-8 text-dim text-sm">No open trades</div>
@@ -177,13 +177,6 @@ export default function Positions({
               </table>
             )}
           </>
-        )}
-
-        {/* RECENT ─────────────────────────────────────────────────────────────── */}
-        {tab === 'recent' && (
-          recentTrades.length === 0
-            ? <div className="flex items-center justify-center py-8 text-dim text-sm">No recent trades yet</div>
-            : <HistoryTable trades={recentTrades} symbolMap={symbolMap} />
         )}
 
         {/* HISTORY ────────────────────────────────────────────────────────────── */}
