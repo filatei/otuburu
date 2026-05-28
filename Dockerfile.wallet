@@ -1,4 +1,11 @@
-FROM golang:1.23-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
+
+# We don't commit go.sum (yet), so the Dockerfile runs `go mod tidy` each
+# build — which means transitive deps drift to whatever's latest. A retail
+# transitive dep (github.com/rogpeppe/go-internal v1.15.0+) now requires
+# Go 1.25, so the builder image is pinned to that. Follow-up: commit
+# go.sum and switch the RUN below to `go mod download` for reproducible
+# builds.
 
 WORKDIR /build
 COPY go-services/wallet/ go-services/wallet/

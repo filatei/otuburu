@@ -1,7 +1,13 @@
 # Build context: repo root  (docker build -f Dockerfile.gateway .)
 #
 # ── Stage 1: generate proto + build binary ───────────────────────────────────
-FROM golang:1.23-bookworm AS builder
+# Pinned to Go 1.25 to match Dockerfile.wallet — neither service commits
+# go.sum yet, so `go mod tidy` below resolves transitive deps fresh each
+# build. As of 2026-05, a downstream dep (rogpeppe/go-internal v1.15.0)
+# started requiring Go 1.25; pinning the builder avoids surprise breakage
+# next time something else floats forward. Follow-up: commit go.sum and
+# switch the RUN below to `go mod download` for reproducible builds.
+FROM golang:1.25-bookworm AS builder
 # Note: build context must be repo root (docker build -f Dockerfile.gateway .)
 
 RUN apt-get update \
