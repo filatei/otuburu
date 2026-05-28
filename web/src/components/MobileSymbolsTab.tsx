@@ -8,14 +8,17 @@ import { displayNameOf, formatPrice, priceDecimals } from '@/lib/symbols'
  * MobileSymbolsTab — vertical scrollable list of all tradeable symbols.
  *
  * Inspired by MT5's "Quotes" screen. Each row shows symbol display name,
- * type badge, mid price with directional flash, and bid/ask. Tap any row
- * to select that symbol and auto-jump to the Chart tab.
+ * type badge, and bid/ask with directional flash. Tap any row to open the
+ * MT5-style actions sheet (Chart / New Order / Close Profitable / Close
+ * Losers / Properties).
  */
 
 interface Props {
   symbols:  SymbolInfo[]
   ticks:    Record<string, Tick>
   selected: string
+  /** Called when a row is tapped. Parent decides what to do — currently
+   *  this opens the SymbolActionsSheet for that symbol. */
   onSelect: (symbol: string) => void
 }
 
@@ -32,7 +35,7 @@ export default function MobileSymbolsTab({ symbols, ticks, selected, onSelect }:
     <div className="h-full overflow-y-auto bg-panel">
       <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-dim border-b border-border bg-surface/40 sticky top-0 z-10 flex items-center justify-between">
         <span>Quotes · {symbols.length} symbols</span>
-        <span className="text-dim/70">Tap to open chart</span>
+        <span className="text-dim/70">Tap for actions</span>
       </div>
       <ul className="divide-y divide-border">
         {symbols.map(info => (

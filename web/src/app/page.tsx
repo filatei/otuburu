@@ -14,10 +14,11 @@ import MobileChartTiles  from '@/components/MobileChartTiles'
 import MobilePositions   from '@/components/MobilePositions'
 import MobileTradeForm   from '@/components/MobileTradeForm'
 import AccountStatsPanel from '@/components/AccountStatsPanel'
-import AuthModal        from '@/components/AuthModal'
-import ProfileModal     from '@/components/ProfileModal'
-import AppDrawer        from '@/components/AppDrawer'
-import DepositModal     from '@/components/DepositModal'
+import AuthModal           from '@/components/AuthModal'
+import ProfileModal        from '@/components/ProfileModal'
+import AppDrawer           from '@/components/AppDrawer'
+import DepositModal        from '@/components/DepositModal'
+import SymbolActionsSheet  from '@/components/SymbolActionsSheet'
 import { provisionAccount } from '@/hooks/useAccount'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
@@ -67,6 +68,8 @@ export default function TradingPage() {
   const [drawerOpen,    setDrawerOpen]    = useState(false)
   const [depositOpen,   setDepositOpen]   = useState(false)
   const [mobileTab,     setMobileTab]     = useState<MobileTab>('chart')
+  /** Symbol whose MT5-style action sheet is currently open. null = closed. */
+  const [actionsFor,    setActionsFor]    = useState<string | null>(null)
 
   const { user, loading: authLoading, loginWithGoogle, logout, refreshBalances } = useAuth()
 
@@ -135,6 +138,20 @@ export default function TradingPage() {
       {/* DepositModal stays mounted while `user` is present so BottomSheet
           can play its exit animation when `open` flips back to false. */}
       {user && <DepositModal open={depositOpen} user={user} onClose={() => setDepositOpen(false)} />}
+
+      {/* MT5-style symbol actions sheet — tap a row on Quotes to open. */}
+      <SymbolActionsSheet
+        open={actionsFor !== null}
+        onClose={() => setActionsFor(null)}
+        info={actionsFor ? (symbols.find(s => s.symbol === actionsFor) ?? null) : null}
+        tick={actionsFor ? (allTicks[actionsFor] ?? null) : null}
+        positions={positions}
+        spots={spots}
+        accountId={accountId}
+        onTraded={handleTraded}
+        onOpenChart={() => { if (actionsFor) { setSelected(actionsFor); setMobileTab('chart') } }}
+        onNewOrder ={() => { if (actionsFor) { setSelected(actionsFor); setMobileTab('trade') } }}
+      />
       <AppDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -211,7 +228,10 @@ export default function TradingPage() {
               symbols={symbols}
               ticks={allTicks}
               selected={selected}
-              onSelect={(s) => { setSelected(s); setMobileTab('chart') }}
+              // MT5 behaviour: tap a symbol → context sheet appears, user
+              // chooses Chart / New Order / Close Profitable / Close Losers
+              // / Properties. Direct-jump-to-chart is gone.
+              onSelect={(s) => setActionsFor(s)}
             />
           )}
           {mobileTab === 'chart' && (
