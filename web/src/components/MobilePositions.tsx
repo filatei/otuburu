@@ -6,7 +6,6 @@ import type {
 } from '@/types'
 import { closePosition, closeSpot } from '@/hooks/useAccount'
 import { buildSymbolMap, displayNameOf, formatPrice, priceDecimals } from '@/lib/symbols'
-import { usePullToRefresh, PullIndicator } from '@/hooks/usePullToRefresh'
 import { useSwipeToClose } from '@/hooks/useSwipeToClose'
 
 /**
@@ -48,18 +47,6 @@ export default function MobilePositions(props: Props) {
   const symbolMap = useMemo(() => buildSymbolMap(symbols), [symbols])
   const openCount = positions.length + binaries.length + spots.length
 
-  // Pull-to-refresh — applied to the scrollable list area below the tabs.
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const { pull, refreshing, threshold } = usePullToRefresh(scrollRef, async () => {
-    // Quick double-refresh: call once and let it settle. UI feedback comes
-    // from the indicator + refreshing flag; consumer is responsible for the
-    // actual data update via onRefresh.
-    await Promise.resolve(onRefresh())
-    // Give the eye ~250ms even if the refresh resolved instantly, otherwise
-    // the spinner barely flashes and feels broken.
-    await new Promise(r => setTimeout(r, 250))
-  })
-
   return (
     <div className="flex flex-col h-full">
       {/* Fixed header — tabs + "+" button (does NOT scroll with the list) */}
@@ -82,9 +69,9 @@ export default function MobilePositions(props: Props) {
         </div>
       </div>
 
-      {/* Scrollable list area with pull-to-refresh */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <PullIndicator pull={pull} refreshing={refreshing} threshold={threshold} />
+      {/* Scrollable list area. Engine pushes updates via the tick socket —
+          no pull-to-refresh by design (MT5 doesn't have one either). */}
+      <div className="flex-1 overflow-y-auto">
       {tab === 'open' && (
         <>
           {openCount === 0 && (

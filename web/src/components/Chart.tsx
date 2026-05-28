@@ -408,13 +408,12 @@ function HistoricalChart({ symbol, info, resolution, candles, trades, loading }:
 
       <ZoomControls chartRef={chartRef} />
 
-      {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-surface/60 text-dim text-sm">
-          Loading {resolution} history…
-        </div>
-      )}
+      {/* MT5 ethos: no loading overlay. Chart starts empty and fills in as
+          history arrives. Only show the "no data" hint once the fetch is
+          done AND nothing came back — never block the canvas with a spinner.
+          See: feedback_mt5_silent_ux.md */}
       {!loading && candles.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center text-dim text-sm">
+        <div className="absolute inset-0 flex items-center justify-center text-dim text-sm pointer-events-none">
           No {resolution} data yet — trade data builds over time.
         </div>
       )}

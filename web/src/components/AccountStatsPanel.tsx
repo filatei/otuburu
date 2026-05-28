@@ -25,21 +25,26 @@ interface Props {
 }
 
 export default function AccountStatsPanel({ account, floatingPnl, title }: Props) {
-  if (!account) {
-    return (
-      <div className="px-4 py-4 text-dim text-sm">Loading account…</div>
-    )
-  }
-
-  const rows: Array<{ label: string; value: string; color?: string }> = [
-    { label: 'Balance',         value: fmt(account.balance) },
-    { label: 'Equity',          value: fmt(account.equity) },
-    { label: 'Margin',          value: fmt(account.used_margin) },
-    { label: 'Free margin',     value: fmt(account.free_margin) },
-    { label: 'Margin Level (%)', value: account.used_margin > 0
-        ? fmt(account.margin_level)
-        : '—' },
-  ]
+  // MT5 ethos: no "Loading…" copy. When the account hasn't arrived from the
+  // engine yet, render the rows with em-dashes so the layout is stable and
+  // the values just appear when they're ready. See: feedback_mt5_silent_ux.md
+  const rows: Array<{ label: string; value: string; color?: string }> = account
+    ? [
+        { label: 'Balance',         value: fmt(account.balance) },
+        { label: 'Equity',          value: fmt(account.equity) },
+        { label: 'Margin',          value: fmt(account.used_margin) },
+        { label: 'Free margin',     value: fmt(account.free_margin) },
+        { label: 'Margin Level (%)', value: account.used_margin > 0
+            ? fmt(account.margin_level)
+            : '—' },
+      ]
+    : [
+        { label: 'Balance',          value: '—' },
+        { label: 'Equity',           value: '—' },
+        { label: 'Margin',           value: '—' },
+        { label: 'Free margin',      value: '—' },
+        { label: 'Margin Level (%)', value: '—' },
+      ]
 
   const pnlValue =
     typeof floatingPnl === 'number' ? floatingPnl : 0
