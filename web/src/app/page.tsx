@@ -10,6 +10,8 @@ import Chart             from '@/components/Chart'
 import TradePanel        from '@/components/TradePanel'
 import Positions         from '@/components/Positions'
 import MobileSymbolsTab  from '@/components/MobileSymbolsTab'
+import MobileChartTiles  from '@/components/MobileChartTiles'
+import AccountStatsPanel from '@/components/AccountStatsPanel'
 import AuthModal        from '@/components/AuthModal'
 import ProfileModal     from '@/components/ProfileModal'
 import AppDrawer        from '@/components/AppDrawer'
@@ -117,6 +119,12 @@ export default function TradingPage() {
 
   const openCount = positions.length + binaries.length + spots.length
 
+  // Aggregate floating P&L across all open positions and spots — drives the
+  // pnl label on the MT5-style AccountStatsPanel header on mobile.
+  const floatingPnl =
+    positions.reduce((s, p) => s + (p.unrealised_pnl ?? 0), 0) +
+    spots.reduce((s, p) => s + (p.unrealised_pnl ?? 0), 0)
+
   return (
     <div className="flex flex-col h-[100dvh] overflow-hidden bg-surface">
       {/* Modals & drawer */}
@@ -203,15 +211,32 @@ export default function TradingPage() {
             />
           )}
           {mobileTab === 'chart' && (
-            <Chart
-              candles={candles} lastTick={lastTick} symbol={selected}
-              info={selectedInfo}
-              accountId={accountId}
-              binaries={binaries} settledHistory={settledHistory}
-            />
+            <div className="h-full flex flex-col overflow-hidden">
+              <MobileChartTiles
+                symbol={selected}
+                info={selectedInfo}
+                lastTick={lastTick}
+                account={account}
+                accountId={accountId}
+                onTraded={handleTraded}
+              />
+              <div className="flex-1 overflow-hidden">
+                <Chart
+                  candles={candles} lastTick={lastTick} symbol={selected}
+                  info={selectedInfo}
+                  accountId={accountId}
+                  binaries={binaries} settledHistory={settledHistory}
+                />
+              </div>
+            </div>
           )}
           {mobileTab === 'trade' && (
             <div className="h-full overflow-y-auto bg-panel">
+              <AccountStatsPanel
+                account={account}
+                floatingPnl={floatingPnl}
+                title="Trade"
+              />
               <TradePanel
                 symbol={selected}
                 info={selectedInfo}
@@ -225,6 +250,11 @@ export default function TradingPage() {
           )}
           {mobileTab === 'positions' && (
             <div className="h-full overflow-y-auto bg-panel">
+              <AccountStatsPanel
+                account={account}
+                floatingPnl={floatingPnl}
+                title="Positions"
+              />
               <Positions
                 positions={positions}
                 binaries={binaries}

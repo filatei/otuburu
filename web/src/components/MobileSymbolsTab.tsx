@@ -77,44 +77,60 @@ function SymbolRow({ info, tick, selected, onSelect }: {
         type="button"
         onClick={() => onSelect(info.symbol)}
         className={clsx(
-          'w-full flex items-center justify-between gap-3 px-4 py-3 transition-colors text-left',
+          'w-full flex items-center gap-3 px-4 py-2.5 transition-colors text-left',
           selected
             ? 'bg-surface/70 border-l-2 border-l-brand'
             : 'hover:bg-surface/30 active:bg-surface/50',
         )}
       >
-        {/* Left: symbol identity */}
-        <div className="flex flex-col gap-0.5">
-          <span className="text-base font-semibold text-text">{displayNameOf(info)}</span>
-          <span className={clsx('text-[10px] uppercase tracking-wider', TYPE_BADGE[info.type] ?? 'text-dim')}>
+        {/* Left: symbol identity (MT5-style — name big, type small below) */}
+        <div className="flex flex-col gap-0.5 min-w-[5rem]">
+          <span className="text-[15px] font-bold text-text leading-tight">
+            {displayNameOf(info)}
+          </span>
+          <span className={clsx('text-[9px] uppercase tracking-wider', TYPE_BADGE[info.type] ?? 'text-dim')}>
             {info.type === 'BOOM_CRASH' ? 'Synthetic' : info.type}
           </span>
         </div>
 
-        {/* Right: price */}
-        <div className="flex flex-col items-end gap-0.5 num">
-          {tick ? (
-            <>
-              <span
-                className={clsx(
-                  'text-base font-semibold',
-                  flash === 'up'   ? 'flash-up text-up'   :
-                  flash === 'down' ? 'flash-down text-down' : 'text-text',
-                )}
-              >
-                {formatPrice(info, tick.mid, dp)}
-              </span>
-              <div className="flex gap-1.5 text-[10px]">
-                <span className="text-down">{formatPrice(info, tick.bid, dp)}</span>
-                <span className="text-dim">/</span>
-                <span className="text-up">{formatPrice(info, tick.ask, dp)}</span>
-              </div>
-            </>
-          ) : (
-            <span className="text-sm text-dim">—</span>
-          )}
-        </div>
+        <div className="flex-1" />
+
+        {/* Right: bid/ask in two columns, MT5-style big numbers */}
+        {tick ? (
+          <div className="flex items-center gap-3 num">
+            <PriceTile label="Bid" value={formatPrice(info, tick.bid, dp)} flash={flash} colour="down" />
+            <PriceTile label="Ask" value={formatPrice(info, tick.ask, dp)} flash={flash} colour="up" />
+          </div>
+        ) : (
+          <span className="text-sm text-dim">—</span>
+        )}
       </button>
     </li>
+  )
+}
+
+/** Single bid or ask tile — split into big main digits and small superscript last digit. */
+function PriceTile({ label, value, flash, colour }: {
+  label:  'Bid' | 'Ask'
+  value:  string
+  flash:  'up' | 'down' | null
+  colour: 'up' | 'down'
+}) {
+  const big   = value.slice(0, -1)
+  const small = value.slice(-1)
+  const flashCls =
+    flash === 'up'   ? 'flash-up'   :
+    flash === 'down' ? 'flash-down' : ''
+  return (
+    <div className="flex flex-col items-end">
+      <span className="text-[8px] uppercase tracking-wider text-dim">{label}</span>
+      <span className={clsx(
+        'text-[15px] font-bold leading-tight',
+        colour === 'up' ? 'text-up' : 'text-down',
+        flashCls,
+      )}>
+        {big}<span className="text-[10px] align-super">{small}</span>
+      </span>
+    </div>
   )
 }
