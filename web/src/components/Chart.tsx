@@ -97,10 +97,12 @@ function LiveChart({ candles, lastTick, symbol, info, binaries, settledHistory }
   const divisor = divisorOf(info)
   const containerRef  = useRef<HTMLDivElement>(null)
   const chartRef      = useRef<import('lightweight-charts').IChartApi | null>(null)
-  const seriesRef     = useRef<import('lightweight-charts').ISeriesApi<'Line'> | null>(null)
+  const seriesRef     = useRef<import('lightweight-charts').ISeriesApi<'Candlestick'> | null>(null)
   const priceLinesRef = useRef<Map<string, import('lightweight-charts').IPriceLine>>(new Map())
 
-  // Create chart once
+  // Create chart once — candlestick series for visual consistency with the
+  // historical timeframes. (Was a line series; line + candles felt jarring
+  // when switching between LIVE and M1/M5/etc.)
   useEffect(() => {
     if (!containerRef.current) return
     let chart: import('lightweight-charts').IChartApi
@@ -118,13 +120,15 @@ function LiveChart({ candles, lastTick, symbol, info, binaries, settledHistory }
         handleScale: true,
       })
 
-      const series = chart.addLineSeries({
-        color: '#4bb4b4',
-        lineWidth: 2,
+      const series = chart.addCandlestickSeries({
+        upColor:         '#4bb4b4',
+        downColor:       '#cc2e3d',
+        borderUpColor:   '#4bb4b4',
+        borderDownColor: '#cc2e3d',
+        wickUpColor:     '#4bb4b4',
+        wickDownColor:   '#cc2e3d',
         priceLineVisible: false,
         lastValueVisible: true,
-        crosshairMarkerVisible: true,
-        crosshairMarkerRadius: 4,
       })
 
       chartRef.current  = chart
@@ -148,25 +152,31 @@ function LiveChart({ candles, lastTick, symbol, info, binaries, settledHistory }
     }
   }, []) // eslint-disable-line
 
-  // Load full series when symbol changes — values divided for display.
+  // Load full series when symbol changes — OHLC divided for display.
   useEffect(() => {
     if (!seriesRef.current || candles.length === 0) return
     seriesRef.current.setData(
       candles.map(c => ({
-        time: c.time as import('lightweight-charts').Time,
-        value: c.close / divisor,
+        time:  c.time as import('lightweight-charts').Time,
+        open:  c.open  / divisor,
+        high:  c.high  / divisor,
+        low:   c.low   / divisor,
+        close: c.close / divisor,
       }))
     )
     chartRef.current?.timeScale().fitContent()
   }, [symbol, candles.length === 0, divisor]) // eslint-disable-line
 
-  // Tick-by-tick update — divisor applied.
+  // Tick-by-tick update — apply divisor to OHLC of the latest bucket.
   useEffect(() => {
     if (!seriesRef.current || candles.length === 0) return
     const last = candles[candles.length - 1]
     seriesRef.current.update({
       time:  last.time as import('lightweight-charts').Time,
-      value: last.close / divisor,
+      open:  last.open  / divisor,
+      high:  last.high  / divisor,
+      low:   last.low   / divisor,
+      close: last.close / divisor,
     })
   }, [lastTick]) // eslint-disable-line
 
