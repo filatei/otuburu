@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import type { SymbolInfo, Tick } from '@/types'
 import { displayNameOf, formatPrice, priceDecimals } from '@/lib/symbols'
+import { useSessionHL, type SessionRange } from '@/hooks/useSessionHL'
 
 /**
  * MobileSymbolsTab — vertical scrollable list of all tradeable symbols.
@@ -31,6 +32,10 @@ const TYPE_BADGE: Record<string, string> = {
 }
 
 export default function MobileSymbolsTab({ symbols, ticks, selected, onSelect }: Props) {
+  // Session High/Low per symbol, observed off the live tick stream. Resets
+  // at UTC midnight. MT5 shows the same pair under each Quotes row.
+  const sessionHL = useSessionHL(ticks)
+
   return (
     <div className="h-full overflow-y-auto bg-panel">
       <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-dim border-b border-border bg-surface/40 sticky top-0 z-10 flex items-center justify-between">
@@ -43,6 +48,7 @@ export default function MobileSymbolsTab({ symbols, ticks, selected, onSelect }:
             key={info.symbol}
             info={info}
             tick={ticks[info.symbol] ?? null}
+            range={sessionHL[info.symbol] ?? null}
             selected={info.symbol === selected}
             onSelect={onSelect}
           />
@@ -52,9 +58,10 @@ export default function MobileSymbolsTab({ symbols, ticks, selected, onSelect }:
   )
 }
 
-function SymbolRow({ info, tick, selected, onSelect }: {
+function SymbolRow({ info, tick, range, selected, onSelect }: {
   info:     SymbolInfo
   tick:     Tick | null
+  range:    SessionRange | null
   selected: boolean
   onSelect: (symbol: string) => void
 }) {
@@ -86,7 +93,8 @@ function SymbolRow({ info, tick, selected, onSelect }: {
             : 'hover:bg-surface/30 active:bg-surface/50',
         )}
       >
-        {/* Left: symbol identity (MT5-style — name big, type small below) */}
+        {/* Left: symbol identity (MT5-style — name big, type small below,
+            session H/L underneath when ticks have accumulated). */}
         <div className="flex flex-col gap-0.5 min-w-[5rem]">
           <span className="text-[15px] font-bold text-text leading-tight">
             {displayNameOf(info)}
@@ -94,6 +102,11 @@ function SymbolRow({ info, tick, selected, onSelect }: {
           <span className={clsx('text-[9px] uppercase tracking-wider', TYPE_BADGE[info.type] ?? 'text-dim')}>
             {info.type === 'BOOM_CRASH' ? 'Synthetic' : info.type}
           </span>
+          {range && (
+            <span className="text-[9px] text-dim/70 num tracking-tight">
+              H {formatPrice(info, range.high, dp)} · L {formatPrice(info, range.low, dp)}
+            </span>
+          )}
         </div>
 
         <div className="flex-1" />
