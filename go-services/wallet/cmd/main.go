@@ -20,6 +20,16 @@ import (
 func main() {
 	ctx := context.Background()
 
+	// ── Required secrets — fail loud at boot, never start silently degraded.
+	// Symmetric with the gateway: if either of these is missing, wallet→gateway
+	// balance-sync or user JWT verification will silently 401. We refuse to
+	// start unless both are set and meet a minimal length bar (24 bytes).
+	// The actual reads happen inside the auth/payments packages — these calls
+	// exist purely to make the dependency visible and to crash cleanly here.
+	// See feedback_otuburu_env_passthrough.md.
+	mustEnv("INTERNAL_SECRET", "wallet→gateway server-to-server auth")
+	mustEnv("JWT_SECRET",      "HS256 user JWT signing key")
+
 	// ── Database ──────────────────────────────────────────────────────────────
 	pool, err := db.Connect(ctx)
 	if err != nil {
@@ -113,4 +123,31 @@ func main() {
 	if err := r.Run(":" + port); err != nil {
 		slog.Error("server", "err", err)
 	}
+}
+
+// mustEnv aborts startup with a helpful message if env var `key` is empty
+// or shorter than 24 bytes. Used for shared secrets where a silent default
+// would create a hard-to-debug auth bug later. Symmetric helper exists in
+// gateway/cmd/main.go — keep them in sync if you change the threshold.
+//
+// 24 bytes is a deliberately modest bar — long enough to defeat trivial
+// dictionary attacks against HMAC, short enough that local dev secrets
+// don't need to be ceremonial. Production uses 32+ from GitHub Secrets.
+func mustEnv(key, purpose string) string {
+	const minLen = 24
+	v := os.Getenv(key)
+	if v == "" {
+		slog.Error("missing required secret",
+			"key", key, "purpose", purpose,
+			"hint", "set "+key+" in your environment or compose .env file")
+		os.Exit(1)
+	}
+	if len(v) < minLen {
+		slog.Error("required secret is too short",
+			"key", key, "purpose", purpose,
+			"got_length", len(v), "min_length", minLen,
+			"hint", "use `openssl rand -hex 32` to generate a fresh value")
+		os.Exit(1)
+	}
+	return v
 }

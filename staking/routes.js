@@ -18,7 +18,11 @@ const paystack = require('./paystack');
 const mailer   = require('./mailer');
 
 const BASE_URL     = process.env.BASE_URL     || 'https://otuburu.torama.money';
-const JWT_SECRET   = process.env.JWT_SECRET   || 'change-me-in-production-use-32-chars-min';
+// JWT_SECRET is validated at boot in server.js via mustEnv(), so it is
+// guaranteed present and well-formed by the time this module is required.
+// No fallback default — a hard-coded secret would let an attacker who knows
+// the source forge tokens.
+const JWT_SECRET   = process.env.JWT_SECRET;
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'filatei@gtsng.com').split(',').map(e => e.trim());
 
 // ─── Auth middleware ──────────────────────────────────────────────────────────

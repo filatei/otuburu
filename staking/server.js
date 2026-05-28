@@ -14,6 +14,12 @@ const http    = require('http');
 const express = require('express');
 const fs      = require('fs');
 
+// ── Required secrets — fail loud at boot, never start silently degraded.
+// Symmetric with the Go services. If JWT_SECRET is missing, every authed
+// request would silently 401; better to crash now with a clear message.
+// See feedback_otuburu_env_passthrough.md for the historical incident.
+mustEnv('JWT_SECRET', 'HS256 user JWT signing key (shared with wallet+gateway)');
+
 const stakingRoutes = require('./routes');
 
 const PORT = process.env.PORT || 8084;
@@ -85,3 +91,26 @@ process.on('SIGTERM', () => {
   console.log('[Staking] SIGTERM received, shutting down gracefully...');
   server.close(() => process.exit(0));
 });
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * mustEnv — aborts the process with a clear error if env var `key` is empty
+ * or shorter than 24 chars. Symmetric helper exists in the Go services; keep
+ * the threshold in sync if you change it.
+ */
+function mustEnv(key, purpose) {
+  const MIN_LEN = 24;
+  const v = process.env[key];
+  if (!v) {
+    console.error(`[Staking] FATAL: missing required secret ${key} (${purpose}).`);
+    console.error(`[Staking] hint: set ${key} in your environment or compose .env file.`);
+    process.exit(1);
+  }
+  if (v.length < MIN_LEN) {
+    console.error(`[Staking] FATAL: ${key} is too short (got ${v.length}, need ${MIN_LEN}+ chars). Purpose: ${purpose}.`);
+    console.error(`[Staking] hint: generate a fresh value with \`openssl rand -hex 32\`.`);
+    process.exit(1);
+  }
+  return v;
+}

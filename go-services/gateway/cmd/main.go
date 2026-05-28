@@ -32,6 +32,17 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
+	// ── Required secrets — fail loud at boot, never start silently degraded.
+	// Historical bug: a missing INTERNAL_SECRET in compose meant wallet→gateway
+	// calls silently 401'd and deposits stopped crediting, but the service was
+	// still "up". We now refuse to start unless both shared secrets are set
+	// and meet a minimal length bar. See feedback_otuburu_env_passthrough.md.
+	//
+	// JWT_SECRET is consumed by internal/auth/jwt.go via os.Getenv at package
+	// init — we just need to assert it exists here, value isn't held locally.
+	internalSecret := mustEnv("INTERNAL_SECRET", "wallet→gateway server-to-server auth")
+	mustEnv("JWT_SECRET", "HS256 user JWT signing key")
+
 	port := envOr("PORT", "8082")
 	engineAddr := envOr("ENGINE_ADDR", "localhost:9090")
 
@@ -69,7 +80,7 @@ func main() {
 	})
 
 	rest.RegisterRoutes(r.Group("/api"))
-	rest.RegisterInternalRoutes(r.Group("/internal"))
+	rest.RegisterInternalRoutes(r.Group("/internal"), internalSecret)
 
 	srv := &http.Server{
 		Addr:         ":" + port,
@@ -98,4 +109,31 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// mustEnv returns the value of env var `key`, or aborts startup with a
+// helpful message if it is empty or shorter than 24 bytes. Used for shared
+// secrets where a silent default would create a hard-to-debug auth bug
+// later (e.g. wallet→gateway X-Internal-Secret mismatch).
+//
+// 24 bytes is a deliberately modest bar — long enough to defeat trivial
+// dictionary attacks against HMAC, short enough that local dev secrets
+// don't need to be ceremonial. Production uses 32+ in our GitHub Secrets.
+func mustEnv(key, purpose string) string {
+	const minLen = 24
+	v := os.Getenv(key)
+	if v == "" {
+		slog.Error("missing required secret",
+			"key", key, "purpose", purpose,
+			"hint", "set "+key+" in your environment or compose .env file")
+		os.Exit(1)
+	}
+	if len(v) < minLen {
+		slog.Error("required secret is too short",
+			"key", key, "purpose", purpose,
+			"got_length", len(v), "min_length", minLen,
+			"hint", "use `openssl rand -hex 32` to generate a fresh value")
+		os.Exit(1)
+	}
+	return v
 }

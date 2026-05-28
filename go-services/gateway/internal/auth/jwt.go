@@ -13,12 +13,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var jwtSecret = []byte(func() string {
-	if s := os.Getenv("JWT_SECRET"); s != "" {
-		return s
-	}
-	return "change-me-in-production-use-32-chars-min"
-}())
+// jwtSecret is read once at package init. Main is expected to have already
+// validated JWT_SECRET via mustEnv() before the rest package's routes are
+// wired, so by the time any request hits Verify() this is guaranteed
+// non-empty. There is intentionally **no fallback default** — a hard-coded
+// secret would let an attacker who knows the source forge tokens, and a
+// silent empty would 401 every legitimate request without surfacing why.
+var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 
 // Claims mirrors the wallet service Claims so both services share one token format.
 type Claims struct {

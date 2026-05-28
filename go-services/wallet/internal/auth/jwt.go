@@ -8,12 +8,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var jwtSecret = []byte(func() string {
-	if s := os.Getenv("JWT_SECRET"); s != "" {
-		return s
-	}
-	return "change-me-in-production-use-32-chars-min"
-}())
+// jwtSecret is read once at package init. main.go validates JWT_SECRET via
+// mustEnv() before any HTTP routes are wired, so by the time any request
+// hits Verify/Issue this is guaranteed non-empty. There is intentionally
+// **no fallback default** — a hard-coded secret would let an attacker who
+// knows the source forge tokens.
+var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 
 type Claims struct {
 	UserID    string `json:"uid"`

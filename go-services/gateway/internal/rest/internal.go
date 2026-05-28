@@ -11,58 +11,65 @@ package rest
 //     Called by the wallet service after every credited deposit.
 
 import (
+	"crypto/subtle"
 	"net/http"
-	"os"
 
 	"github.com/gin-gonic/gin"
 
 	"otuburu.money/gateway/internal/enginepb"
 )
 
-var internalSecret = os.Getenv("INTERNAL_SECRET")
-
-// RegisterInternalRoutes attaches the internal API to a route group.
-// Typically called with r.Group("/internal").
-func RegisterInternalRoutes(rg *gin.RouterGroup) {
-	rg.POST("/balance-sync", handleBalanceSync)
+// RegisterInternalRoutes attaches the internal API to a route group, binding
+// in the shared secret. Pass a non-empty `secret` — the caller (main.go) is
+// responsible for fail-loud at boot if it isn't configured. Module-level
+// `os.Getenv` is intentionally avoided here so the dependency is explicit.
+func RegisterInternalRoutes(rg *gin.RouterGroup, secret string) {
+	rg.POST("/balance-sync", makeBalanceSyncHandler(secret))
 }
 
-// handleBalanceSync updates the engine book balance for a real account.
+// makeBalanceSyncHandler closes over the shared secret and returns a Gin
+// handler. Splitting the closure out makes the secret dependency explicit
+// and keeps the request-time auth check on a constant-time comparison.
 //
 // Request body:
 //
 //	{ "account_id": "<uuid>", "balance": 1234.56 }
 //
 // Protected by X-Internal-Secret header — never expose this group to the internet.
-func handleBalanceSync(c *gin.Context) {
-	// Verify the shared secret.  An empty configured secret disables the endpoint.
-	secret := c.GetHeader("X-Internal-Secret")
-	if internalSecret == "" || secret != internalSecret {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "forbidden"})
-		return
-	}
+func makeBalanceSyncHandler(secret string) gin.HandlerFunc {
+	secretBytes := []byte(secret)
+	return func(c *gin.Context) {
+		// subtle.ConstantTimeCompare avoids any timing side-channel on the
+		// secret comparison. ConstantTimeCompare returns 0 when lengths
+		// differ, so it also rejects an empty header against a real secret.
+		got := []byte(c.GetHeader("X-Internal-Secret"))
+		if subtle.ConstantTimeCompare(got, secretBytes) != 1 {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "forbidden"})
+			return
+		}
 
-	var req struct {
-		AccountID string  `json:"account_id" binding:"required"`
-		Balance   float64 `json:"balance"    binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+		var req struct {
+			AccountID string  `json:"account_id" binding:"required"`
+			Balance   float64 `json:"balance"    binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
-	ctx, cancel := rpcCtx()
-	defer cancel()
+		ctx, cancel := rpcCtx()
+		defer cancel()
 
-	resp, err := engineClient.Service().CreateAccount(ctx, &enginepb.CreateAccountRequest{
-		AccountId:      req.AccountID,
-		Label:          "Real",
-		IsDemo:         false,
-		InitialBalance: req.Balance,
-	})
-	if err != nil {
-		engineErr(c, err)
-		return
+		resp, err := engineClient.Service().CreateAccount(ctx, &enginepb.CreateAccountRequest{
+			AccountId:      req.AccountID,
+			Label:          "Real",
+			IsDemo:         false,
+			InitialBalance: req.Balance,
+		})
+		if err != nil {
+			engineErr(c, err)
+			return
+		}
+		writeProtoJSON(c, http.StatusOK, resp)
 	}
-	writeProtoJSON(c, http.StatusOK, resp)
 }
