@@ -1,6 +1,9 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import type { Candle, Tick, BinaryOption, SettledTrade, Resolution, ApiSettledTrade, SymbolInfo } from '@/types'
+import type {
+  Candle, Tick, BinaryOption, SettledTrade, Resolution, ApiSettledTrade, SymbolInfo,
+  Position, SpotPosition,
+} from '@/types'
 import { RESOLUTIONS } from '@/types'
 import { useChartHistory } from '@/hooks/useChartHistory'
 import { displayNameOf, divisorOf, toDisplayPrice } from '@/lib/symbols'
@@ -11,13 +14,15 @@ interface Props {
   symbol:           string
   info?:            SymbolInfo | null  // optional, for display divisor + display name
   accountId?:       string
-  binaries?:        BinaryOption[]      // open trades → entry-price dashed lines (LIVE only)
-  settledHistory?:  SettledTrade[]      // settled trades → ▲/▼ markers (LIVE only)
+  binaries?:        BinaryOption[]      // open binaries  → entry-price dashed lines
+  positions?:       Position[]          // open CFDs      → entry-price solid lines (MT5-style)
+  spots?:           SpotPosition[]      // open Spots     → entry-price solid lines (MT5-style)
+  settledHistory?:  SettledTrade[]      // settled trades → ▲/▼ markers
 }
 
 export default function Chart({
   candles, lastTick, symbol, info = null, accountId = 'demo',
-  binaries = [], settledHistory = [],
+  binaries = [], positions = [], spots = [], settledHistory = [],
 }: Props) {
   const [resolution, setResolution] = useState<Resolution>('M1')
 
@@ -43,6 +48,8 @@ export default function Chart({
           symbol={symbol}
           info={info}
           binaries={binaries}
+          positions={positions}
+          spots={spots}
           settledHistory={settledHistory}
         />
       ) : (
@@ -53,6 +60,8 @@ export default function Chart({
           candles={histCandles}
           trades={histTrades}
           loading={loading}
+          positions={positions}
+          spots={spots}
         />
       )}
     </div>
@@ -86,19 +95,25 @@ function TimeframeBar({ resolution, onSelect }: {
 
 // ─── Live line chart (existing behaviour) ─────────────────────────────────────
 
-function LiveChart({ candles, lastTick, symbol, info, binaries, settledHistory }: {
+function LiveChart({ candles, lastTick, symbol, info, binaries, positions, spots, settledHistory }: {
   candles:         Candle[]
   lastTick:        Tick | null
   symbol:          string
   info:            SymbolInfo | null
   binaries:        BinaryOption[]
+  positions:       Position[]
+  spots:           SpotPosition[]
   settledHistory:  SettledTrade[]
 }) {
   const divisor = divisorOf(info)
   const containerRef  = useRef<HTMLDivElement>(null)
   const chartRef      = useRef<import('lightweight-charts').IChartApi | null>(null)
   const seriesRef     = useRef<import('lightweight-charts').ISeriesApi<'Candlestick'> | null>(null)
+  /** Keyed by binary.id — dashed entry lines for open Rise/Fall. */
   const priceLinesRef = useRef<Map<string, import('lightweight-charts').IPriceLine>>(new Map())
+  /** Keyed by `pos:${id}` / `spot:${id}` — solid entry lines for CFD + Spot.
+   *  Kept separate from binaries so cleanup ownership is unambiguous. */
+  const tradeLinesRef = useRef<Map<string, import('lightweight-charts').IPriceLine>>(new Map())
 
   // Create chart once — candlestick series for visual consistency with the
   // historical timeframes. (Was a line series; line + candles felt jarring
@@ -155,6 +170,7 @@ function LiveChart({ candles, lastTick, symbol, info, binaries, settledHistory }
 
     return () => {
       priceLinesRef.current.clear()
+      tradeLinesRef.current.clear()
       chart?.remove()
     }
   }, []) // eslint-disable-line
@@ -220,6 +236,20 @@ function LiveChart({ candles, lastTick, symbol, info, binaries, settledHistory }
       }
     })
   }, [binaries, symbol, divisor])
+
+  // Entry-price lines for open CFD + Spot positions (MT5-style). Lines are
+  // **solid** (binaries use dashed) so direction is encoded by colour and
+  // style is encoded by trade type at a glance. Title shows side, size, and
+  // current floating P&L — and we re-apply on every change so the P&L
+  // updates as ticks come in without remounting the line.
+  useEffect(() => {
+    if (!seriesRef.current) return
+    import('lightweight-charts').then(({ LineStyle }) => {
+      const series = seriesRef.current!
+      const openForSymbol = buildOpenTradeRows(positions, spots, symbol, divisor)
+      reconcileTradeLines(series, tradeLinesRef.current, openForSymbol, LineStyle.Solid)
+    })
+  }, [positions, spots, symbol, divisor])
 
   // Settled trade markers
   useEffect(() => {
@@ -290,19 +320,24 @@ function LiveChart({ candles, lastTick, symbol, info, binaries, settledHistory }
 
 // ─── Historical candlestick chart ─────────────────────────────────────────────
 
-function HistoricalChart({ symbol, info, resolution, candles, trades, loading }: {
+function HistoricalChart({ symbol, info, resolution, candles, trades, loading, positions, spots }: {
   symbol:     string
   info:       SymbolInfo | null
   resolution: Resolution
   candles:    { ts_s: number; open: number; high: number; low: number; close: number }[]
   trades:     ApiSettledTrade[]
   loading:    boolean
+  positions:  Position[]
+  spots:      SpotPosition[]
 }) {
   const divisor     = divisorOf(info)
   const displayName = displayNameOf(info, symbol)
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef     = useRef<import('lightweight-charts').IChartApi | null>(null)
   const seriesRef    = useRef<import('lightweight-charts').ISeriesApi<'Candlestick'> | null>(null)
+  /** Open-trade entry lines — same machinery as LiveChart so users see
+   *  their open positions overlaid regardless of the timeframe they pick. */
+  const tradeLinesRef = useRef<Map<string, import('lightweight-charts').IPriceLine>>(new Map())
 
   // Create chart once per mount
   useEffect(() => {
@@ -352,8 +387,23 @@ function HistoricalChart({ symbol, info, resolution, candles, trades, loading }:
       return () => ro.disconnect()
     })
 
-    return () => { chart?.remove() }
+    return () => {
+      tradeLinesRef.current.clear()
+      chart?.remove()
+    }
   }, []) // eslint-disable-line
+
+  // Open-trade entry lines — same shape and behaviour as LiveChart so users
+  // see their CFD/Spot entries on any timeframe. Title updates live on each
+  // P&L tick because the parent re-renders with fresh `positions` arrays.
+  useEffect(() => {
+    if (!seriesRef.current) return
+    import('lightweight-charts').then(({ LineStyle }) => {
+      const series = seriesRef.current!
+      const openForSymbol = buildOpenTradeRows(positions, spots, symbol, divisor)
+      reconcileTradeLines(series, tradeLinesRef.current, openForSymbol, LineStyle.Solid)
+    })
+  }, [positions, spots, symbol, divisor])
 
   // Reload candles when data changes — OHLC divided for display.
   useEffect(() => {
@@ -419,6 +469,93 @@ function HistoricalChart({ symbol, info, resolution, candles, trades, loading }:
       )}
     </div>
   )
+}
+
+// ─── Open-trade entry-line helpers ──────────────────────────────────────────
+//
+// Both LiveChart and HistoricalChart need to render dashboard-style entry
+// lines for the currently-selected symbol's open CFD + Spot positions. The
+// two factor out into:
+//
+//   buildOpenTradeRows()    — derives the renderable rows from props
+//   reconcileTradeLines()   — upserts/removes IPriceLines on a series, keyed
+//                             by `pos:${id}` / `spot:${id}` so binaries
+//                             (which live in priceLinesRef) never collide.
+//
+// Lines are SOLID; binaries are dashed. Colour is by side: BUY → up green,
+// SELL → down red. Title format: "BUY 0.10 +1.23" / "SELL spot $50 -0.45".
+
+type TradeLineRow = {
+  key:   string
+  price: number
+  color: string
+  title: string
+}
+
+function buildOpenTradeRows(
+  positions: Position[],
+  spots:     SpotPosition[],
+  symbol:    string,
+  divisor:   number,
+): TradeLineRow[] {
+  const fmtPnl = (pnl: number) =>
+    (pnl >= 0 ? '+' : '') + pnl.toFixed(2)
+
+  const fromPositions = positions
+    .filter(p => p.symbol === symbol)
+    .map<TradeLineRow>(p => ({
+      key:   `pos:${p.id}`,
+      price: p.entry / divisor,
+      color: p.side === 'BUY' ? '#4bb4b4' : '#cc2e3d',
+      title: `${p.side} ${p.lots.toFixed(2)} ${fmtPnl(p.unrealised_pnl ?? 0)}`,
+    }))
+
+  const fromSpots = spots
+    .filter(s => s.symbol === symbol)
+    .map<TradeLineRow>(s => ({
+      key:   `spot:${s.id}`,
+      price: s.entry / divisor,
+      color: s.side === 'BUY' ? '#4bb4b4' : '#cc2e3d',
+      title: `${s.side} spot $${s.stake.toFixed(0)} ${fmtPnl(s.unrealised_pnl ?? 0)}`,
+    }))
+
+  return [...fromPositions, ...fromSpots]
+}
+
+function reconcileTradeLines(
+  series:    import('lightweight-charts').ISeriesApi<'Candlestick'>,
+  store:     Map<string, import('lightweight-charts').IPriceLine>,
+  rows:      TradeLineRow[],
+  lineStyle: import('lightweight-charts').LineStyle,
+) {
+  const activeKeys = new Set(rows.map(r => r.key))
+
+  // Remove lines for trades that have closed or moved off-symbol
+  store.forEach((line, key) => {
+    if (!activeKeys.has(key)) {
+      try { series.removePriceLine(line) } catch { /* chart may have remounted */ }
+      store.delete(key)
+    }
+  })
+
+  // Upsert active lines — applyOptions on existing so the P&L title can
+  // update each tick without dropping and recreating the price line.
+  for (const r of rows) {
+    const existing = store.get(r.key)
+    if (existing) {
+      existing.applyOptions({ price: r.price, title: r.title })
+    } else {
+      const line = series.createPriceLine({
+        price:            r.price,
+        color:            r.color,
+        lineWidth:        1,
+        lineStyle,
+        axisLabelVisible: true,
+        title:            r.title,
+      })
+      store.set(r.key, line)
+    }
+  }
 }
 
 // ─── Zoom controls ───────────────────────────────────────────────────────────

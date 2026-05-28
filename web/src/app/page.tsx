@@ -210,7 +210,7 @@ export default function TradingPage() {
               candles={candles} lastTick={lastTick} symbol={selected}
               info={selectedInfo}
               accountId={accountId}
-              binaries={binaries} settledHistory={settledHistory}
+              binaries={binaries} positions={positions} spots={spots} settledHistory={settledHistory}
             />
           </div>
           <Positions
@@ -265,7 +265,7 @@ export default function TradingPage() {
                   candles={candles} lastTick={lastTick} symbol={selected}
                   info={selectedInfo}
                   accountId={accountId}
-                  binaries={binaries} settledHistory={settledHistory}
+                  binaries={binaries} positions={positions} spots={spots} settledHistory={settledHistory}
                 />
               </div>
             </div>
