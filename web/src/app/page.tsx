@@ -132,7 +132,9 @@ export default function TradingPage() {
       {/* Modals & drawer */}
       {authOpen    && <AuthModal onSuccess={handleGoogleLogin} error={authError} />}
       {profileOpen && user && <ProfileModal user={user} onClose={() => setProfileOpen(false)} />}
-      {depositOpen && user && <DepositModal user={user} onClose={() => setDepositOpen(false)} />}
+      {/* DepositModal stays mounted while `user` is present so BottomSheet
+          can play its exit animation when `open` flips back to false. */}
+      {user && <DepositModal open={depositOpen} user={user} onClose={() => setDepositOpen(false)} />}
       <AppDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}

@@ -2,17 +2,22 @@
 import { useState, useEffect } from 'react'
 import type { AuthUser } from '@/hooks/useAuth'
 import { authFetch } from '@/lib/api'
+import BottomSheet from './BottomSheet'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 
 interface Props {
-  user: AuthUser
+  user:    AuthUser
   onClose: () => void
+  /** When false, the sheet is unmounted. Parent controls mount lifecycle so
+   *  we can play the close animation cleanly. Defaults to true when omitted
+   *  so existing call sites keep working. */
+  open?:   boolean
 }
 
 type Tab = 'usdt' | 'ngn'
 
-export default function DepositModal({ user, onClose }: Props) {
+export default function DepositModal({ user: _user, onClose, open = true }: Props) {
   const [tab,        setTab]        = useState<Tab>('usdt')
   const [address,    setAddress]    = useState<string | null>(null)
   const [addrLoading, setAddrLoading] = useState(false)
@@ -66,26 +71,10 @@ export default function DepositModal({ user, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-
-      {/* Panel */}
-      <div className="relative w-full max-w-sm bg-panel border border-border rounded-2xl shadow-2xl overflow-hidden">
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <h2 className="text-text font-bold text-base">Deposit Funds</h2>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center text-dim hover:text-text rounded-lg hover:bg-surface transition-colors"
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex border-b border-border">
+    <BottomSheet open={open} onClose={onClose} title="Deposit Funds">
+      <div>
+        {/* Tabs — pinned at the top of the scrollable content area */}
+        <div className="flex border-b border-border sticky top-0 bg-panel z-10">
           <TabBtn label="USDT (TRC20)" active={tab === 'usdt'} onClick={() => setTab('usdt')} />
           <TabBtn label="NGN (Paystack)" active={tab === 'ngn'}  onClick={() => setTab('ngn')}  />
         </div>
@@ -219,7 +208,7 @@ export default function DepositModal({ user, onClose }: Props) {
           )}
         </div>
       </div>
-    </div>
+    </BottomSheet>
   )
 }
 

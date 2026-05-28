@@ -1,14 +1,19 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
+import BottomSheet from './BottomSheet'
 
 interface Props {
   onSuccess: (credential: string) => Promise<void>
   error?:    string | null
+  /** Optional close handler. When omitted the sheet renders without a
+   *  dismiss affordance — used for the gated auth screen where users must
+   *  sign in to use the app. */
+  onClose?:  () => void
 }
 
 const CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? ''
 
-export default function AuthModal({ onSuccess, error: externalError }: Props) {
+export default function AuthModal({ onSuccess, error: externalError, onClose }: Props) {
   const btnRef                    = useRef<HTMLDivElement>(null)
   const [internalError, setInternalError] = useState<string | null>(null)
   const [loading,       setLoading]       = useState(false)
@@ -69,9 +74,14 @@ export default function AuthModal({ onSuccess, error: externalError }: Props) {
     if (g?.accounts?.id) g.accounts.id.prompt()
   }
 
+  // Gate-mode (no onClose) — render a tap-noop so the sheet stays put.
+  // The user must sign in; backdrop dismiss would just put them back at a
+  // blank screen with no recourse.
+  const handleClose = onClose ?? (() => {})
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="bg-panel border border-border rounded-2xl p-8 flex flex-col items-center gap-6 w-80 shadow-2xl">
+    <BottomSheet open={true} onClose={handleClose}>
+      <div className="p-8 flex flex-col items-center gap-6">
 
         {/* Logo */}
         <div className="flex flex-col items-center gap-1">
@@ -122,6 +132,6 @@ export default function AuthModal({ onSuccess, error: externalError }: Props) {
           Deposit real USDT to trade live
         </p>
       </div>
-    </div>
+    </BottomSheet>
   )
 }
