@@ -1,11 +1,13 @@
 'use client'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import clsx from 'clsx'
 import type {
   Position, BinaryOption, SpotPosition, Tick, SettledTrade, SymbolInfo,
 } from '@/types'
 import { closePosition, closeSpot } from '@/hooks/useAccount'
 import { buildSymbolMap, displayNameOf, formatPrice, priceDecimals } from '@/lib/symbols'
+import { usePullToRefresh, PullIndicator } from '@/hooks/usePullToRefresh'
+import { useSwipeToClose } from '@/hooks/useSwipeToClose'
 
 /**
  * MobilePositions — MT5-style positions view.
@@ -46,10 +48,22 @@ export default function MobilePositions(props: Props) {
   const symbolMap = useMemo(() => buildSymbolMap(symbols), [symbols])
   const openCount = positions.length + binaries.length + spots.length
 
+  // Pull-to-refresh — applied to the scrollable list area below the tabs.
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const { pull, refreshing, threshold } = usePullToRefresh(scrollRef, async () => {
+    // Quick double-refresh: call once and let it settle. UI feedback comes
+    // from the indicator + refreshing flag; consumer is responsible for the
+    // actual data update via onRefresh.
+    await Promise.resolve(onRefresh())
+    // Give the eye ~250ms even if the refresh resolved instantly, otherwise
+    // the spinner barely flashes and feels broken.
+    await new Promise(r => setTimeout(r, 250))
+  })
+
   return (
-    <div className="flex flex-col">
-      {/* Sticky header — tabs + "+" button */}
-      <div className="sticky top-0 z-10 bg-panel border-b border-border">
+    <div className="flex flex-col h-full">
+      {/* Fixed header — tabs + "+" button (does NOT scroll with the list) */}
+      <div className="shrink-0 bg-panel border-b border-border">
         <div className="flex items-center">
           <TabBtn label="Open"    count={openCount}              active={tab === 'open'}    onClick={() => setTab('open')} />
           <TabBtn label="Recent"  count={settledHistory.length}  active={tab === 'recent'}  onClick={() => setTab('recent')} />
@@ -68,7 +82,9 @@ export default function MobilePositions(props: Props) {
         </div>
       </div>
 
-      {/* Content */}
+      {/* Scrollable list area with pull-to-refresh */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <PullIndicator pull={pull} refreshing={refreshing} threshold={threshold} />
       {tab === 'open' && (
         <>
           {openCount === 0 && (
@@ -144,6 +160,7 @@ export default function MobilePositions(props: Props) {
               <SettledRow key={t.id} trade={t} info={symbolMap.get(t.symbol) ?? null} />
             ))
       )}
+      </div>
     </div>
   )
 }
@@ -157,7 +174,7 @@ function PositionRow({ info, symbolId, side, sizeText, entry, current, pnl, onCl
 }) {
   const dp = priceDecimals(info)
   return (
-    <RowFrame onLongHold={onClose}>
+    <SwipeableRow onClose={onClose}>
       <div className="flex-1 min-w-0">
         <div className="text-sm font-bold text-text flex items-baseline gap-1.5 truncate">
           <span>{displayNameOf(info, symbolId)},</span>
@@ -171,7 +188,7 @@ function PositionRow({ info, symbolId, side, sizeText, entry, current, pnl, onCl
         </div>
       </div>
       <PnlAndClose pnl={pnl} onClose={onClose} />
-    </RowFrame>
+    </SwipeableRow>
   )
 }
 
@@ -184,7 +201,7 @@ function SpotRow({ info, symbolId, side, stake, units, entry, pnl, onClose }: {
   // Display units are TRUE units × divisor (so user sees "22 BTC-units" not "0.022 BTC")
   const displayUnits = units * (info?.display_divisor ?? 1)
   return (
-    <RowFrame onLongHold={onClose}>
+    <SwipeableRow onClose={onClose}>
       <div className="flex-1 min-w-0">
         <div className="text-sm font-bold text-text flex items-baseline gap-1.5 truncate">
           <span>{displayNameOf(info, symbolId)},</span>
@@ -197,7 +214,7 @@ function SpotRow({ info, symbolId, side, stake, units, entry, pnl, onClose }: {
         </div>
       </div>
       <PnlAndClose pnl={pnl} onClose={onClose} />
-    </RowFrame>
+    </SwipeableRow>
   )
 }
 
@@ -263,13 +280,56 @@ function SettledRow({ trade: t, info }: { trade: SettledTrade; info: SymbolInfo 
 
 // ─── Bits ────────────────────────────────────────────────────────────────────
 
-function RowFrame({ children }: {
-  children: React.ReactNode
-  onLongHold?: () => void  // reserved — future swipe-to-close
-}) {
+function RowFrame({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border/60 active:bg-surface/40">
       {children}
+    </div>
+  )
+}
+
+/** SwipeableRow — wraps a row with a left-swipe-to-close gesture.
+ *  As the user drags left, the row translates with their finger and a red
+ *  Close zone is revealed beneath. Past the threshold, on release the row
+ *  animates off-screen and onClose fires (calling the existing close API).
+ *  Below the swipe threshold, the row springs back to its rest position. */
+function SwipeableRow({ children, onClose }: {
+  children: React.ReactNode
+  onClose:  () => void | Promise<void>
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const { offset, armed } = useSwipeToClose(ref, onClose)
+  const swiping = offset !== 0
+  return (
+    <div className="relative overflow-hidden border-b border-border/60">
+      {/* Background revealed under the row as it slides left */}
+      {swiping && (
+        <div
+          className={clsx(
+            'absolute inset-0 flex items-center justify-end px-4 transition-colors',
+            armed ? 'bg-down/80' : 'bg-down/30',
+          )}
+        >
+          <span className={clsx(
+            'text-[11px] font-bold uppercase tracking-wider transition-colors',
+            armed ? 'text-white' : 'text-down',
+          )}>
+            {armed ? 'Release to close' : 'Swipe to close'}
+          </span>
+        </div>
+      )}
+      {/* Foreground row that actually translates */}
+      <div
+        ref={ref}
+        className="relative flex items-center gap-3 px-4 py-2.5 bg-panel active:bg-surface/40"
+        style={{
+          transform: `translateX(${offset}px)`,
+          transition: offset === 0 ? 'transform 200ms ease' : 'none',
+          touchAction: 'pan-y', // hint the browser: vertical scroll OK, horizontal handled by us
+        }}
+      >
+        {children}
+      </div>
     </div>
   )
 }
