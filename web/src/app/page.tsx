@@ -8,7 +8,6 @@ import Header           from '@/components/Header'
 import SymbolBar        from '@/components/SymbolBar'
 import Chart            from '@/components/Chart'
 import TradePanel       from '@/components/TradePanel'
-import MobileQuickTrade from '@/components/MobileQuickTrade'
 import Positions        from '@/components/Positions'
 import AuthModal        from '@/components/AuthModal'
 import ProfileModal     from '@/components/ProfileModal'
@@ -186,27 +185,16 @@ export default function TradingPage() {
 
       {/* ── Mobile layout (<md): tab-switched panels ────────────────────────── */}
       <div className="flex flex-col flex-1 overflow-hidden md:hidden">
-        {/* Content area */}
-        <div className="flex-1 overflow-hidden flex flex-col">
+        {/* Content area — each tab is a dedicated full-screen view
+            (Chart / Trade / Positions). MetaTrader-style separation. */}
+        <div className="flex-1 overflow-hidden">
           {mobileTab === 'chart' && (
-            <>
-              <div className="flex-1 overflow-hidden">
-                <Chart
-                  candles={candles} lastTick={lastTick} symbol={selected}
-                  info={selectedInfo}
-                  accountId={accountId}
-                  binaries={binaries} settledHistory={settledHistory}
-                />
-              </div>
-              <MobileQuickTrade
-                symbol={selected}
-                info={selectedInfo}
-                lastTick={lastTick}
-                account={account}
-                accountId={accountId}
-                onTraded={handleTraded}
-              />
-            </>
+            <Chart
+              candles={candles} lastTick={lastTick} symbol={selected}
+              info={selectedInfo}
+              accountId={accountId}
+              binaries={binaries} settledHistory={settledHistory}
+            />
           )}
           {mobileTab === 'trade' && (
             <div className="h-full overflow-y-auto bg-panel">

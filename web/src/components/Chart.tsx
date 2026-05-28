@@ -115,7 +115,14 @@ function LiveChart({ candles, lastTick, symbol, info, binaries, settledHistory }
         grid: { vertLines: { color: '#1a1a1a' }, horzLines: { color: '#1a1a1a' } },
         crosshair: { mode: CrosshairMode.Normal },
         rightPriceScale: { borderColor: '#242424' },
-        timeScale: { borderColor: '#242424', timeVisible: true, secondsVisible: true },
+        timeScale: {
+          borderColor: '#242424',
+          timeVisible: true,
+          secondsVisible: true,
+          // Tighter default density — more candles per screen (MetaTrader-style).
+          // Users zoom in via the +/− overlay if they want bigger candles.
+          barSpacing: 4,
+        },
         handleScroll: true,
         handleScale: true,
       })
@@ -164,7 +171,9 @@ function LiveChart({ candles, lastTick, symbol, info, binaries, settledHistory }
         close: c.close / divisor,
       }))
     )
-    chartRef.current?.timeScale().fitContent()
+    // scrollToRealTime instead of fitContent — keep the fixed barSpacing
+    // density and just position the latest candle at the right edge.
+    chartRef.current?.timeScale().scrollToRealTime()
   }, [symbol, candles.length === 0, divisor]) // eslint-disable-line
 
   // Tick-by-tick update — apply divisor to OHLC of the latest bucket.
@@ -308,7 +317,13 @@ function HistoricalChart({ symbol, info, resolution, candles, trades, loading }:
         grid: { vertLines: { color: '#1a1a1a' }, horzLines: { color: '#1a1a1a' } },
         crosshair: { mode: CrosshairMode.Normal },
         rightPriceScale: { borderColor: '#242424' },
-        timeScale: { borderColor: '#242424', timeVisible: true, secondsVisible: false },
+        timeScale: {
+          borderColor: '#242424',
+          timeVisible: true,
+          secondsVisible: false,
+          // Tighter default density — packs more candles per screen.
+          barSpacing: 4,
+        },
         handleScroll: true,
         handleScale: true,
       })
@@ -352,7 +367,9 @@ function HistoricalChart({ symbol, info, resolution, candles, trades, loading }:
         close: c.close / divisor,
       }))
     )
-    chartRef.current?.timeScale().fitContent()
+    // scrollToRealTime instead of fitContent — keep the fixed barSpacing
+    // density and just position the latest candle at the right edge.
+    chartRef.current?.timeScale().scrollToRealTime()
   }, [candles, divisor])
 
   // Trade markers from API history
