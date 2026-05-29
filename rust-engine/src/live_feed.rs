@@ -4,9 +4,9 @@
 //!   - cryBTCUSD → BTCUSDT
 //!   - cryETHUSD → ETHUSDT
 //!
-//! Yahoo Finance chart endpoint `query1.finance.yahoo.com/v8/finance/chart/GC=F`
+//! Yahoo Finance chart endpoint `query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X`
 //! (no API key, unofficial but widely used):
-//!   - cryXAUUSD → COMEX gold futures (GC=F) as a proxy for spot XAU/USD.
+//!   - cryXAUUSD → spot XAU/USD interbank price via Yahoo `XAUUSD=X`.
 //!     Futures basis vs spot is small (~$0.50–$5 per oz) and acceptable for
 //!     a display-only synthetic feed. Frankfurter was tried first but it
 //!     doesn't carry metals — every fetch failed.
@@ -142,7 +142,7 @@ async fn fetch_binance(
     }
 }
 
-// ── Yahoo Finance (XAU/USD via COMEX gold futures GC=F) ──────────────────────
+// ── Yahoo Finance (XAU/USD via spot pair XAUUSD=X) ──────────────────────────
 
 /// Mozilla-style User-Agent override for Yahoo. Their chart endpoint sometimes
 /// rejects custom UA strings, so we masquerade as a browser on this one call.
@@ -236,7 +236,7 @@ async fn fetch_yahoo_history(
 }
 
 /// Fetch the latest regular-market price for any Yahoo Finance ticker via the
-/// public chart endpoint. Works for `GC=F` (gold futures), `^GSPC`, `^DJI`,
+/// public chart endpoint. Works for `XAUUSD=X` (gold spot), `^GSPC`, `^DJI`,
 /// `^IXIC`, equities, etc. Outside trading hours Yahoo returns the last close.
 async fn fetch_yahoo_chart(client: &reqwest::Client, yahoo_ticker: &str) -> Option<f64> {
     let url = format!("https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_ticker}");
@@ -380,20 +380,26 @@ pub fn start(state: SharedState) {
     // ETH/USD — 500 ms (Binance bookTicker, real bid/ask)
     spawn_binance(state.clone(), client.clone(), "ETHUSDT", "cryETHUSD", 500);
 
-    // Gold — Yahoo GC=F at 2 s, synthetic bid/ask around mid.
+    // Gold — Yahoo XAUUSD=X (interbank spot) at 2 s, synthetic bid/ask around mid.
+    // We used to source from GC=F (COMEX gold futures front month) but that
+    // sits +$5-25 above spot because of the cost of carry — and every other
+    // CFD broker (Exness, IG, Plus500, CMC) shows the spot XAUUSD level from
+    // their LBMA bullion-bank feeds, so our number looked off by ~$20 to any
+    // user cross-checking. Yahoo's XAUUSD=X uses the currency-pair format
+    // (same convention as EURUSD=X) which is spot, not futures.
     spawn_yahoo(
         state.clone(),
         client.clone(),
-        "GC=F",
+        "XAUUSD=X",
         "cryXAUUSD",
         GOLD_HALF_SPREAD_PCT,
         2_000,
     );
-    // Silver — Yahoo SI=F at 2 s, synthetic bid/ask around mid.
+    // Silver — same story: Yahoo XAGUSD=X (spot) instead of SI=F (futures).
     spawn_yahoo(
         state.clone(),
         client.clone(),
-        "SI=F",
+        "XAGUSD=X",
         "XAGUSD",
         SILVER_HALF_SPREAD_PCT,
         2_000,
@@ -449,8 +455,10 @@ pub fn start(state: SharedState) {
     // waiting hours/days for live ticks to fill them. Refreshed hourly. We
     // use SPY/DIA/QQQ tickers (not ^GSPC/^DJI/^IXIC) so historical prices
     // match the ETF scale of the live feed.
-    spawn_yahoo_history_refresh(state.clone(), client.clone(), "GC=F", "cryXAUUSD");
-    spawn_yahoo_history_refresh(state.clone(), client.clone(), "SI=F", "XAGUSD");
+    // Historical backfill for metals — same tickers as live feed so price
+    // history matches up. XAUUSD=X / XAGUSD=X are the spot interbank pairs.
+    spawn_yahoo_history_refresh(state.clone(), client.clone(), "XAUUSD=X", "cryXAUUSD");
+    spawn_yahoo_history_refresh(state.clone(), client.clone(), "XAGUSD=X", "XAGUSD");
     spawn_yahoo_history_refresh(state.clone(), client.clone(), "SPY", "SPX");
     spawn_yahoo_history_refresh(state.clone(), client.clone(), "DIA", "DJI");
     spawn_yahoo_history_refresh(state, client, "QQQ", "NDX");
@@ -491,7 +499,7 @@ fn spawn_binance(
 
 /// Generic Yahoo Finance chart-endpoint feeder. Polls every `cadence_ms`,
 /// synthesises bid/ask around the mid using `half_spread_pct`, and dispatches
-/// a tick under the internal `symbol` id. Used for gold (GC=F) and US indices.
+/// a tick under the internal `symbol` id. Used for gold (XAUUSD=X) and US indices.
 fn spawn_yahoo(
     state: SharedState,
     client: Arc<reqwest::Client>,
