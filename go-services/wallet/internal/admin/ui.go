@@ -51,6 +51,13 @@ const adminHTML = `<!DOCTYPE html>
   .btn-approve{background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.4);color:var(--up)}
   .btn-reject{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.4);color:var(--down)}
   .btn-primary{background:rgba(99,102,241,.15);border-color:rgba(99,102,241,.4);color:var(--brand)}
+  /* Pending withdrawal rows get a left-border highlight + faint glow so the
+     queue items needing attention are visually separated from the historical
+     ones the admin is just reviewing. */
+  .row-pending{box-shadow:inset 3px 0 0 var(--warn)}
+  .row-pending td{background:rgba(245,158,11,.04)}
+  .copy-btn{background:transparent;border:1px solid var(--border);border-radius:4px;padding:0 6px;font-size:11px;color:var(--dim);cursor:pointer;line-height:18px;height:20px;vertical-align:baseline}
+  .copy-btn:hover{border-color:var(--brand);color:var(--brand)}
   #login-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:99}
   #login-box{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:40px;width:340px;display:flex;flex-direction:column;gap:20px}
   #login-box h2{font-size:20px;color:var(--brand);font-weight:700}
@@ -275,12 +282,18 @@ async function loadDeposits() {
 }
 
 // ── Withdrawals ───────────────────────────────────────────────────────────────
+// Keep a copy of the last-rendered batch so action handlers can reach the
+// full address + user details without redoing the API call.
+var _wdCache = {};
+
 async function loadWithdrawals() {
   var status = document.getElementById('wd-filter').value;
   var d = await apiGet('/admin/withdrawals?status='+status);
   var tb = document.getElementById('withdrawals-tb');
+  _wdCache = {};
   if (!d.withdrawals || !d.withdrawals.length) { tb.innerHTML = '<tr><td colspan="7" class="empty">None</td></tr>'; return; }
   tb.innerHTML = d.withdrawals.map(function(w) {
+    _wdCache[w.id] = w;
     var txLink = w.txid
       ? '<a href="https://tronscan.org/#/transaction/'+w.txid+'" target="_blank" style="color:var(--brand);font-size:11px">'+w.txid.slice(0,12)+'…</a>'
       : '—';
@@ -288,20 +301,42 @@ async function loadWithdrawals() {
       ? '<button class="btn btn-approve" onclick="approveWd(\''+w.id+'\',this)">Approve</button> ' +
         '<button class="btn btn-reject"  onclick="rejectWd(\''+w.id+'\',this)">Reject</button>'
       : '';
-    return '<tr>' +
-      '<td><div style="font-size:12px;font-weight:600">'+esc(w.name||'')+'</div><div class="mono" style="font-size:11px;color:var(--dim)">'+esc(w.email)+'</div></td>' +
-      '<td class="mono" style="font-weight:600">$'+fmt(w.amount)+'</td>' +
-      '<td class="mono" style="font-size:11px;color:var(--dim)">'+shortAddr(w.address)+'</td>' +
+    // Destination cell — clickable address that opens TRONSCAN, plus a
+    // small Copy button so the admin can paste the full address into
+    // whatever tool they want to verify it independently before approving.
+    var addrCell =
+      '<a href="https://tronscan.org/#/address/'+esc(w.address)+'" target="_blank" class="mono" style="font-size:11px;color:var(--dim);text-decoration:none" title="'+esc(w.address)+'">'+shortAddr(w.address)+'</a>' +
+      ' <button class="copy-btn" onclick="copyText(\''+esc(w.address)+'\',this)" title="Copy address">📋</button>';
+    // Time row: stack "Xh ago" over the absolute timestamp so admins can
+    // scan urgency at a glance but still see when something old slipped
+    // through.
+    var when =
+      '<div style="font-size:12px;color:var(--dim)">'+timeAgo(w.created_at)+'</div>' +
+      '<div class="mono" style="font-size:10px;color:var(--dim);opacity:.7">'+absTime(w.created_at)+'</div>';
+    return '<tr'+(w.status==='pending' ? ' class="row-pending"' : '')+'>' +
+      '<td><div style="font-size:12px;font-weight:600">'+esc(w.name||'(no name)')+'</div><div class="mono" style="font-size:11px;color:var(--dim)">'+esc(w.email)+'</div></td>' +
+      '<td class="mono" style="font-weight:700;font-size:14px;color:var(--text)">$'+fmt(w.amount)+'</td>' +
+      '<td>'+addrCell+'</td>' +
       '<td><span class="pill p-'+w.status+'">'+w.status+'</span></td>' +
       '<td>'+txLink+'</td>' +
-      '<td style="color:var(--dim);font-size:12px">'+timeAgo(w.created_at)+'</td>' +
+      '<td>'+when+'</td>' +
       '<td>'+actions+'</td>' +
       '</tr>';
   }).join('');
 }
 
 async function approveWd(id, btn) {
-  if (!confirm('Approve and broadcast withdrawal from treasury?')) return;
+  var w = _wdCache[id];
+  if (!w) return;
+  // Spell out exactly what's about to happen — fat-finger-proof. The admin
+  // sees user identity, amount, full destination address before they
+  // authorise an on-chain broadcast that can't be reversed.
+  var msg = 'APPROVE WITHDRAWAL\n\n' +
+    'User:    ' + (w.name||'(no name)') + ' <' + w.email + '>\n' +
+    'Amount:  $' + fmt(w.amount) + ' USDT\n' +
+    'To:      ' + w.address + '\n\n' +
+    'This broadcasts on-chain immediately. Continue?';
+  if (!confirm(msg)) return;
   btn.disabled = true; btn.textContent = 'Sending…';
   var r = await apiPost('/admin/withdrawals/'+id+'/approve', {});
   if (r.error) { alert('Error: '+r.error); btn.disabled=false; btn.textContent='Approve'; return; }
@@ -309,10 +344,36 @@ async function approveWd(id, btn) {
 }
 
 async function rejectWd(id, btn) {
-  var reason = prompt('Reason for rejection (optional):') || '';
+  var w = _wdCache[id];
+  if (!w) return;
+  var reason = prompt('Reject $' + fmt(w.amount) + ' withdrawal for ' + w.email + '\n\nReason (will be emailed to user):') || '';
+  if (reason === '') {
+    if (!confirm('Reject with no reason given?')) return;
+  }
   btn.disabled = true;
   await apiPost('/admin/withdrawals/'+id+'/reject', { reason: reason });
   loadWithdrawals();
+}
+
+// Copy a string to clipboard and flash the button to confirm. Used for the
+// TRC20 destination addresses in the withdrawals table — copying the
+// truncated text on the page wouldn't work, so we provide the full address
+// from JS.
+function copyText(text, btn) {
+  navigator.clipboard.writeText(text).then(function() {
+    var orig = btn.textContent;
+    btn.textContent = '✓';
+    setTimeout(function(){ btn.textContent = orig; }, 1000);
+  });
+}
+
+// absTime — short absolute timestamp for the second line under "Xh ago".
+function absTime(iso) {
+  try {
+    var d = new Date(iso);
+    var pad = function(n){ return String(n).padStart(2,'0'); };
+    return d.getFullYear()+'.'+pad(d.getMonth()+1)+'.'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+  } catch(e) { return ''; }
 }
 
 // ── Utils ─────────────────────────────────────────────────────────────────────

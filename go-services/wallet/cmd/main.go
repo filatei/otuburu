@@ -55,16 +55,17 @@ func main() {
 	}
 	go sw.Run(ctx)
 
-	// ── Deposit monitor ───────────────────────────────────────────────────────
-	monitor := wallet.NewMonitor(pool)
-	go monitor.Run(ctx)
-
 	// ── Transactional email ──────────────────────────────────────────────────
-	// Built up here, before route wiring, because both walletH and paystackH
-	// take it as a dependency. Nil-safe: when SMTP config is incomplete the
-	// wallet still runs, just without notifications. Email is best-effort;
-	// we never block a deposit credit or withdrawal request on send success.
+	// Initialised before the deposit monitor and route wiring because both
+	// take the mailer as a dependency. Nil-safe — when SMTP config is
+	// incomplete the wallet still runs, just without notifications. Email
+	// is best-effort; we never block a deposit credit or withdrawal request
+	// on send success.
 	mailer := email.New()
+
+	// ── Deposit monitor ───────────────────────────────────────────────────────
+	monitor := wallet.NewMonitor(pool, mailer)
+	go monitor.Run(ctx)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	gin.SetMode(gin.ReleaseMode)
@@ -108,8 +109,20 @@ func main() {
 	rateFetcher := payments.NewRateFetcher(seedRate)
 	rateFetcher.Start(ctx)
 
+	// Phase 3: multi-currency rate map (NGN, GHS, KES, ZAR, UGX). Boots
+	// alongside the legacy single-currency RateFetcher for now; future
+	// callers should migrate to RateMap and the legacy fetcher can retire
+	// once Paystack handler stops needing it.
+	rateMap := payments.NewRateMap()
+	rateMap.Start(ctx)
+
 	paystackH := payments.New(pool, rateFetcher, mailer)
 	paystackH.RegisterRoutes(protected, r.Group("/"))
+
+	// Expose the rate map read-only for the frontend's deposit-preview UI
+	// (Phase 3 NGN/GHS/KES picker). One endpoint, no auth required — the
+	// rates are publicly available from the upstream providers anyway.
+	r.GET("/payments/rates", payments.RatesHandler(rateMap))
 
 	// ── Admin: back-office dashboard ──────────────────────────────────────────
 	// Note: avoid r.Group("/admin") alongside r.GET("/admin") — Gin's router

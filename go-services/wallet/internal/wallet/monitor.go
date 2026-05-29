@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"otuburu.money/wallet/internal/email"
 )
 
 const pollInterval = 30 * time.Second
@@ -29,15 +31,17 @@ type Monitor struct {
 	apiKey         string
 	gatewayURL     string // e.g. http://gateway:8082
 	internalSecret string
+	mailer         *email.Mailer
 	client         *http.Client
 }
 
-func NewMonitor(db *pgxpool.Pool) *Monitor {
+func NewMonitor(db *pgxpool.Pool, mailer *email.Mailer) *Monitor {
 	return &Monitor{
 		db:             db,
 		apiKey:         os.Getenv("TRONGRID_API_KEY"),
 		gatewayURL:     os.Getenv("GATEWAY_URL"),
 		internalSecret: os.Getenv("INTERNAL_SECRET"),
+		mailer:         mailer,
 		client:         &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -201,6 +205,35 @@ func (m *Monitor) credit(ctx context.Context, t trc20Transfer, accountID string)
 	// Push the new balance into the engine book so the user can trade immediately.
 	// We read the current Postgres balance (post-credit) for accuracy.
 	m.syncEngineBalance(ctx, accountID)
+
+	// Notify the user — best-effort, fire-and-forget. Symmetric with the
+	// Paystack NGN credit path; users now get a confirmation regardless of
+	// which rail the deposit came in on.
+	m.notifyDepositCredited(ctx, accountID, amount, t.TransactionID)
+}
+
+// notifyDepositCredited emails the user that their USDT deposit has been
+// confirmed and credited. Nil-safe (mailer may be nil if SMTP is misconfigured).
+func (m *Monitor) notifyDepositCredited(ctx context.Context, accountID string, usd float64, txid string) {
+	if m.mailer == nil {
+		return
+	}
+	var emailAddr, name string
+	if err := m.db.QueryRow(ctx,
+		`SELECT u.email, COALESCE(u.name, '') FROM users u
+		 JOIN accounts a ON a.user_id = u.id
+		 WHERE a.id = $1`,
+		accountID,
+	).Scan(&emailAddr, &name); err != nil || emailAddr == "" {
+		slog.Warn("usdt deposit email: recipient lookup failed", "account_id", accountID, "err", err)
+		return
+	}
+	if name == "" {
+		name = "there"
+	}
+	subject := fmt.Sprintf("Deposit credited — $%.2f USDT", usd)
+	body := email.DepositCreditedHTML(name, usd, "USDT", txid)
+	m.mailer.Send(emailAddr, subject, body)
 }
 
 // syncEngineBalance reads the current Postgres balance for accountID and
