@@ -94,6 +94,22 @@ export default function AuthModal({ onSuccess, error: externalError, onClose }: 
         <div className="text-center">
           <p className="text-text text-sm font-medium mb-1">Welcome</p>
           <p className="text-dim text-xs">Sign in to access your trading account</p>
+          {/* Below the welcome — the headline of the value prop. "Zero
+              commission" is industry-standard phrasing for spread-based
+              brokers (Robinhood, eToro, Plus500 all use it) and tells
+              cross-shoppers the obvious comparison point versus stock
+              brokers that charge per-trade fees. */}
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5">
+            <span className="px-2 py-0.5 rounded-full bg-up/10 text-up text-[10px] font-bold uppercase tracking-wider">
+              Zero commission
+            </span>
+            <span className="px-2 py-0.5 rounded-full bg-brand/10 text-brand text-[10px] font-bold uppercase tracking-wider">
+              From $1
+            </span>
+            <span className="px-2 py-0.5 rounded-full bg-surface text-dim text-[10px] font-bold uppercase tracking-wider border border-border">
+              24/7 markets
+            </span>
+          </div>
         </div>
 
         {/* Error banner */}

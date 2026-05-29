@@ -163,7 +163,7 @@ export default function AppDrawer({
           </Section>
         </div>
 
-        {/* ── Footer: sign out ──────────────────────────────────────────── */}
+        {/* ── Footer: value-prop tagline + sign out ────────────────────── */}
         {user && (
           <div className="shrink-0 px-3 pb-6 pt-2 border-t border-border mt-2">
             <button
@@ -173,6 +173,9 @@ export default function AppDrawer({
               <span className="text-base">🚪</span>
               Sign out
             </button>
+            <p className="text-center text-[10px] text-dim/70 mt-3 leading-relaxed">
+              Zero commission · Spreads from 5 bps · Real markets, fractional access
+            </p>
           </div>
         )}
       </div>
