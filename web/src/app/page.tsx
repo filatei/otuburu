@@ -21,6 +21,7 @@ import DepositModal        from '@/components/DepositModal'
 import SymbolActionsSheet    from '@/components/SymbolActionsSheet'
 import SymbolPropertiesModal from '@/components/SymbolPropertiesModal'
 import { provisionAccount } from '@/hooks/useAccount'
+import { useAutoFullscreen } from '@/hooks/useAutoFullscreen'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 
@@ -60,6 +61,11 @@ function orderSymbols(symbols: SymbolInfo[]): SymbolInfo[] {
 type MobileTab = 'symbols' | 'chart' | 'trade' | 'positions'
 
 export default function TradingPage() {
+  // Default the experience to fullscreen so the browser URL bar gets out of
+  // the way (MT5-like). One-shot — fires on the first user gesture, respects
+  // the user's prior explicit opt-out, no-op on iOS Safari.
+  useAutoFullscreen()
+
   const [symbols,       setSymbols]       = useState<SymbolInfo[]>([])
   const [selected,      setSelected]      = useState('frxEURUSD')
   const [mode,          setMode]          = useState<'demo' | 'real'>('demo')

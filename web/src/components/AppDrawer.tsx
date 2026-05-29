@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import type { AuthUser } from '@/hooks/useAuth'
+import { setFullscreenPref } from '@/hooks/useAutoFullscreen'
 
 interface Props {
   open:          boolean
@@ -210,8 +211,12 @@ function FullscreenItem({ onClose }: { onClose: () => void }) {
     try {
       if (document.fullscreenElement) {
         await document.exitFullscreen()
+        // Remember the user explicitly wants the URL bar back, so the
+        // first-gesture auto-fullscreen on next page load doesn't fight them.
+        setFullscreenPref(false)
       } else {
         await document.documentElement.requestFullscreen()
+        setFullscreenPref(true)
       }
     } catch (err) {
       // Some browsers reject the call if the gesture didn't originate from

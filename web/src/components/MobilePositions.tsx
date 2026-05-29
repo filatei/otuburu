@@ -84,8 +84,13 @@ export default function MobilePositions(props: Props) {
 
   const [tab, setTab] = useState<Tab>('trade')
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>({ kind: '7d' })
+  /** Single-expand: only one row open at a time (mirrors MT5 mobile). null = none. */
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const symbolMap = useMemo(() => buildSymbolMap(symbols), [symbols])
   const openCount = positions.length + binaries.length + spots.length
+
+  const toggleExpand = (id: string) =>
+    setExpandedId(prev => (prev === id ? null : id))
 
   // Filtered settled trades + their aggregate net P&L for the filter chip.
   // Memoised on (history, filter) so chip switching is cheap even with a
@@ -134,13 +139,11 @@ export default function MobilePositions(props: Props) {
             return (
               <PositionRow
                 key={p.id}
+                position={p}
                 info={info}
-                symbolId={p.symbol}
-                side={p.side}
-                sizeText={`${p.lots.toFixed(2)} lots`}
-                entry={p.entry}
                 current={current}
-                pnl={p.unrealised_pnl}
+                expanded={expandedId === p.id}
+                onToggle={() => toggleExpand(p.id)}
                 onClose={async () => { await closePosition(accountId, p.id); onRefresh() }}
               />
             )
@@ -167,13 +170,10 @@ export default function MobilePositions(props: Props) {
             return (
               <SpotRow
                 key={s.id}
+                spot={s}
                 info={info}
-                symbolId={s.symbol}
-                side={s.side}
-                stake={s.stake}
-                units={s.units}
-                entry={s.entry}
-                pnl={s.unrealised_pnl}
+                expanded={expandedId === s.id}
+                onToggle={() => toggleExpand(s.id)}
                 onClose={async () => { await closeSpot(accountId, s.id); onRefresh() }}
               />
             )
@@ -203,54 +203,87 @@ export default function MobilePositions(props: Props) {
 
 // ─── Row components ──────────────────────────────────────────────────────────
 
-function PositionRow({ info, symbolId, side, sizeText, entry, current, pnl, onClose }: {
-  info: SymbolInfo | null; symbolId: string; side: 'BUY' | 'SELL';
-  sizeText: string; entry: number; current: number; pnl: number;
-  onClose: () => Promise<void>
+function PositionRow({ position: p, info, current, expanded, onToggle, onClose }: {
+  position: Position
+  info:     SymbolInfo | null
+  current:  number
+  expanded: boolean
+  onToggle: () => void
+  onClose:  () => Promise<void>
 }) {
   const dp = priceDecimals(info)
   return (
-    <SwipeableRow onClose={onClose}>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-bold text-text flex items-baseline gap-1.5 truncate">
-          <span>{displayNameOf(info, symbolId)},</span>
-          <span className={clsx('font-semibold', side === 'BUY' ? 'text-up' : 'text-down')}>
-            {side.toLowerCase()}
-          </span>
-          <span className="text-text">{sizeText}</span>
+    <>
+      <SwipeableRow onClose={onClose} onTap={onToggle}>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-bold text-text flex items-baseline gap-1.5 truncate">
+            <span>{displayNameOf(info, p.symbol)},</span>
+            <span className={clsx('font-semibold', p.side === 'BUY' ? 'text-up' : 'text-down')}>
+              {p.side.toLowerCase()}
+            </span>
+            <span className="text-text">{p.lots.toFixed(2)} lots</span>
+          </div>
+          <div className="text-[12px] text-dim num mt-0.5">
+            {formatPrice(info, p.entry, dp)} <span className="text-dim/60">→</span> {formatPrice(info, current, dp)}
+          </div>
         </div>
-        <div className="text-[12px] text-dim num mt-0.5">
-          {formatPrice(info, entry, dp)} <span className="text-dim/60">→</span> {formatPrice(info, current, dp)}
-        </div>
-      </div>
-      <PnlAndClose pnl={pnl} onClose={onClose} />
-    </SwipeableRow>
+        <PnlAndClose pnl={p.unrealised_pnl} onClose={onClose} />
+      </SwipeableRow>
+      {expanded && (
+        <ExpandedDetails
+          rows={[
+            ['Order',    `#${p.id.slice(0, 8)}`],
+            ['Open',     fmtOpenTime(p.opened_at_ms)],
+            ['S / L',    p.sl_loss   && p.sl_loss   > 0 ? `$${p.sl_loss.toFixed(2)}`   : '—'],
+            ['T / P',    p.tp_profit && p.tp_profit > 0 ? `$${p.tp_profit.toFixed(2)}` : '—'],
+            ['Margin',   `$${p.margin.toFixed(2)}`],
+            ['Notional', `$${p.notional.toFixed(2)}`],
+          ]}
+        />
+      )}
+    </>
   )
 }
 
-function SpotRow({ info, symbolId, side, stake, units, entry, pnl, onClose }: {
-  info: SymbolInfo | null; symbolId: string; side: 'BUY' | 'SELL';
-  stake: number; units: number; entry: number; pnl: number;
-  onClose: () => Promise<void>
+function SpotRow({ spot: s, info, expanded, onToggle, onClose }: {
+  spot:     SpotPosition
+  info:     SymbolInfo | null
+  expanded: boolean
+  onToggle: () => void
+  onClose:  () => Promise<void>
 }) {
   const dp = priceDecimals(info)
   // Display units are TRUE units × divisor (so user sees "22 BTC-units" not "0.022 BTC")
-  const displayUnits = units * (info?.display_divisor ?? 1)
+  const displayUnits = s.units * (info?.display_divisor ?? 1)
   return (
-    <SwipeableRow onClose={onClose}>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-bold text-text flex items-baseline gap-1.5 truncate">
-          <span>{displayNameOf(info, symbolId)},</span>
-          <span className={clsx('font-semibold', side === 'BUY' ? 'text-up' : 'text-down')}>
-            spot ${stake.toFixed(2)}
-          </span>
+    <>
+      <SwipeableRow onClose={onClose} onTap={onToggle}>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-bold text-text flex items-baseline gap-1.5 truncate">
+            <span>{displayNameOf(info, s.symbol)},</span>
+            <span className={clsx('font-semibold', s.side === 'BUY' ? 'text-up' : 'text-down')}>
+              spot ${s.stake.toFixed(2)}
+            </span>
+          </div>
+          <div className="text-[12px] text-dim num mt-0.5">
+            {displayUnits.toFixed(4)} units @ {formatPrice(info, s.entry, dp)}
+          </div>
         </div>
-        <div className="text-[12px] text-dim num mt-0.5">
-          {displayUnits.toFixed(4)} units @ {formatPrice(info, entry, dp)}
-        </div>
-      </div>
-      <PnlAndClose pnl={pnl} onClose={onClose} />
-    </SwipeableRow>
+        <PnlAndClose pnl={s.unrealised_pnl} onClose={onClose} />
+      </SwipeableRow>
+      {expanded && (
+        <ExpandedDetails
+          rows={[
+            ['Order',  `#${s.id.slice(0, 8)}`],
+            ['Open',   fmtOpenTime(s.opened_at_ms)],
+            ['S / L',  s.sl_loss   && s.sl_loss   > 0 ? `$${s.sl_loss.toFixed(2)}`   : '—'],
+            ['T / P',  s.tp_profit && s.tp_profit > 0 ? `$${s.tp_profit.toFixed(2)}` : '—'],
+            ['Stake',  `$${s.stake.toFixed(2)}`],
+            ['Units',  displayUnits.toFixed(4)],
+          ]}
+        />
+      )}
+    </>
   )
 }
 
@@ -324,18 +357,29 @@ function RowFrame({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** SwipeableRow — wraps a row with a left-swipe-to-close gesture.
- *  As the user drags left, the row translates with their finger and a red
- *  Close zone is revealed beneath. Past the threshold, on release the row
- *  animates off-screen and onClose fires (calling the existing close API).
- *  Below the swipe threshold, the row springs back to its rest position. */
-function SwipeableRow({ children, onClose }: {
+/** SwipeableRow — wraps a row with a left-swipe-to-close gesture AND an
+ *  optional tap-to-expand. The two gestures coexist: meaningful horizontal
+ *  movement (≥10px) engages the swipe and suppresses the tap; a quick
+ *  release without drift fires onTap. Browsers don't dispatch click after
+ *  a touch drag with sufficient movement, so onClick on the foreground
+ *  div is safe — but we belt-and-braces it with an offset==0 check too. */
+function SwipeableRow({ children, onClose, onTap }: {
   children: React.ReactNode
   onClose:  () => void | Promise<void>
+  onTap?:   () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const { offset, armed } = useSwipeToClose(ref, onClose)
   const swiping = offset !== 0
+
+  // Defence against a click that synthesises after a swipe — only treat
+  // it as a tap when the row is at rest. Without this, the offscreen
+  // animation triggered by close could race with the synthetic click and
+  // toggle expand on the SAME row we just closed.
+  const handleClick = () => {
+    if (offset === 0 && onTap) onTap()
+  }
+
   return (
     <div className="relative overflow-hidden border-b border-border/60">
       {/* Background revealed under the row as it slides left */}
@@ -357,7 +401,12 @@ function SwipeableRow({ children, onClose }: {
       {/* Foreground row that actually translates */}
       <div
         ref={ref}
-        className="relative flex items-center gap-3 px-4 py-2.5 bg-panel active:bg-surface/40"
+        onClick={handleClick}
+        role={onTap ? 'button' : undefined}
+        className={clsx(
+          'relative flex items-center gap-3 px-4 py-2.5 bg-panel active:bg-surface/40',
+          onTap && 'cursor-pointer',
+        )}
         style={{
           transform: `translateX(${offset}px)`,
           transition: offset === 0 ? 'transform 200ms ease' : 'none',
@@ -368,6 +417,36 @@ function SwipeableRow({ children, onClose }: {
       </div>
     </div>
   )
+}
+
+/** ExpandedDetails — MT5-style detail panel revealed under a tapped row.
+ *  Two-column grid; left labels in dim, right values bold + mono. Used by
+ *  PositionRow and SpotRow; pure presentation so it can render any
+ *  ordered list of [label, value] tuples. */
+function ExpandedDetails({ rows }: { rows: Array<[string, string]> }) {
+  return (
+    <div className="bg-surface/40 border-b border-border/60 px-4 py-2">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex items-baseline justify-between gap-2">
+            <span className="text-dim">{label}:</span>
+            <span className="text-text font-semibold num text-right truncate">{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** fmtOpenTime — MT5-style local timestamp: "2026.05.28 16:18:39".
+ *  Uses local time intentionally; traders relate open times to their own
+ *  trading session, not UTC. */
+function fmtOpenTime(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '—'
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} ` +
+         `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
 function PnlAndClose({ pnl, onClose }: { pnl: number; onClose: () => void }) {
