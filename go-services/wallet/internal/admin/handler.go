@@ -28,6 +28,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"otuburu.money/wallet/internal/email"
 	"otuburu.money/wallet/internal/sweep"
 	"otuburu.money/wallet/internal/wallet"
 )
@@ -37,16 +38,19 @@ type Handler struct {
 	db      *pgxpool.Pool
 	hd      *wallet.HDWallet
 	sweeper *sweep.Sweeper
+	mailer  *email.Mailer
 	apiKey  string
 	client  *http.Client
 }
 
-// New creates an admin Handler.
-func New(db *pgxpool.Pool, hd *wallet.HDWallet, sw *sweep.Sweeper) *Handler {
+// New creates an admin Handler. `mailer` may be nil — email notifications
+// just become a no-op in that case (admin actions still succeed).
+func New(db *pgxpool.Pool, hd *wallet.HDWallet, sw *sweep.Sweeper, mailer *email.Mailer) *Handler {
 	return &Handler{
 		db:      db,
 		hd:      hd,
 		sweeper: sw,
+		mailer:  mailer,
 		apiKey:  os.Getenv("TRONGRID_API_KEY"),
 		client:  &http.Client{Timeout: 15 * time.Second},
 	}
@@ -323,6 +327,10 @@ func (h *Handler) ApproveWithdrawal(c *gin.Context) {
 	tx.Commit(ctx) //nolint:errcheck
 
 	slog.Info("withdrawal sent", "id", wid, "amount", amount, "to", toAddr, "txid", txid)
+
+	// Notify the user — best-effort, fire-and-forget.
+	h.notifyWithdrawalSent(ctx, accountID, amount, toAddr, txid)
+
 	c.JSON(200, gin.H{"status": "sent", "txid": txid})
 }
 
@@ -376,7 +384,61 @@ func (h *Handler) RejectWithdrawal(c *gin.Context) {
 	}
 
 	slog.Info("withdrawal rejected + refunded", "id", wid, "amount", amount, "reason", reason)
+
+	// Notify the user — best-effort, fire-and-forget.
+	h.notifyWithdrawalRejected(ctx, accountID, amount, reason)
+
 	c.JSON(200, gin.H{"status": "rejected", "refunded": amount})
+}
+
+// notifyWithdrawalSent emails the user that their withdrawal has been
+// broadcast on-chain, with the txid so they can verify on TRONSCAN.
+func (h *Handler) notifyWithdrawalSent(ctx context.Context, accountID string, amount float64, addr, txid string) {
+	if h.mailer == nil {
+		return
+	}
+	to, name := h.recipientFromAccount(ctx, accountID)
+	if to == "" {
+		return
+	}
+	subject := fmt.Sprintf("Withdrawal sent — $%.2f USDT", amount)
+	body := email.WithdrawalSentHTML(name, amount, addr, txid)
+	h.mailer.Send(to, subject, body)
+}
+
+// notifyWithdrawalRejected emails the user that their withdrawal was not
+// approved and the reserved balance has been credited back.
+func (h *Handler) notifyWithdrawalRejected(ctx context.Context, accountID string, amount float64, reason string) {
+	if h.mailer == nil {
+		return
+	}
+	to, name := h.recipientFromAccount(ctx, accountID)
+	if to == "" {
+		return
+	}
+	subject := fmt.Sprintf("Withdrawal declined — $%.2f refunded", amount)
+	body := email.WithdrawalRejectedHTML(name, amount, reason)
+	h.mailer.Send(to, subject, body)
+}
+
+// recipientFromAccount resolves an account_id to the owning user's email
+// and display name. Returns ("", "") when not found or on db error;
+// callers should bail in that case.
+func (h *Handler) recipientFromAccount(ctx context.Context, accountID string) (string, string) {
+	var em, name string
+	if err := h.db.QueryRow(ctx,
+		`SELECT u.email, COALESCE(u.name, '') FROM users u
+		 JOIN accounts a ON a.user_id = u.id
+		 WHERE a.id = $1`,
+		accountID,
+	).Scan(&em, &name); err != nil {
+		slog.Warn("admin: recipient lookup failed", "account_id", accountID, "err", err)
+		return "", ""
+	}
+	if name == "" {
+		name = "there"
+	}
+	return em, name
 }
 
 // ManualSweep triggers an immediate sweep cycle.

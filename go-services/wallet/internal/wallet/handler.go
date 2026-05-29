@@ -169,16 +169,34 @@ func (h *Handler) Transactions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"transactions": txns})
 }
 
-// POST /wallet/withdraw — request a USDT withdrawal
+// POST /wallet/withdraw — request a USDT withdrawal.
+// Body: { amount, address, account_id? } — when account_id is omitted, falls
+// back to the JWT's legacy AccountID (single-account behaviour). Phase 2
+// callers can pass an explicit real account id; we verify ownership via
+// claims.OwnsAccount before debiting.
 func (h *Handler) Withdraw(c *gin.Context) {
 	claims := c.MustGet("claims").(*auth.Claims)
 
 	var req struct {
-		Amount  float64 `json:"amount"  binding:"required,min=10"`
-		Address string  `json:"address" binding:"required"`
+		Amount    float64 `json:"amount"     binding:"required,min=10"`
+		Address   string  `json:"address"    binding:"required"`
+		AccountID string  `json:"account_id"` // optional; defaults to legacy primary real
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Resolve which account to debit. Default to the JWT's primary real
+	// for back-compat with single-account clients; explicit account_id is
+	// validated against the user's ownership claim. Demo accounts cannot
+	// be withdrawn from — only real money goes on-chain.
+	accountID := req.AccountID
+	if accountID == "" {
+		accountID = claims.AccountID
+	}
+	if accountID == "" || accountID == claims.DemoID || !claims.OwnsAccount(accountID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "account not owned by caller or demo"})
 		return
 	}
 
@@ -190,10 +208,14 @@ func (h *Handler) Withdraw(c *gin.Context) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// Deduct from real balance (optimistic lock via CHECK constraint)
+	// Deduct from the chosen real account's balance (optimistic lock via
+	// CHECK constraint that balance can't go negative). The query also
+	// pins type='real' as a belt-and-braces guard so a stale demo UUID in
+	// the claim can't ever drain a real balance.
 	result, err := tx.Exec(ctx,
-		`UPDATE accounts SET balance = balance - $1 WHERE id = $2 AND balance >= $1`,
-		req.Amount, claims.AccountID,
+		`UPDATE accounts SET balance = balance - $1
+		 WHERE id = $2 AND type='real' AND balance >= $1`,
+		req.Amount, accountID,
 	)
 	if err != nil || result.RowsAffected() == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "insufficient balance"})
@@ -204,7 +226,7 @@ func (h *Handler) Withdraw(c *gin.Context) {
 	err = tx.QueryRow(ctx,
 		`INSERT INTO withdrawals (user_id, account_id, amount, address)
 		 VALUES ($1,$2,$3,$4) RETURNING id`,
-		claims.UserID, claims.AccountID, req.Amount, req.Address,
+		claims.UserID, accountID, req.Amount, req.Address,
 	).Scan(&wID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "insert failed"})
@@ -215,7 +237,7 @@ func (h *Handler) Withdraw(c *gin.Context) {
 	tx.Exec(ctx, //nolint:errcheck
 		`INSERT INTO ledger (account_id, type, amount, status, ref, note)
 		 VALUES ($1,'withdrawal',$2,'pending',$3,'Withdrawal request pending approval')`,
-		claims.AccountID, -req.Amount, wID,
+		accountID, -req.Amount, wID,
 	)
 
 	if err := tx.Commit(ctx); err != nil {

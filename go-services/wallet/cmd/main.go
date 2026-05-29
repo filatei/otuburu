@@ -115,7 +115,7 @@ func main() {
 	// Note: avoid r.Group("/admin") alongside r.GET("/admin") — Gin's router
 	// tree treats the group prefix as a node and drops the exact-match handler.
 	// Apply the auth middleware inline per route instead.
-	adminH   := admin.New(pool, hd, sw)
+	adminH   := admin.New(pool, hd, sw, mailer)
 	adminAuth := admin.Middleware()
 	r.GET("/admin",                        adminH.UI) // HTML — no auth (JS handles it)
 	r.GET("/admin/dashboard",              adminAuth, adminH.Dashboard)

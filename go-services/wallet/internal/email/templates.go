@@ -63,6 +63,44 @@ func WithdrawalRequestedHTML(name string, usdAmount float64, address string, wit
 	return fmt.Sprintf(sharedShell, body, sharedFooter)
 }
 
+// WithdrawalSentHTML — confirmation that the on-chain broadcast went out
+// (status = sent), with the tx hash so users can verify on TRONSCAN.
+func WithdrawalSentHTML(name string, usdAmount float64, address string, txid string) string {
+	body := fmt.Sprintf(`
+<h2 style="color:#22c55e;margin:0 0 4px;font-size:18px">Withdrawal sent</h2>
+<p style="color:#aaa;margin:0 0 16px">Hi %s, your USDT is on its way.</p>
+<div style="background:#141414;border:1px solid #2a2a2a;border-radius:8px;padding:16px;margin:0 0 16px">
+  <p style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:2px;margin:0 0 6px">Amount</p>
+  <p style="font-size:26px;font-weight:700;color:#22c55e;margin:0 0 12px">$%.2f USDT</p>
+  <p style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:2px;margin:0 0 6px">Destination (TRC20)</p>
+  <p style="font-family:monospace;font-size:12px;color:#aaa;word-break:break-all;margin:0 0 12px">%s</p>
+  <p style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:2px;margin:0 0 6px">Transaction</p>
+  <p style="font-family:monospace;font-size:11px;color:#aaa;word-break:break-all;margin:0 0 8px">%s</p>
+  <p style="margin:0"><a href="https://tronscan.org/#/transaction/%s" style="color:#EAB308;font-size:12px">View on TRONSCAN &rarr;</a></p>
+</div>
+<p style="color:#aaa;font-size:13px;margin:0">TRC20 USDT typically confirms within 1-2 minutes.</p>`,
+		htmlEscape(name), usdAmount, htmlEscape(address), htmlEscape(txid), htmlEscape(txid))
+	return fmt.Sprintf(sharedShell, body, sharedFooter)
+}
+
+// WithdrawalRejectedHTML — notification that a withdrawal was declined and
+// the reserved balance has been credited back to the account.
+func WithdrawalRejectedHTML(name string, usdAmount float64, reason string) string {
+	body := fmt.Sprintf(`
+<h2 style="color:#ef4444;margin:0 0 4px;font-size:18px">Withdrawal not approved</h2>
+<p style="color:#aaa;margin:0 0 16px">Hi %s,</p>
+<div style="background:#141414;border:1px solid #2a2a2a;border-radius:8px;padding:16px;margin:0 0 16px">
+  <p style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:2px;margin:0 0 6px">Amount refunded</p>
+  <p style="font-size:24px;font-weight:700;color:#fff;margin:0 0 12px">$%.2f USDT</p>
+  <p style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:2px;margin:0 0 6px">Reason</p>
+  <p style="color:#ccc;font-size:13px;margin:0">%s</p>
+</div>
+<p style="color:#aaa;font-size:13px;margin:0 0 12px">The full amount has been credited back to your account balance. You can submit a new withdrawal request whenever you are ready.</p>
+<p style="margin:0"><a href="mailto:support@torama.money" style="color:#EAB308;font-size:13px">Reply to this email for help &rarr;</a></p>`,
+		htmlEscape(name), usdAmount, htmlEscape(reason))
+	return fmt.Sprintf(sharedShell, body, sharedFooter)
+}
+
 // htmlEscape — minimal escape for the few user-supplied bits we inject
 // (name, reference, address). Not a full HTML sanitiser; the inputs come
 // from our own DB so the risk is exfiltration on display, not injection.
