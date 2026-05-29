@@ -49,14 +49,29 @@ export function useAccount(accountId: string): GameState {
   const historyRef      = useRef<SettledTrade[]>([])
   const inflightRef     = useRef(false)
 
-  // Load persisted history when accountId changes
+  // Reset per-account state on accountId change. CRITICAL for the demo↔real
+  // toggle UX: without this, switching modes leaves the previous account's
+  // balance and positions on screen for the 50-200ms before the new fetch
+  // completes — a brand-new user toggling to Real would see the demo's
+  // $10,000 instead of their actual $0. By clearing first, the Header falls
+  // back to user.real_balance (the Postgres balance from /auth/me) which is
+  // the correct number for un-deposited users until the engine confirms.
   useEffect(() => {
-    if (!accountId || accountId === 'demo') { setSettledHistory([]); return }
+    setAccount(null)
+    setPositions([])
+    setBinaries([])
+    setSpots([])
+    setLoading(true)
+    prevBinariesRef.current = new Map()
+    prevBalanceRef.current  = null
+
+    if (!accountId || accountId === 'demo') {
+      setSettledHistory([])
+      return
+    }
     const stored = loadHistory(accountId)
     historyRef.current = stored
     setSettledHistory(stored)
-    prevBinariesRef.current = new Map()
-    prevBalanceRef.current  = null
   }, [accountId])
 
   // ── Core state application — shared by both WebSocket push and HTTP fetch ──
