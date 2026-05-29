@@ -559,20 +559,34 @@ impl EngineService for EngineServiceImpl {
 
         let mut inner = self.state.inner.write().await;
 
-        // If the account already exists, sync its balance from the wallet when:
-        //   (a) the caller supplied a positive initial_balance, AND
-        //   (b) there are no open CFD positions or binary options in-flight.
-        // This is the deposit-credit path: wallet credits Postgres then pushes
-        // the new balance here so the engine book stays in sync without polling.
+        // If the account already exists, sync its balance from the caller when
+        // (a) there are no open CFD positions, binaries, or spots in-flight,
+        // AND (b) the engine's cached balance disagrees with what the caller
+        // says by more than rounding noise. Both the wallet's deposit-credit
+        // path and the frontend's login-time provisioning go through here —
+        // in both cases the caller has the authoritative Postgres balance,
+        // so when the engine snapshot diverges (typically because of stale
+        // state from prior code or testing) the engine is wrong and should
+        // converge to the caller's value.
+        //
+        // The earlier `initial_balance > 0.0` gate prevented a real user with
+        // $0 in Postgres from overwriting a stale $10k cached in the engine —
+        // a silent login-time corruption that confused brand-new users
+        // toggling demo→real. Allowing 0 to flow through is safe because
+        // the no-in-flight guard still blocks mid-trade balance changes.
         if let Some(book) = inner.books.get_mut(&account_id) {
-            if r.initial_balance > 0.0 && book.positions().is_empty() && book.binaries().is_empty()
-            {
-                book.account.balance = r.initial_balance;
+            let no_flight = book.positions().is_empty()
+                && book.binaries().is_empty()
+                && book.spots().is_empty();
+            let diverged = (book.account.balance - r.initial_balance).abs() > 0.01;
+            if no_flight && diverged {
                 tracing::info!(
                     %account_id,
-                    balance = r.initial_balance,
-                    "account balance synced from wallet"
+                    old_balance = book.account.balance,
+                    new_balance = r.initial_balance,
+                    "account balance synced from caller"
                 );
+                book.account.balance = r.initial_balance;
             }
             return Ok(Response::new(CreateAccountResponse {
                 account_id: account_id.to_string(),

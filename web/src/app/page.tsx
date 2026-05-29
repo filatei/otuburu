@@ -116,18 +116,28 @@ export default function TradingPage() {
   const handleGoogleLogin = useCallback(async (credential: string) => {
     setAuthError(null)
     try {
-      const authUser = await loginWithGoogle(credential)
-      // Provision engine accounts immediately after login so the user can trade
-      // without a round-trip delay.  Demo always starts at $10 000; real account
-      // uses the Postgres balance so it reflects any prior deposits.
-      await Promise.allSettled([
-        provisionAccount(authUser.demo_id,    'Demo', true,  10_000),
-        provisionAccount(authUser.account_id, 'Real', false, authUser.real_balance ?? 0),
-      ])
+      // The user state populates after this resolves; engine provisioning
+      // happens in the user-keyed useEffect below, so it covers both
+      // fresh-login and session-restore paths.
+      await loginWithGoogle(credential)
     } catch (err: any) {
       setAuthError(err?.message ?? 'Sign-in failed. Please try again.')
     }
   }, [loginWithGoogle])
+
+  // Sync engine books to Postgres balances whenever the user object changes
+  // (fresh login OR session restore on page reload). Engine's CreateAccount
+  // is idempotent: it creates if missing or syncs balance down to caller's
+  // value when no positions are in flight. Without this, a returning user
+  // with a stale engine balance would never see Postgres truth without
+  // signing out and back in.
+  useEffect(() => {
+    if (!user) return
+    Promise.allSettled([
+      provisionAccount(user.demo_id,    'Demo', true,  10_000),
+      provisionAccount(user.account_id, 'Real', false, user.real_balance ?? 0),
+    ])
+  }, [user?.user_id, user?.real_balance]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleTraded = useCallback(() => {
     refresh()
