@@ -10,6 +10,10 @@ import { useEffect } from 'react'
  *    requestFullscreen() on the document element. Browsers gate the API
  *    behind a "transient activation", which is why we wait for a gesture
  *    instead of firing on mount.
+ *  - Re-arms whenever `armKey` changes — important because the Google
+ *    Sign-In button is rendered inside an iframe, so clicks on it during
+ *    the auth flow never bubble to document. Passing `user?.id` here from
+ *    the caller means the first post-login gesture re-fires the trigger.
  *  - Respects an opt-out: if localStorage `otuburu.fullscreen` is `"off"`
  *    we don't auto-enter. The Drawer's FullscreenItem writes that flag
  *    whenever the user explicitly exits, so they aren't re-trapped.
@@ -17,13 +21,13 @@ import { useEffect } from 'react'
  *    users still install the PWA via the Home Screen banner for the same
  *    effect.
  *
- * Subtle by design: a single one-shot listener, no UI surface. The
- * drawer's Display section is the user's "exit at will" affordance.
+ * Subtle by design: a single one-shot listener per arm, no UI surface.
+ * The drawer's Display section is the user's "exit at will" affordance.
  */
 
 const PREF_KEY = 'otuburu.fullscreen'
 
-export function useAutoFullscreen() {
+export function useAutoFullscreen(armKey: unknown = 'initial') {
   useEffect(() => {
     const docEl = document.documentElement as HTMLElement & {
       webkitRequestFullscreen?: () => Promise<void>
@@ -62,7 +66,7 @@ export function useAutoFullscreen() {
       document.removeEventListener('pointerdown', enter)
       document.removeEventListener('keydown',     enter)
     }
-  }, [])
+  }, [armKey])
 }
 
 /**

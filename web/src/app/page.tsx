@@ -61,11 +61,6 @@ function orderSymbols(symbols: SymbolInfo[]): SymbolInfo[] {
 type MobileTab = 'symbols' | 'chart' | 'trade' | 'positions'
 
 export default function TradingPage() {
-  // Default the experience to fullscreen so the browser URL bar gets out of
-  // the way (MT5-like). One-shot — fires on the first user gesture, respects
-  // the user's prior explicit opt-out, no-op on iOS Safari.
-  useAutoFullscreen()
-
   const [symbols,       setSymbols]       = useState<SymbolInfo[]>([])
   const [selected,      setSelected]      = useState('frxEURUSD')
   const [mode,          setMode]          = useState<'demo' | 'real'>('demo')
@@ -83,6 +78,12 @@ export default function TradingPage() {
   const [propertiesFor, setPropertiesFor] = useState<string | null>(null)
 
   const { user, loading: authLoading, loginWithGoogle, logout, refreshBalances } = useAuth()
+
+  // Auto-fullscreen: re-arm on initial mount AND whenever user logs in.
+  // Google Sign-In renders inside an iframe so its click doesn't bubble to
+  // document — the initial arm misses it. The user.user_id-keyed re-arm
+  // catches the first post-login tap on our own DOM.
+  useAutoFullscreen(user?.user_id ?? 'pre-auth')
 
   useEffect(() => {
     if (!authLoading && !user) setAuthOpen(true)

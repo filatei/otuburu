@@ -52,7 +52,10 @@ export default function MobileTradeForm({
   symbol, info, lastTick, account, accountId, floatingPnl, onTraded,
 }: Props) {
   const [stake,    setStake]    = useState(50)
-  const [mode,     setMode]     = useState<Mode>('binary')
+  // Default to Spot — that's the primary retail product (fractional spot
+  // exposure, 1:1 leverage, simpler mental model). Rise/Fall and CFD are
+  // available via the mode tabs but not the landing experience.
+  const [mode,     setMode]     = useState<Mode>('spot')
   const [ticks,    setTicks]    = useState(5)
   const [tp,       setTp]       = useState('')
   const [sl,       setSl]       = useState('')
