@@ -21,6 +21,7 @@ import DepositModal        from '@/components/DepositModal'
 import SymbolActionsSheet     from '@/components/SymbolActionsSheet'
 import SymbolPropertiesModal  from '@/components/SymbolPropertiesModal'
 import AccountSwitcherSheet   from '@/components/AccountSwitcherSheet'
+import WithdrawSheet          from '@/components/WithdrawSheet'
 import { provisionAccount } from '@/hooks/useAccount'
 import { useAutoFullscreen } from '@/hooks/useAutoFullscreen'
 import { useDailyPnLBySymbol } from '@/hooks/useDailyPnL'
@@ -71,6 +72,7 @@ export default function TradingPage() {
   const [profileOpen,   setProfileOpen]   = useState(false)
   const [drawerOpen,    setDrawerOpen]    = useState(false)
   const [depositOpen,   setDepositOpen]   = useState(false)
+  const [withdrawOpen,  setWithdrawOpen]  = useState(false)
   const [mobileTab,     setMobileTab]     = useState<MobileTab>('chart')
   /** Symbol whose MT5-style action sheet is currently open. null = closed. */
   const [actionsFor,    setActionsFor]    = useState<string | null>(null)
@@ -259,7 +261,7 @@ export default function TradingPage() {
         onLogout={logout}
         onEditProfile={() => setProfileOpen(true)}
         onDeposit={() => setDepositOpen(true)}
-        onWithdraw={() => {}}
+        onWithdraw={() => setWithdrawOpen(true)}
         onHistory={() => {}}
         onSwitchAccount={
           (user?.accounts?.filter(a => a.type === 'real').length ?? 0) >= 1
@@ -277,6 +279,19 @@ export default function TradingPage() {
         onSelect={selectRealAccount}
         onCreated={handleAccountCreated}
       />
+
+      {/* Withdrawal sheet — USDT path live, NGN tab placeholder until
+          Phase 3 backend lands. Only mounted when user is signed in so
+          we never have to deal with a null AuthUser inside. */}
+      {user && (
+        <WithdrawSheet
+          open={withdrawOpen}
+          onClose={() => setWithdrawOpen(false)}
+          user={user}
+          activeAccountId={realAccountId}
+          onSubmitted={handleTraded}
+        />
+      )}
 
       <Header
         user={user}
