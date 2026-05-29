@@ -80,6 +80,12 @@ services:
       TRONGRID_API_KEY:  ${TRONGRID_API_KEY:-}
       GOOGLE_CLIENT_ID:  ${GOOGLE_CLIENT_ID:-}
       ADMIN_SECRET:      ${ADMIN_SECRET:-}
+      # Transactional email (shared SMTP config with staking)
+      SMTP_HOST:         ${SMTP_HOST:-smtp-relay.gmail.com}
+      SMTP_PORT:         ${SMTP_PORT:-587}
+      SMTP_USER:         ${SMTP_USER:-}
+      SMTP_PASS:         ${SMTP_PASS:-}
+      SMTP_FROM:         ${SMTP_FROM:-Otuburu <noreply@torama.money>}
     ports:
       - "127.0.0.1:8083:8083"
     networks:

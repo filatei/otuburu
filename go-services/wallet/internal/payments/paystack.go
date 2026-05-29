@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"otuburu.money/wallet/internal/auth"
+	"otuburu.money/wallet/internal/email"
 )
 
 const (
@@ -56,12 +57,14 @@ type Handler struct {
 	rates          *RateFetcher // live USD→NGN rate (never nil)
 	gatewayURL     string       // GATEWAY_URL — for post-deposit engine sync
 	internalSecret string       // INTERNAL_SECRET
+	mailer         *email.Mailer
 	client         *http.Client
 }
 
 // New creates a Paystack handler.  Returns nil if PAYSTACK_SECRET_KEY is not set.
 // The supplied RateFetcher (already Started) provides the live USD/NGN rate.
-func New(db *pgxpool.Pool, rates *RateFetcher) *Handler {
+// `mailer` may be nil — emails just become a no-op in that case.
+func New(db *pgxpool.Pool, rates *RateFetcher, mailer *email.Mailer) *Handler {
 	secret := os.Getenv("PAYSTACK_SECRET_KEY")
 	if secret == "" {
 		slog.Warn("PAYSTACK_SECRET_KEY not set — Paystack payments disabled")
@@ -73,6 +76,7 @@ func New(db *pgxpool.Pool, rates *RateFetcher) *Handler {
 		rates:          rates,
 		gatewayURL:     os.Getenv("GATEWAY_URL"),
 		internalSecret: os.Getenv("INTERNAL_SECRET"),
+		mailer:         mailer,
 		client:         &http.Client{Timeout: 15 * time.Second},
 	}
 }
@@ -324,7 +328,38 @@ func (h *Handler) creditPaystack(ctx context.Context, ref, accountID string, amo
 
 	// Push new balance into engine book
 	h.syncEngineBalance(ctx, accountID)
+
+	// Notify the user — best-effort, fire-and-forget.
+	h.notifyDepositCredited(ctx, accountID, usdCredited, ref)
 	return nil
+}
+
+// notifyDepositCredited sends the "deposit credited" email. Errors are logged
+// inside the mailer; we never block the transaction on this.
+func (h *Handler) notifyDepositCredited(ctx context.Context, accountID string, usd float64, ref string) {
+	if h.mailer == nil {
+		return
+	}
+	var (
+		emailAddr string
+		name      string
+	)
+	err := h.db.QueryRow(ctx,
+		`SELECT u.email, COALESCE(u.name, '') FROM users u
+		 JOIN accounts a ON a.user_id = u.id
+		 WHERE a.id = $1`,
+		accountID,
+	).Scan(&emailAddr, &name)
+	if err != nil || emailAddr == "" {
+		slog.Warn("mailer: skip — could not resolve recipient", "account_id", accountID, "err", err)
+		return
+	}
+	if name == "" {
+		name = "there"
+	}
+	subject := fmt.Sprintf("Deposit credited — $%.2f", usd)
+	body := email.DepositCreditedHTML(name, usd, "NGN", ref)
+	h.mailer.Send(emailAddr, subject, body)
 }
 
 func (h *Handler) syncEngineBalance(ctx context.Context, accountID string) {

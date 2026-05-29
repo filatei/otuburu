@@ -1,6 +1,7 @@
 package wallet
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -8,15 +9,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"otuburu.money/wallet/internal/auth"
+	"otuburu.money/wallet/internal/email"
 )
 
 type Handler struct {
-	db  *pgxpool.Pool
-	hd  *HDWallet
+	db     *pgxpool.Pool
+	hd     *HDWallet
+	mailer *email.Mailer
 }
 
-func NewHandler(db *pgxpool.Pool, hd *HDWallet) *Handler {
-	return &Handler{db: db, hd: hd}
+// NewHandler builds the wallet HTTP handler. `mailer` may be nil — emails
+// just become a no-op in that case (no crash).
+func NewHandler(db *pgxpool.Pool, hd *HDWallet, mailer *email.Mailer) *Handler {
+	return &Handler{db: db, hd: hd, mailer: mailer}
 }
 
 // GET /wallet/deposit-address — returns (or creates) the user's TRC20 deposit address.
@@ -216,6 +221,24 @@ func (h *Handler) Withdraw(c *gin.Context) {
 	if err := tx.Commit(ctx); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "commit failed"})
 		return
+	}
+
+	// Notify user — best-effort, fire-and-forget.
+	if h.mailer != nil {
+		var (
+			emailAddr, name string
+		)
+		if err := h.db.QueryRow(ctx,
+			`SELECT email, COALESCE(name, '') FROM users WHERE id=$1`,
+			claims.UserID,
+		).Scan(&emailAddr, &name); err == nil && emailAddr != "" {
+			if name == "" {
+				name = "there"
+			}
+			subject := fmt.Sprintf("Withdrawal request received — $%.2f", req.Amount)
+			body := email.WithdrawalRequestedHTML(name, req.Amount, req.Address, wID)
+			h.mailer.Send(emailAddr, subject, body)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

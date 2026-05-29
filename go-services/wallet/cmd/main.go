@@ -12,6 +12,7 @@ import (
 	"otuburu.money/wallet/internal/admin"
 	"otuburu.money/wallet/internal/auth"
 	"otuburu.money/wallet/internal/db"
+	"otuburu.money/wallet/internal/email"
 	"otuburu.money/wallet/internal/payments"
 	"otuburu.money/wallet/internal/sweep"
 	"otuburu.money/wallet/internal/wallet"
@@ -85,7 +86,7 @@ func main() {
 	protected := r.Group("/", auth.JWTMiddleware())
 	protected.GET("/auth/me", authH.Me)
 
-	walletH := wallet.NewHandler(pool, hd)
+	walletH := wallet.NewHandler(pool, hd, mailer)
 	protected.GET("/wallet/deposit-address", walletH.DepositAddress)
 	protected.GET("/wallet/balance", walletH.Balance)
 	protected.GET("/wallet/transactions", walletH.Transactions)
@@ -94,13 +95,19 @@ func main() {
 	protected.GET("/wallet/accounts", walletH.ListAccounts)
 	protected.POST("/wallet/accounts", walletH.CreateAccount)
 
+	// ── Transactional email ──────────────────────────────────────────────────
+	// Nil-safe — when SMTP config is incomplete the wallet still runs, just
+	// without notifications. Email is best-effort; we never block a deposit
+	// credit or withdrawal request on send success.
+	mailer := email.New()
+
 	// ── Payment channels ──────────────────────────────────────────────────────
 	// Seed rate from env; RateFetcher will override with live data within seconds.
 	seedRate, _ := strconv.ParseFloat(os.Getenv("USD_TO_NGN_RATE"), 64)
 	rateFetcher := payments.NewRateFetcher(seedRate)
 	rateFetcher.Start(ctx)
 
-	paystackH := payments.New(pool, rateFetcher)
+	paystackH := payments.New(pool, rateFetcher, mailer)
 	paystackH.RegisterRoutes(protected, r.Group("/"))
 
 	// ── Admin: back-office dashboard ──────────────────────────────────────────
