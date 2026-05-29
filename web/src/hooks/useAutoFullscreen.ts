@@ -37,34 +37,47 @@ export function useAutoFullscreen(armKey: unknown = 'initial') {
       typeof docEl.webkitRequestFullscreen === 'function'
     if (!supported) return
 
-    // Respect explicit opt-out from a prior session
-    if (localStorage.getItem(PREF_KEY) === 'off') return
-
     let cancelled = false
 
+    // Earlier this used { once: true }, which meant a single failed attempt
+    // (browser rejecting the request because the transient activation came
+    // from inside Google's iframe, or because the auth modal's BottomSheet
+    // consumed it) permanently unsubscribed the listener. The user would
+    // then have to toggle via the drawer to get fullscreen at all.
+    //
+    // New design: stay armed and retry on every interaction. Cheap because
+    // the handler short-circuits when already fullscreen or when the user
+    // has opted out — neither path calls requestFullscreen.
     const enter = async () => {
       if (cancelled) return
+      if (document.fullscreenElement) return // already in
+      if (localStorage.getItem(PREF_KEY) === 'off') return // user opted out
+
       try {
-        if (!document.fullscreenElement) {
-          await docEl.requestFullscreen()
-          // Persist preference so future sessions know the user is happy
-          // with fullscreen; the drawer toggle can flip this back to 'off'.
-          localStorage.setItem(PREF_KEY, 'on')
-        }
+        await docEl.requestFullscreen()
+        // Persist preference so future sessions know the user is happy
+        // with fullscreen; the drawer toggle can flip this back to 'off'.
+        localStorage.setItem(PREF_KEY, 'on')
       } catch {
         // Browser blocked the call (no transient activation, permission
-        // policy, etc.) — silent. The drawer toggle remains available.
+        // policy, etc.). Silent — next interaction will get another shot.
       }
     }
 
-    const opts: AddEventListenerOptions = { once: true, passive: true }
+    // Capture-phase listener so handlers below us can't stopPropagation
+    // away from us. Both pointerdown AND click — pointerdown covers the
+    // case where a child element handles the click and prevents bubbling,
+    // click is the more permissive default.
+    const opts: AddEventListenerOptions = { capture: true, passive: true }
     document.addEventListener('pointerdown', enter, opts)
+    document.addEventListener('click',       enter, opts)
     document.addEventListener('keydown',     enter, opts)
 
     return () => {
       cancelled = true
-      document.removeEventListener('pointerdown', enter)
-      document.removeEventListener('keydown',     enter)
+      document.removeEventListener('pointerdown', enter, opts)
+      document.removeEventListener('click',       enter, opts)
+      document.removeEventListener('keydown',     enter, opts)
     }
   }, [armKey])
 }
