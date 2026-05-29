@@ -4,7 +4,7 @@
 //!   - cryBTCUSD → BTCUSDT
 //!   - cryETHUSD → ETHUSDT
 //!
-//! Yahoo Finance chart endpoint `query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X`
+//! Yahoo Finance chart endpoint `query1.finance.yahoo.com/v8/finance/chart/GC=F`
 //! (no API key, unofficial but widely used):
 //!   - cryXAUUSD → spot XAU/USD interbank price via Yahoo `XAUUSD=X`.
 //!     Futures basis vs spot is small (~$0.50–$5 per oz) and acceptable for
@@ -380,26 +380,28 @@ pub fn start(state: SharedState) {
     // ETH/USD — 500 ms (Binance bookTicker, real bid/ask)
     spawn_binance(state.clone(), client.clone(), "ETHUSDT", "cryETHUSD", 500);
 
-    // Gold — Yahoo XAUUSD=X (interbank spot) at 2 s, synthetic bid/ask around mid.
-    // We used to source from GC=F (COMEX gold futures front month) but that
-    // sits +$5-25 above spot because of the cost of carry — and every other
-    // CFD broker (Exness, IG, Plus500, CMC) shows the spot XAUUSD level from
-    // their LBMA bullion-bank feeds, so our number looked off by ~$20 to any
-    // user cross-checking. Yahoo's XAUUSD=X uses the currency-pair format
-    // (same convention as EURUSD=X) which is spot, not futures.
+    // Gold — Yahoo GC=F (COMEX front-month futures) at 2 s, synthetic bid/ask
+    // around mid. This sits +$5-25 above LBMA spot because of cost of carry,
+    // which means our price reads $20 above what users see on Exness/IG/etc.
+    // We tried switching to spot via `XAUUSD=X` (Yahoo's FX-pair convention)
+    // but Yahoo doesn't carry that symbol — chart endpoint returns "No data
+    // found, symbol may be delisted". They treat gold as a commodity, not an
+    // FX pair, so the only free-tier Yahoo paths are GC=F (futures) or GLD
+    // (ETF, different scale entirely). Future fix: switch to exchangerate.host
+    // which carries XAU/USD spot, or a paid metals feed (Refinitiv, Polygon).
     spawn_yahoo(
         state.clone(),
         client.clone(),
-        "XAUUSD=X",
+        "GC=F",
         "cryXAUUSD",
         GOLD_HALF_SPREAD_PCT,
         2_000,
     );
-    // Silver — same story: Yahoo XAGUSD=X (spot) instead of SI=F (futures).
+    // Silver — same constraint, same fallback (SI=F is COMEX silver futures).
     spawn_yahoo(
         state.clone(),
         client.clone(),
-        "XAGUSD=X",
+        "SI=F",
         "XAGUSD",
         SILVER_HALF_SPREAD_PCT,
         2_000,
@@ -455,10 +457,12 @@ pub fn start(state: SharedState) {
     // waiting hours/days for live ticks to fill them. Refreshed hourly. We
     // use SPY/DIA/QQQ tickers (not ^GSPC/^DJI/^IXIC) so historical prices
     // match the ETF scale of the live feed.
-    // Historical backfill for metals — same tickers as live feed so price
-    // history matches up. XAUUSD=X / XAGUSD=X are the spot interbank pairs.
-    spawn_yahoo_history_refresh(state.clone(), client.clone(), "XAUUSD=X", "cryXAUUSD");
-    spawn_yahoo_history_refresh(state.clone(), client.clone(), "XAGUSD=X", "XAGUSD");
+    // Historical backfill for metals — same tickers as live feed so the
+    // chart's history matches up with the streaming price. GC=F / SI=F are
+    // COMEX futures (see live spawn block above for why we're stuck with
+    // futures vs spot on the free Yahoo tier).
+    spawn_yahoo_history_refresh(state.clone(), client.clone(), "GC=F", "cryXAUUSD");
+    spawn_yahoo_history_refresh(state.clone(), client.clone(), "SI=F", "XAGUSD");
     spawn_yahoo_history_refresh(state.clone(), client.clone(), "SPY", "SPX");
     spawn_yahoo_history_refresh(state.clone(), client.clone(), "DIA", "DJI");
     spawn_yahoo_history_refresh(state, client, "QQQ", "NDX");
