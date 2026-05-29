@@ -7,6 +7,16 @@ export interface Tick {
   tick_index: number
 }
 
+/** One of the user's accounts as returned by /auth/me and /wallet/accounts.
+ *  Phase 2 multi-account model: 1 demo + N real per user, each with a
+ *  user-visible label and an independent USD balance. */
+export interface UserAccount {
+  id:      string
+  label:   string
+  type:    'demo' | 'real'
+  balance: number
+}
+
 export interface SymbolInfo {
   symbol:          string                  // internal id, used in API calls (e.g. "cryBTCUSD")
   type:            'BOOM_CRASH' | 'FX' | 'CRYPTO' | 'METAL' | 'INDEX'

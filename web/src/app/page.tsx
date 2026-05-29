@@ -18,8 +18,9 @@ import AuthModal           from '@/components/AuthModal'
 import ProfileModal        from '@/components/ProfileModal'
 import AppDrawer           from '@/components/AppDrawer'
 import DepositModal        from '@/components/DepositModal'
-import SymbolActionsSheet    from '@/components/SymbolActionsSheet'
-import SymbolPropertiesModal from '@/components/SymbolPropertiesModal'
+import SymbolActionsSheet     from '@/components/SymbolActionsSheet'
+import SymbolPropertiesModal  from '@/components/SymbolPropertiesModal'
+import AccountSwitcherSheet   from '@/components/AccountSwitcherSheet'
 import { provisionAccount } from '@/hooks/useAccount'
 import { useAutoFullscreen } from '@/hooks/useAutoFullscreen'
 import { useDailyPnLBySymbol } from '@/hooks/useDailyPnL'
@@ -77,8 +78,13 @@ export default function TradingPage() {
    *  Tracked separately from `actionsFor` so the modal mounts fresh each time
    *  and unmounts on close — no leaked open-state across symbol selections. */
   const [propertiesFor, setPropertiesFor] = useState<string | null>(null)
+  /** Phase 2 multi-account: when in real mode, which real account is active.
+   *  Persisted per-user in localStorage so a session restore picks up where
+   *  the user left off. Falls back to the first real account on first session. */
+  const [selectedRealId,    setSelectedRealId]    = useState<string | null>(null)
+  const [accountSheetOpen,  setAccountSheetOpen]  = useState(false)
 
-  const { user, loading: authLoading, loginWithGoogle, logout, refreshBalances } = useAuth()
+  const { user, loading: authLoading, loginWithGoogle, logout, refreshBalances, applyToken } = useAuth()
 
   // Auto-fullscreen: re-arm on initial mount AND whenever user logs in.
   // Google Sign-In renders inside an iframe so its click doesn't bubble to
@@ -102,8 +108,37 @@ export default function TradingPage() {
       .catch(() => {})
   }, [])
 
+  // Phase 2: pick the active real account.
+  //   1. localStorage preference if the user previously chose one we still own
+  //   2. otherwise the first real account in accounts[]
+  //   3. fall back to legacy user.account_id (single-account JWTs)
+  const realAccountId: string | null = (() => {
+    if (!user) return null
+    const owned = (user.accounts ?? []).filter(a => a.type === 'real').map(a => a.id)
+    if (selectedRealId && owned.includes(selectedRealId)) return selectedRealId
+    return owned[0] ?? user.account_id ?? null
+  })()
+  const activeAccountLabel: string | undefined =
+    user?.accounts?.find(a => a.id === realAccountId)?.label
+
+  // Hydrate selectedRealId from localStorage once the user is known.
+  useEffect(() => {
+    if (!user) return
+    const key = `otuburu.selected_real:${user.user_id}`
+    const stored = localStorage.getItem(key)
+    if (stored && user.accounts?.some(a => a.id === stored && a.type === 'real')) {
+      setSelectedRealId(stored)
+    }
+  }, [user?.user_id, user?.accounts])
+
+  const selectRealAccount = useCallback((id: string) => {
+    setSelectedRealId(id)
+    if (user) localStorage.setItem(`otuburu.selected_real:${user.user_id}`, id)
+    setMode('real') // switching account implies real mode
+  }, [user])
+
   const accountId = user
-    ? (mode === 'real' ? user.account_id : user.demo_id)
+    ? (mode === 'real' ? (realAccountId ?? user.account_id) : user.demo_id)
     : 'demo'
 
   // applyState is passed to useTicks so WebSocket state pushes update account
@@ -132,13 +167,36 @@ export default function TradingPage() {
   // value when no positions are in flight. Without this, a returning user
   // with a stale engine balance would never see Postgres truth without
   // signing out and back in.
+  //
+  // Phase 2: provision every real account the user owns, not just the legacy
+  // primary, so newly-created accounts get an engine book on first session.
   useEffect(() => {
     if (!user) return
-    Promise.allSettled([
-      provisionAccount(user.demo_id,    'Demo', true,  10_000),
-      provisionAccount(user.account_id, 'Real', false, user.real_balance ?? 0),
-    ])
-  }, [user?.user_id, user?.real_balance]) // eslint-disable-line react-hooks/exhaustive-deps
+    const calls: Promise<unknown>[] = [
+      provisionAccount(user.demo_id, 'Demo', true, 10_000),
+    ]
+    for (const a of user.accounts ?? []) {
+      if (a.type === 'real') {
+        calls.push(provisionAccount(a.id, a.label || 'Real', false, a.balance ?? 0))
+      }
+    }
+    // Fallback for older tokens whose /auth/me didn't return accounts[] yet.
+    if (!user.accounts?.some(a => a.type === 'real') && user.account_id) {
+      calls.push(provisionAccount(user.account_id, 'Real', false, user.real_balance ?? 0))
+    }
+    Promise.allSettled(calls)
+  }, [user?.user_id, user?.real_balance, user?.accounts]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Called by AccountSwitcherSheet after a successful POST /wallet/accounts.
+  // We swap in the fresh JWT (which now carries the new account id in its
+  // aids claim), provision the engine book, and switch into the new account.
+  const handleAccountCreated = useCallback(async (newId: string, newToken: string) => {
+    await applyToken(newToken)
+    // Engine book provisioning for the new account — start at $0; deposit
+    // funds will sync up via the wallet's balance-sync path.
+    provisionAccount(newId, 'Real', false, 0).catch(() => {})
+    selectRealAccount(newId)
+  }, [applyToken, selectRealAccount])
 
   const handleTraded = useCallback(() => {
     refresh()
@@ -196,12 +254,28 @@ export default function TradingPage() {
         onClose={() => setDrawerOpen(false)}
         user={user}
         mode={mode}
+        activeAccountLabel={activeAccountLabel}
         onModeToggle={() => setMode(m => m === 'demo' ? 'real' : 'demo')}
         onLogout={logout}
         onEditProfile={() => setProfileOpen(true)}
         onDeposit={() => setDepositOpen(true)}
         onWithdraw={() => {}}
         onHistory={() => {}}
+        onSwitchAccount={
+          (user?.accounts?.filter(a => a.type === 'real').length ?? 0) >= 1
+            ? () => setAccountSheetOpen(true)
+            : undefined
+        }
+      />
+
+      {/* Phase 2 multi-account picker — list + switch + create. */}
+      <AccountSwitcherSheet
+        open={accountSheetOpen}
+        onClose={() => setAccountSheetOpen(false)}
+        accounts={user?.accounts ?? []}
+        selectedId={realAccountId}
+        onSelect={selectRealAccount}
+        onCreated={handleAccountCreated}
       />
 
       <Header

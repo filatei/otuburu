@@ -8,17 +8,24 @@ interface Props {
   onClose:       () => void
   user:          AuthUser | null
   mode:          'demo' | 'real'
+  /** Label of the currently active real account — shown in the user card
+   *  when mode === 'real'. Phase 2: replaces the implicit "Real" label. */
+  activeAccountLabel?: string
   onModeToggle:  () => void
   onLogout:      () => void
   onEditProfile: () => void
   onDeposit:     () => void
   onWithdraw:    () => void
   onHistory:     () => void
+  /** Open the multi-account picker sheet (lists real accounts, lets the
+   *  user switch or create a new one). Optional — when undefined, the
+   *  "Switch account" item is hidden. */
+  onSwitchAccount?: () => void
 }
 
 export default function AppDrawer({
-  open, onClose, user, mode, onModeToggle,
-  onLogout, onEditProfile, onDeposit, onWithdraw, onHistory,
+  open, onClose, user, mode, activeAccountLabel, onModeToggle,
+  onLogout, onEditProfile, onDeposit, onWithdraw, onHistory, onSwitchAccount,
 }: Props) {
   const drawerRef = useRef<HTMLDivElement>(null)
 
@@ -85,11 +92,17 @@ export default function AppDrawer({
                 <p className="text-dim text-xs truncate">{user.email}</p>
               </div>
             </div>
-            {/* Balance + mode toggle */}
+            {/* Balance + mode toggle. When in real mode and an account label
+                is known, show it under "Balance" so users know which real
+                account is active (Phase 2 multi-account). */}
             <div className="flex items-center justify-between pt-3 border-t border-border">
-              <div>
+              <div className="min-w-0">
                 <p className="text-[10px] text-dim uppercase tracking-wider mb-0.5">
-                  {mode === 'demo' ? 'Demo Balance' : 'Real Balance'}
+                  {mode === 'demo'
+                    ? 'Demo Balance'
+                    : activeAccountLabel
+                      ? `Real · ${activeAccountLabel}`
+                      : 'Real Balance'}
                 </p>
                 <p className="num text-lg font-bold text-text">
                   ${balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -97,7 +110,7 @@ export default function AppDrawer({
               </div>
               <button
                 onClick={() => { onModeToggle(); }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors shrink-0 ${
                   mode === 'demo'
                     ? 'bg-brand/10 border-brand/30 text-brand hover:bg-brand/20'
                     : 'bg-up/10 border-up/30 text-up hover:bg-up/20'
@@ -132,6 +145,9 @@ export default function AppDrawer({
           </Section>
 
           <Section title="Account">
+            {onSwitchAccount && (
+              <Item icon="🔁" label="Switch account" sub="Manage real accounts" badge="live" onClick={() => { onSwitchAccount(); onClose() }} />
+            )}
             <Item icon="👤" label="Edit Profile"       sub="Name & preferences"          badge="live" onClick={() => { onEditProfile(); onClose() }} />
             <Item icon="🎁" label="Refer a Friend"     sub="Earn on their trades"        badge="soon" />
             <Item icon="🔔" label="Notifications"      sub="Trade alerts & news"         badge="soon" />

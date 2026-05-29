@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
+import type { UserAccount } from '@/types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 const TOKEN_KEY = 'otuburu_token'
@@ -10,10 +11,13 @@ export interface AuthUser {
   email:      string
   name:       string
   picture:    string
-  account_id: string  // real
+  account_id: string  // first real account (legacy field — use accounts[] for multi)
   demo_id:    string
   real_balance: number
   demo_balance: number
+  /** Phase 2: every account the user owns (1 demo + N real). May be empty
+   *  briefly on first login before /auth/me populates. */
+  accounts?:    UserAccount[]
 }
 
 export function useAuth() {
@@ -72,5 +76,17 @@ export function useAuth() {
     if (me) setUser(prev => prev ? { ...prev, ...me } : prev)
   }, [user])
 
-  return { user, loading, loginWithGoogle, logout, refreshBalances }
+  /** applyToken — used after POST /wallet/accounts: the backend returns a
+   *  fresh JWT that includes the new account in its aids claim, plus the
+   *  new account row itself. We persist the token and merge the account so
+   *  the user can trade against it immediately. */
+  const applyToken = useCallback(async (newToken: string) => {
+    sessionStorage.setItem(TOKEN_KEY, newToken)
+    const me = await fetch(`${API_BASE}/auth/me`, {
+      headers: { Authorization: `Bearer ${newToken}` },
+    }).then(r => r.json()).catch(() => null)
+    if (me) setUser(prev => prev ? { ...prev, ...me, token: newToken } : prev)
+  }, [])
+
+  return { user, loading, loginWithGoogle, logout, refreshBalances, applyToken }
 }

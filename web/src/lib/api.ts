@@ -36,3 +36,31 @@ export async function authFetch(url: string, options: FetchOptions = {}): Promis
 
   return fetch(url, { ...rest, headers })
 }
+
+// ─── Account management (Phase 2 multi-account) ──────────────────────────────
+
+import type { UserAccount } from '@/types'
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
+
+/** GET /wallet/accounts — list every account the user owns. */
+export async function listAccounts(): Promise<UserAccount[]> {
+  const res = await authFetch(`${API_BASE}/wallet/accounts`)
+  if (!res.ok) throw new Error('Failed to load accounts')
+  const data = await res.json() as { accounts?: UserAccount[] }
+  return data.accounts ?? []
+}
+
+/** POST /wallet/accounts — create a new real account.
+ *  Returns the created account plus a refreshed JWT that includes the new
+ *  id in its `aids` claim, so the caller can immediately trade against it
+ *  without re-authenticating. */
+export async function createAccountApi(label: string): Promise<{ account: UserAccount; token: string }> {
+  const res = await authFetch(`${API_BASE}/wallet/accounts`, {
+    method: 'POST',
+    body:   JSON.stringify({ label }),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data?.error ?? 'Failed to create account')
+  return { account: data.account, token: data.token }
+}
