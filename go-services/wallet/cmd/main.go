@@ -59,6 +59,13 @@ func main() {
 	monitor := wallet.NewMonitor(pool)
 	go monitor.Run(ctx)
 
+	// ── Transactional email ──────────────────────────────────────────────────
+	// Built up here, before route wiring, because both walletH and paystackH
+	// take it as a dependency. Nil-safe: when SMTP config is incomplete the
+	// wallet still runs, just without notifications. Email is best-effort;
+	// we never block a deposit credit or withdrawal request on send success.
+	mailer := email.New()
+
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -94,12 +101,6 @@ func main() {
 	// Phase-2 multi-account: list + create real accounts for a user.
 	protected.GET("/wallet/accounts", walletH.ListAccounts)
 	protected.POST("/wallet/accounts", walletH.CreateAccount)
-
-	// ── Transactional email ──────────────────────────────────────────────────
-	// Nil-safe — when SMTP config is incomplete the wallet still runs, just
-	// without notifications. Email is best-effort; we never block a deposit
-	// credit or withdrawal request on send success.
-	mailer := email.New()
 
 	// ── Payment channels ──────────────────────────────────────────────────────
 	// Seed rate from env; RateFetcher will override with live data within seconds.
