@@ -6,7 +6,8 @@
 //!
 //! Yahoo Finance chart endpoint `query1.finance.yahoo.com/v8/finance/chart/GC=F`
 //! (no API key, unofficial but widely used):
-//!   - cryXAUUSD → spot XAU/USD interbank price via Yahoo `XAUUSD=X`.
+//!   - cryXAUUSD → spot XAU/USD via exchangerate.host; history backfill via
+//!     Yahoo GC=F (futures, slight step at the boundary — acceptable).
 //!     Futures basis vs spot is small (~$0.50–$5 per oz) and acceptable for
 //!     a display-only synthetic feed. Frankfurter was tried first but it
 //!     doesn't carry metals — every fetch failed.
@@ -44,6 +45,82 @@ const SILVER_HALF_SPREAD_PCT: f64 = 0.0020;
 /// US indices: 0.05% half-spread (5 bps each side). Real-world index CFD
 /// spreads run 0.5–2 points on SPX (~3–10 bps); we sit at the tighter end.
 const INDEX_HALF_SPREAD_PCT: f64 = 0.0005;
+
+// ── Metals spot (XAU/XAG) via exchangerate.host ──────────────────────────────
+//
+// exchangerate.host returns rates as "1 USD = X target" — so an XAU entry of
+// 0.000529 means 0.000529 troy ounces per USD, which inverts to ~$1890/oz.
+// We poll every 5 seconds and dispatch both gold and silver from the same
+// request so we minimise hits on the free tier (no API key required, but
+// they get cranky above ~20 req/sec sustained).
+//
+// Compared to Yahoo GC=F/SI=F: these are LBMA-derived spot prices, so they
+// match what users see on Exness/IG/etc. within a few cents. The trade-off:
+// exchangerate.host's free tier doesn't carry historical time-series, so the
+// chart's history backfill still comes from Yahoo futures (GC=F/SI=F). That
+// creates a small step (~\$20 for gold) at the boundary between historical
+// candles and the first live tick. Acceptable until we move to a paid feed.
+
+const EXCHANGERATE_METALS_URL: &str =
+    "https://api.exchangerate.host/latest?base=USD&symbols=XAU,XAG";
+
+#[derive(serde::Deserialize)]
+struct ExchangerateResp {
+    rates: std::collections::HashMap<String, f64>,
+}
+
+/// Fetch spot XAU/USD and XAG/USD prices. Returns None on any failure;
+/// caller treats as "use last cached value".
+async fn fetch_exchangerate_metals(client: &reqwest::Client) -> Option<(f64, f64)> {
+    let resp = client
+        .get(EXCHANGERATE_METALS_URL)
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: ExchangerateResp = resp.json().await.ok()?;
+    // The map returns USD→ccy. For XAU, the value is "ounces per USD" so we
+    // invert to "USD per ounce". Same for silver.
+    let xau_per_usd = body.rates.get("XAU").copied()?;
+    let xag_per_usd = body.rates.get("XAG").copied()?;
+    if xau_per_usd <= 0.0 || xag_per_usd <= 0.0 {
+        return None;
+    }
+    Some((1.0 / xau_per_usd, 1.0 / xag_per_usd))
+}
+
+/// Spawn a polling task that dispatches gold AND silver ticks every
+/// `cadence_ms` from a single exchangerate.host fetch.
+fn spawn_metals_spot(state: SharedState, client: Arc<reqwest::Client>, cadence_ms: u64) {
+    tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_millis(cadence_ms));
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+        let mut last: Option<(f64, f64)> = None;
+
+        loop {
+            interval.tick().await;
+            match fetch_exchangerate_metals(&client).await {
+                Some(prices) => last = Some(prices),
+                None => {
+                    if last.is_none() {
+                        warn!(
+                            "metals spot fetch failed — no price yet, XAU/XAG silent until first success"
+                        );
+                    } else {
+                        warn!("metals spot fetch failed — using last known");
+                    }
+                }
+            }
+            if let Some((xau, xag)) = last {
+                dispatch(&state, mid_to_tick("cryXAUUSD", xau, GOLD_HALF_SPREAD_PCT)).await;
+                dispatch(&state, mid_to_tick("XAGUSD",    xag, SILVER_HALF_SPREAD_PCT)).await;
+            }
+        }
+    });
+}
 
 // ── Alpaca latest quotes (US equity ETFs as index proxies) ───────────────────
 //
@@ -380,32 +457,14 @@ pub fn start(state: SharedState) {
     // ETH/USD — 500 ms (Binance bookTicker, real bid/ask)
     spawn_binance(state.clone(), client.clone(), "ETHUSDT", "cryETHUSD", 500);
 
-    // Gold — Yahoo GC=F (COMEX front-month futures) at 2 s, synthetic bid/ask
-    // around mid. This sits +$5-25 above LBMA spot because of cost of carry,
-    // which means our price reads $20 above what users see on Exness/IG/etc.
-    // We tried switching to spot via `XAUUSD=X` (Yahoo's FX-pair convention)
-    // but Yahoo doesn't carry that symbol — chart endpoint returns "No data
-    // found, symbol may be delisted". They treat gold as a commodity, not an
-    // FX pair, so the only free-tier Yahoo paths are GC=F (futures) or GLD
-    // (ETF, different scale entirely). Future fix: switch to exchangerate.host
-    // which carries XAU/USD spot, or a paid metals feed (Refinitiv, Polygon).
-    spawn_yahoo(
-        state.clone(),
-        client.clone(),
-        "GC=F",
-        "cryXAUUSD",
-        GOLD_HALF_SPREAD_PCT,
-        2_000,
-    );
-    // Silver — same constraint, same fallback (SI=F is COMEX silver futures).
-    spawn_yahoo(
-        state.clone(),
-        client.clone(),
-        "SI=F",
-        "XAGUSD",
-        SILVER_HALF_SPREAD_PCT,
-        2_000,
-    );
+    // Gold + silver — exchangerate.host spot, both fetched in one request to
+    // keep the rate-limit footprint low. Pulled every 5 seconds because retail
+    // doesn't need millisecond-level metal ticks and the free tier doesn't
+    // like aggressive polling. See the spawn_metals_spot block above for the
+    // story on why we moved off Yahoo futures (GC=F/SI=F was \$20 above spot
+    // because of cost-of-carry, made our prices look wrong vs every other
+    // CFD broker).
+    spawn_metals_spot(state.clone(), client.clone(), 5_000);
 
     // US indices — Alpaca real-time IEX feed via SPY/DIA/QQQ ETFs (preferred),
     // or fall back to Yahoo polling (15-min delay) if Alpaca creds are missing.
