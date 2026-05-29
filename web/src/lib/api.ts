@@ -1,7 +1,7 @@
 /**
  * Authenticated fetch wrapper.
  *
- * Reads the JWT from sessionStorage and attaches it as an Authorization header.
+ * Reads the JWT from localStorage and attaches it as an Authorization header.
  * Falls back to a plain fetch if no token is present (unauthenticated calls like
  * /api/symbols or /api/candles don't need a token).
  */
@@ -10,7 +10,7 @@ const TOKEN_KEY = 'otuburu_token'
 
 function getToken(): string | null {
   if (typeof window === 'undefined') return null
-  return sessionStorage.getItem(TOKEN_KEY)
+  return localStorage.getItem(TOKEN_KEY)
 }
 
 type FetchOptions = RequestInit & { skipAuth?: boolean }

@@ -46,7 +46,12 @@ func Sign(userID string, accountIDs []string, demoID, email string) (string, err
 		DemoID:     demoID,
 		Email:      email,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(30 * 24 * time.Hour)),
+			// 1-year TTL — matches MT5-style persistence: the user stays
+			// signed in until they explicitly hit Sign out. Frontend
+			// stores the token in localStorage (not sessionStorage) so it
+			// survives browser closes. Re-issued on every login; users
+			// who close the app for >1 year just re-authenticate.
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(365 * 24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}

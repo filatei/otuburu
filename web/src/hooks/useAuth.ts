@@ -3,6 +3,9 @@ import { useState, useEffect, useCallback } from 'react'
 import type { UserAccount } from '@/types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
+// Persisted in localStorage (not sessionStorage) so the user stays signed in
+// across browser closes — same persistence model as MT5 mobile. Cleared
+// only by an explicit Sign out tap (see logout() below) or token expiry.
 const TOKEN_KEY = 'otuburu_token'
 
 export interface AuthUser {
@@ -24,9 +27,9 @@ export function useAuth() {
   const [user,    setUser]    = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Restore session from sessionStorage on mount
+  // Restore session from localStorage on mount
   useEffect(() => {
-    const token = sessionStorage.getItem(TOKEN_KEY)
+    const token = localStorage.getItem(TOKEN_KEY)
     if (!token) { setLoading(false); return }
     fetch(`${API_BASE}/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -54,13 +57,13 @@ export function useAuth() {
     }).then(r => r.json())
 
     const authUser: AuthUser = { ...data, ...me }
-    sessionStorage.setItem(TOKEN_KEY, data.token)
+    localStorage.setItem(TOKEN_KEY, data.token)
     setUser(authUser)
     return authUser
   }, [])
 
   const logout = useCallback(() => {
-    sessionStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(TOKEN_KEY)
     setUser(null)
     // Sign out from Google too
     if (typeof window !== 'undefined' && (window as any).google) {
@@ -81,7 +84,7 @@ export function useAuth() {
    *  new account row itself. We persist the token and merge the account so
    *  the user can trade against it immediately. */
   const applyToken = useCallback(async (newToken: string) => {
-    sessionStorage.setItem(TOKEN_KEY, newToken)
+    localStorage.setItem(TOKEN_KEY, newToken)
     const me = await fetch(`${API_BASE}/auth/me`, {
       headers: { Authorization: `Bearer ${newToken}` },
     }).then(r => r.json()).catch(() => null)
