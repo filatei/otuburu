@@ -22,6 +22,7 @@ import SymbolActionsSheet    from '@/components/SymbolActionsSheet'
 import SymbolPropertiesModal from '@/components/SymbolPropertiesModal'
 import { provisionAccount } from '@/hooks/useAccount'
 import { useAutoFullscreen } from '@/hooks/useAutoFullscreen'
+import { useDailyPnLBySymbol } from '@/hooks/useDailyPnL'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 
@@ -152,6 +153,11 @@ export default function TradingPage() {
     positions.reduce((s, p) => s + (p.unrealised_pnl ?? 0), 0) +
     spots.reduce((s, p) => s + (p.unrealised_pnl ?? 0), 0)
 
+  // Today's net P&L per symbol — drives the small "+12.34 today" / "−5.00
+  // today" subline under each Quotes row. Realised since UTC midnight plus
+  // unrealised on open positions/spots.
+  const dailyPnl = useDailyPnLBySymbol(settledHistory, positions, spots)
+
   return (
     <div className="flex flex-col h-[100dvh] overflow-hidden bg-surface">
       {/* Modals & drawer */}
@@ -261,6 +267,7 @@ export default function TradingPage() {
               symbols={symbols}
               ticks={allTicks}
               selected={selected}
+              dailyPnl={dailyPnl}
               // MT5 behaviour: tap a symbol → context sheet appears, user
               // chooses Chart / New Order / Close Profitable / Close Losers
               // / Properties. Direct-jump-to-chart is gone.

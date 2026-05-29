@@ -18,6 +18,10 @@ interface Props {
   symbols:  SymbolInfo[]
   ticks:    Record<string, Tick>
   selected: string
+  /** Today's net P&L per symbol (realised since UTC midnight + open
+   *  floating). Omitted entries render as "no activity"; non-zero entries
+   *  render small below bid/ask. */
+  dailyPnl?: Record<string, number>
   /** Called when a row is tapped. Parent decides what to do — currently
    *  this opens the SymbolActionsSheet for that symbol. */
   onSelect: (symbol: string) => void
@@ -31,7 +35,7 @@ const TYPE_BADGE: Record<string, string> = {
   INDEX:      'text-[#5dade2]',
 }
 
-export default function MobileSymbolsTab({ symbols, ticks, selected, onSelect }: Props) {
+export default function MobileSymbolsTab({ symbols, ticks, selected, dailyPnl, onSelect }: Props) {
   // Session High/Low per symbol, observed off the live tick stream. Resets
   // at UTC midnight. MT5 shows the same pair under each Quotes row.
   const sessionHL = useSessionHL(ticks)
@@ -49,6 +53,7 @@ export default function MobileSymbolsTab({ symbols, ticks, selected, onSelect }:
             info={info}
             tick={ticks[info.symbol] ?? null}
             range={sessionHL[info.symbol] ?? null}
+            pnl={dailyPnl?.[info.symbol] ?? null}
             selected={info.symbol === selected}
             onSelect={onSelect}
           />
@@ -58,10 +63,11 @@ export default function MobileSymbolsTab({ symbols, ticks, selected, onSelect }:
   )
 }
 
-function SymbolRow({ info, tick, range, selected, onSelect }: {
+function SymbolRow({ info, tick, range, pnl, selected, onSelect }: {
   info:     SymbolInfo
   tick:     Tick | null
   range:    SessionRange | null
+  pnl:      number | null
   selected: boolean
   onSelect: (symbol: string) => void
 }) {
@@ -111,15 +117,28 @@ function SymbolRow({ info, tick, range, selected, onSelect }: {
 
         <div className="flex-1" />
 
-        {/* Right: bid/ask in two columns, MT5-style big numbers */}
-        {tick ? (
-          <div className="flex items-center gap-3 num">
-            <PriceTile label="Bid" value={formatPrice(info, tick.bid, dp)} flash={flash} colour="down" />
-            <PriceTile label="Ask" value={formatPrice(info, tick.ask, dp)} flash={flash} colour="up" />
-          </div>
-        ) : (
-          <span className="text-sm text-dim">—</span>
-        )}
+        {/* Right: bid/ask + today's P&L. Wrapped in a flex column so the
+            tiny P&L line sits flush under the bid/ask block. Hidden when
+            the symbol has no P&L activity today (MT5-silent — no zero
+            placeholders). */}
+        <div className="flex flex-col items-end gap-0.5">
+          {tick ? (
+            <div className="flex items-center gap-3 num">
+              <PriceTile label="Bid" value={formatPrice(info, tick.bid, dp)} flash={flash} colour="down" />
+              <PriceTile label="Ask" value={formatPrice(info, tick.ask, dp)} flash={flash} colour="up" />
+            </div>
+          ) : (
+            <span className="text-sm text-dim">—</span>
+          )}
+          {typeof pnl === 'number' && Math.abs(pnl) >= 0.005 && (
+            <span className={clsx(
+              'text-[9px] font-semibold num tracking-tight',
+              pnl >= 0 ? 'text-up' : 'text-down',
+            )}>
+              {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)} today
+            </span>
+          )}
+        </div>
       </button>
     </li>
   )
