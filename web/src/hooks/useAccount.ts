@@ -7,6 +7,21 @@ const API_BASE    = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.m
 const HISTORY_KEY = 'otuburu_trade_history'
 const MAX_HISTORY = 200
 
+// ─── Wire-format normalisation ────────────────────────────────────────────────
+//
+// The gateway uses protojson.MarshalOptions{ UseProtoNames: true } which keeps
+// snake_case field names AND serialises proto int64 values as JSON strings to
+// preserve precision (JS Number can't exactly represent integers above 2^53).
+// Our types declare *_ms as number, so we coerce on the way in. Without this,
+// `Number.isFinite("1748441405000")` is false and the MT5-style "Open: …"
+// label fell back to "—" on every expanded position row.
+function normaliseMs<T extends { opened_at_ms?: number | string }>(rows: T[]): T[] {
+  return rows.map(r => ({
+    ...r,
+    opened_at_ms: r.opened_at_ms != null ? Number(r.opened_at_ms) : 0,
+  }))
+}
+
 // ─── Persist helpers ──────────────────────────────────────────────────────────
 function loadHistory(accountId: string): SettledTrade[] {
   try {
@@ -78,9 +93,14 @@ export function useAccount(accountId: string): GameState {
   const applyState = useCallback((data: unknown) => {
     const d = data as Record<string, unknown>
     const newAccount:   AccountState    = (d.account   as AccountState)    ?? null
-    const newPositions: Position[]      = (d.positions as Position[])      ?? []
-    const newBinaries:  BinaryOption[]  = (d.binaries  as BinaryOption[])  ?? []
-    const newSpots:     SpotPosition[]  = (d.spots     as SpotPosition[])  ?? []
+    // Coerce *_ms timestamps from string to number. The gateway's protojson
+    // marshaller serialises proto int64 fields as JSON strings to preserve
+    // precision (JS Number can't exactly represent int64 above 2^53). Without
+    // this, the expandable position row showed "Open: —" because
+    // Number.isFinite("1748441405000") === false.
+    const newPositions: Position[]     = normaliseMs((d.positions as Position[])     ?? [])
+    const newBinaries:  BinaryOption[] = normaliseMs((d.binaries  as BinaryOption[]) ?? [])
+    const newSpots:     SpotPosition[] = normaliseMs((d.spots     as SpotPosition[]) ?? [])
     const newBalance = newAccount?.balance ?? null
 
     // Detect settled binaries (disappeared from live list since last update)
