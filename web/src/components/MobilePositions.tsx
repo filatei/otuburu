@@ -192,7 +192,13 @@ export default function MobilePositions(props: Props) {
           {filteredHistory.length === 0
             ? <EmptyState text="No trades in this range" />
             : filteredHistory.map(t => (
-                <SettledRow key={t.id} trade={t} info={symbolMap.get(t.symbol) ?? null} />
+                <SettledRow
+                key={t.id}
+                trade={t}
+                info={symbolMap.get(t.symbol) ?? null}
+                expanded={expandedId === t.id}
+                onToggle={() => toggleExpand(t.id)}
+              />
               ))}
         </>
       )}
@@ -321,29 +327,54 @@ function BinaryRow({ info, symbolId, direction, stake, entry, ticksLeft, ticksTo
   )
 }
 
-function SettledRow({ trade: t, info }: { trade: SettledTrade; info: SymbolInfo | null }) {
+function SettledRow({ trade: t, info, expanded, onToggle }: {
+  trade:    SettledTrade
+  info:     SymbolInfo | null
+  expanded: boolean
+  onToggle: () => void
+}) {
   const dp = priceDecimals(info)
   const net = t.outcome === 'win' ? t.pnl - t.stake : -t.stake
   const isUp = t.direction === 'UP'
   return (
-    <RowFrame>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-bold text-text flex items-baseline gap-1.5 truncate">
-          <span>{displayNameOf(info, t.symbol)},</span>
-          <span className={clsx('font-semibold', isUp ? 'text-up' : 'text-down')}>
-            {isUp ? 'rise' : 'fall'} ${t.stake.toFixed(0)}
-          </span>
+    <>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 px-4 py-2.5 border-b border-border/60 active:bg-surface/40 text-left cursor-pointer"
+      >
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-bold text-text flex items-baseline gap-1.5 truncate">
+            <span>{displayNameOf(info, t.symbol)},</span>
+            <span className={clsx('font-semibold', isUp ? 'text-up' : 'text-down')}>
+              {isUp ? 'rise' : 'fall'} ${t.stake.toFixed(0)}
+            </span>
+          </div>
+          <div className="text-[12px] text-dim num mt-0.5">
+            {formatPrice(info, t.entry_mid, dp)}
+            <span className="text-dim/60 mx-1">·</span>
+            {formatAgo(t.settled_at)}
+          </div>
         </div>
-        <div className="text-[12px] text-dim num mt-0.5">
-          {formatPrice(info, t.entry_mid, dp)}
-          <span className="text-dim/60 mx-1">·</span>
-          {formatAgo(t.settled_at)}
-        </div>
-      </div>
-      <span className={clsx('num text-sm font-bold shrink-0 ml-2', net >= 0 ? 'text-up' : 'text-down')}>
-        {net >= 0 ? '+' : ''}{net.toFixed(2)}
-      </span>
-    </RowFrame>
+        <span className={clsx('num text-sm font-bold shrink-0 ml-2', net >= 0 ? 'text-up' : 'text-down')}>
+          {net >= 0 ? '+' : ''}{net.toFixed(2)}
+        </span>
+      </button>
+      {expanded && (
+        <ExpandedDetails
+          rows={[
+            ['Order',    `#${t.id.slice(0, 8)}`],
+            ['Settled',  fmtOpenTime(t.settled_at)],
+            ['Direction', isUp ? 'RISE / UP' : 'FALL / DOWN'],
+            ['Stake',    `$${t.stake.toFixed(2)}`],
+            ['Entry',    formatPrice(info, t.entry_mid, dp)],
+            ['Outcome',  t.outcome === 'win' ? 'WON' : 'LOST'],
+            ['Payout',   t.outcome === 'win' ? `$${t.pnl.toFixed(2)}` : '$0.00'],
+            ['Net P&L',  `${net >= 0 ? '+' : ''}$${net.toFixed(2)}`],
+          ]}
+        />
+      )}
+    </>
   )
 }
 

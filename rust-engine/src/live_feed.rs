@@ -128,8 +128,17 @@ fn spawn_metals_spot(state: SharedState, client: Arc<reqwest::Client>, cadence_m
                 }
             }
             if let Some((xau, xag)) = last {
-                dispatch(&state, mid_to_tick("cryXAUUSD", xau, GOLD_HALF_SPREAD_PCT)).await;
-                dispatch(&state, mid_to_tick("XAGUSD", xag, SILVER_HALF_SPREAD_PCT)).await;
+                // Gate dispatch on market hours — metals follow the FX 24/5
+                // calendar (Sun 21:00 UTC → Fri 21:00 UTC). Skipping ticks
+                // when the market is closed naturally freezes the chart
+                // and lets the frontend detect staleness via tick age.
+                let now = chrono::Utc::now();
+                if crate::market_hours::is_open("cryXAUUSD", now) {
+                    dispatch(&state, mid_to_tick("cryXAUUSD", xau, GOLD_HALF_SPREAD_PCT)).await;
+                }
+                if crate::market_hours::is_open("XAGUSD", now) {
+                    dispatch(&state, mid_to_tick("XAGUSD", xag, SILVER_HALF_SPREAD_PCT)).await;
+                }
             }
         }
     });
@@ -614,8 +623,15 @@ fn spawn_yahoo(
             }
 
             if let Some(mid) = *last.lock().await {
-                let tick = mid_to_tick(symbol, mid, half_spread_pct);
-                dispatch(&state, tick).await;
+                // Skip dispatching when the underlying session is closed —
+                // the symbol freezes at its last known price and the
+                // frontend will see a stale tick (>60s old) which signals
+                // "market closed" to the user. Crypto/synthetic are always
+                // open so this is effectively a no-op for those.
+                if crate::market_hours::is_open(symbol, chrono::Utc::now()) {
+                    let tick = mid_to_tick(symbol, mid, half_spread_pct);
+                    dispatch(&state, tick).await;
+                }
             }
         }
     });
@@ -771,8 +787,14 @@ fn spawn_alpaca_indices(
                     .iter()
                     .find(|(_, alp)| *alp == alpaca_sym.as_str())
                 {
-                    let tick = make_tick(internal_sym, bid, ask);
-                    dispatch(&state, tick).await;
+                    // US indices only tick during the cash session (13:30-
+                    // 20:00 UTC weekdays). Alpaca will happily stream the
+                    // last regular-session quote outside hours; we drop it
+                    // so the frontend sees a stale tick and disables trades.
+                    if crate::market_hours::is_open(internal_sym, chrono::Utc::now()) {
+                        let tick = make_tick(internal_sym, bid, ask);
+                        dispatch(&state, tick).await;
+                    }
                 }
             }
         }

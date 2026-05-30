@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { isMarketOpen } from '@/lib/marketHours'
 import clsx from 'clsx'
 import type { Tick, SymbolInfo, AccountState } from '@/types'
 import { placeCFD, placeBinary, placeSpot } from '@/hooks/useAccount'
@@ -119,8 +120,13 @@ export default function MobileTradeForm({
   const sellDir: Direction = activeMode === 'binary' ? 'DOWN' : 'SELL'
   const buyDir:  Direction = activeMode === 'binary' ? 'UP'   : 'BUY'
 
+  // Market hours gate — if the latest tick is too old for this symbol's
+  // class, the underlying venue is closed and we disable trading entirely.
+  // Engine independently rejects via check_price_freshness as a safety net.
+  const marketOpen = isMarketOpen(info, lastTick)
+
   // Spot is buy-only at open — disable SELL tile in spot mode
-  const sellDisabled = activeMode === 'spot' || busy || !lastTick
+  const sellDisabled = activeMode === 'spot' || busy || !lastTick || !marketOpen
 
   // Preview text per mode
   const previewLine: { primary: string; secondary?: string } = (() => {
@@ -182,6 +188,15 @@ export default function MobileTradeForm({
         )}
       </div>
 
+      {/* Market-closed banner — visible when the symbol's underlying venue
+          is outside session. SELL/BUY tiles are also disabled, but the
+          banner makes the cause obvious. */}
+      {!marketOpen && lastTick && (
+        <div className="mx-2 mt-2 px-3 py-2 rounded bg-muted/30 border border-border text-center text-[11px] text-dim">
+          Market closed · last price held until session reopens
+        </div>
+      )}
+
       {/* ── Sell / Volume / Buy tiles (THE ACTION) ─────────────────────────── */}
       <div className="px-2 pt-2 pb-1.5 flex items-stretch gap-1.5">
         <button
@@ -226,7 +241,7 @@ export default function MobileTradeForm({
 
         <button
           onClick={() => doTrade(buyDir)}
-          disabled={busy || !lastTick}
+          disabled={busy || !lastTick || !marketOpen}
           className="flex-1 flex flex-col items-end justify-center px-3 py-3 rounded-md
                      bg-up/20 border-2 border-up/40 disabled:opacity-25
                      active:scale-[0.98] transition-transform"

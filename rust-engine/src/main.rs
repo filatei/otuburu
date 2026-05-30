@@ -12,6 +12,7 @@
 mod db;
 mod engine_service;
 mod live_feed;
+mod market_hours;
 mod ohlc;
 mod persistence;
 mod state;

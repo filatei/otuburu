@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import type { SymbolInfo, Tick } from '@/types'
 import { displayNameOf, formatPrice, priceDecimals } from '@/lib/symbols'
 import { useSessionHL, type SessionRange } from '@/hooks/useSessionHL'
+import { isMarketOpen } from '@/lib/marketHours'
 
 /**
  * MobileSymbolsTab — vertical scrollable list of all tradeable symbols.
@@ -73,9 +74,15 @@ function SymbolRow({ info, tick, range, pnl, selected, onSelect }: {
 }) {
   const prevMid = useRef<number | null>(null)
   const [flash, setFlash] = useState<'up' | 'down' | null>(null)
+  // Closed markets shouldn't visually flash — last-known price is shown but
+  // it isn't actually moving. We mirror the engine's market-hours gate via
+  // tick-age detection: if the most recent tick is too old for the symbol's
+  // class (90s for FX/metals/index, 5min for crypto/synthetic) the market
+  // is closed and we suppress the flash + render a CLOSED chip.
+  const open = isMarketOpen(info, tick)
 
   useEffect(() => {
-    if (!tick) return
+    if (!tick || !open) return
     if (prevMid.current !== null && tick.mid !== prevMid.current) {
       setFlash(tick.mid > prevMid.current ? 'up' : 'down')
       const t = setTimeout(() => setFlash(null), 350)
@@ -122,13 +129,24 @@ function SymbolRow({ info, tick, range, pnl, selected, onSelect }: {
             the symbol has no P&L activity today (MT5-silent — no zero
             placeholders). */}
         <div className="flex flex-col items-end gap-0.5">
-          {tick ? (
+          {!tick ? (
+            <span className="text-sm text-dim">—</span>
+          ) : !open ? (
+            // CLOSED chip + greyed-out last bid/ask so users still see the
+            // level. Trade buttons in the Trade form are gated independently.
+            <div className="flex flex-col items-end gap-0.5">
+              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-muted/40 text-dim">
+                Closed
+              </span>
+              <span className="num text-[11px] text-dim/70">
+                {formatPrice(info, tick.bid, dp)} / {formatPrice(info, tick.ask, dp)}
+              </span>
+            </div>
+          ) : (
             <div className="flex items-center gap-3 num">
               <PriceTile label="Bid" value={formatPrice(info, tick.bid, dp)} flash={flash} colour="down" />
               <PriceTile label="Ask" value={formatPrice(info, tick.ask, dp)} flash={flash} colour="up" />
             </div>
-          ) : (
-            <span className="text-sm text-dim">—</span>
           )}
           {typeof pnl === 'number' && Math.abs(pnl) >= 0.005 && (
             <span className={clsx(
