@@ -42,12 +42,7 @@ pub fn classify(internal_symbol: &str) -> SymbolClass {
         // cryPAXGUSD is gold by underlying but lives on crypto venues, so
         // it inherits the 24/7 calendar — the whole reason we added it.
         // Altcoins (SOL, DOGE, XRP, ADA) trade 24/7 like BTC/ETH.
-        "cryBTCUSD"
-        | "cryETHUSD"
-        | "cryPAXGUSD"
-        | "crySOLUSD"
-        | "cryDOGEUSD"
-        | "cryXRPUSD"
+        "cryBTCUSD" | "cryETHUSD" | "cryPAXGUSD" | "crySOLUSD" | "cryDOGEUSD" | "cryXRPUSD"
         | "cryADAUSD" => SymbolClass::Crypto,
         "cryXAUUSD" | "XAGUSD" => SymbolClass::Metal,
         "SPX" | "DJI" | "NDX" => SymbolClass::Index,

@@ -237,9 +237,8 @@ async fn fetch_alpaca_crypto(
         .map(|p| p.replace('/', "%2F"))
         .collect::<Vec<_>>()
         .join(",");
-    let url = format!(
-        "https://data.alpaca.markets/v1beta3/crypto/us/latest/quotes?symbols={encoded}"
-    );
+    let url =
+        format!("https://data.alpaca.markets/v1beta3/crypto/us/latest/quotes?symbols={encoded}");
     let resp = client
         .get(&url)
         .header("APCA-API-KEY-ID", key_id)
@@ -398,8 +397,7 @@ struct BybitTicker {
 }
 
 async fn fetch_bybit(client: &reqwest::Client, pair: &str) -> Option<(f64, f64)> {
-    let url =
-        format!("https://api.bybit.com/v5/market/tickers?category=spot&symbol={pair}");
+    let url = format!("https://api.bybit.com/v5/market/tickers?category=spot&symbol={pair}");
     let resp = client
         .get(&url)
         .timeout(Duration::from_secs(5))
@@ -442,8 +440,7 @@ fn spawn_multi_source_crypto(
         loop {
             interval.tick().await;
 
-            let (bin, byb) =
-                tokio::join!(fetch_binance(&client, pair), fetch_bybit(&client, pair));
+            let (bin, byb) = tokio::join!(fetch_binance(&client, pair), fetch_bybit(&client, pair));
 
             // Transition logging — flag the first failure and the first
             // recovery after a failure run. Mid-run silence keeps logs
