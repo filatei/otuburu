@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Otuburu</string>
+    <string name="title_activity_main">Otuburu</string>
+    <string name="package_name">money.torama.otuburu</string>
+    <string name="custom_url_scheme">money.torama.otuburu</string>
+</resources>

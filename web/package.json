@@ -9,6 +9,15 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.4",
+    "@capacitor/app": "^8.1.0",
+    "@capacitor/browser": "^8.0.3",
+    "@capacitor/core": "^8.3.4",
+    "@capacitor/ios": "^8.3.4",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/share": "^8.0.1",
+    "@capacitor/splash-screen": "^8.0.1",
+    "@capacitor/status-bar": "^8.0.2",
     "clsx": "^2.1.1",
     "lightweight-charts": "^4.2.0",
     "next": "14.2.5",
@@ -16,6 +25,8 @@
     "react-dom": "^18"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.6.5",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
