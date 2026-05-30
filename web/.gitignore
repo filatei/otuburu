@@ -1,0 +1,11 @@
+
+# Next.js build artifacts — never commit
+.next/
+out/
+next-env.d.ts
+
+# PWA manifest is dynamic via app/manifest.ts; public/ shouldn't shadow it
+public/manifest.webmanifest
+
+# CocoaPods backup from sed -i.bak
+ios/App/Podfile.bak
