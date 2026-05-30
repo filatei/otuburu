@@ -744,6 +744,11 @@ pub fn start(state: SharedState) {
     // stay on the same scale.
     let alpaca_key = std::env::var("APCA_API_KEY_ID").unwrap_or_default();
     let alpaca_secret = std::env::var("APCA_API_SECRET_KEY").unwrap_or_default();
+    // Keep clones for the history seeder which runs after the Yahoo backfill
+    // block further down. Empty when creds are missing — the history call
+    // guards on the same emptiness check before spawning.
+    let alpaca_key_for_history = alpaca_key.clone();
+    let alpaca_secret_for_history = alpaca_secret.clone();
     if !alpaca_key.is_empty() && !alpaca_secret.is_empty() {
         tracing::info!("alpaca creds present — using Alpaca for SPX/DJI/NDX + PAXG/USD");
         spawn_alpaca_indices(
@@ -806,7 +811,21 @@ pub fn start(state: SharedState) {
     spawn_yahoo_history_refresh(state.clone(), client.clone(), "SI=F", "XAGUSD");
     spawn_yahoo_history_refresh(state.clone(), client.clone(), "SPY", "SPX");
     spawn_yahoo_history_refresh(state.clone(), client.clone(), "DIA", "DJI");
-    spawn_yahoo_history_refresh(state, client, "QQQ", "NDX");
+    spawn_yahoo_history_refresh(state.clone(), client.clone(), "QQQ", "NDX");
+
+    // Historical OHLC backfill for crypto via Alpaca's crypto bars endpoint.
+    // Yahoo doesn't carry BTC/ETH/altcoins or PAXG cleanly, so this fills
+    // the gap. One batched HTTP call covers all 7 crypto pairs per
+    // timeframe (Alpaca's bars endpoint accepts comma-separated symbols),
+    // so this is two requests/hour total versus 14 if we fanned out.
+    if !alpaca_key_for_history.is_empty() && !alpaca_secret_for_history.is_empty() {
+        spawn_alpaca_crypto_history_refresh(
+            state,
+            client,
+            alpaca_key_for_history,
+            alpaca_secret_for_history,
+        );
+    }
 }
 
 /// Generic Yahoo Finance chart-endpoint feeder. Polls every `cadence_ms`,
@@ -939,6 +958,210 @@ fn spawn_yahoo_history_refresh(
                 _ => {
                     warn!(symbol, yahoo_ticker, "yahoo H1 history fetch failed");
                 }
+            }
+        }
+    });
+}
+
+// ── Alpaca crypto bars history backfill ──────────────────────────────────────
+//
+// Fills the chart-history gap for the 7 crypto symbols (BTC/ETH/SOL/DOGE/
+// XRP/ADA/PAXG) that Yahoo can't cleanly cover. Yahoo carries BTC-USD and
+// ETH-USD but on a futures-style price track, and the altcoins / PAXG it
+// doesn't carry at all. Alpaca's crypto bars endpoint is the natural source
+// since the live PAXG feed already comes from there — same venue conventions.
+//
+// One batched HTTP request per timeframe (Alpaca accepts comma-separated
+// symbols), so this is two requests per HISTORY_REFRESH_SECS rather than
+// 14 (= 7 × 2 timeframes). D1 history persists to SQLite so the next engine
+// boot has data immediately; H1 is in-memory only since refresh-on-boot is
+// fast (2 requests).
+//
+// Endpoint shape (Alpaca v1beta3 crypto bars):
+//   GET /v1beta3/crypto/us/bars?symbols=BTC/USD,ETH/USD,...&timeframe=1Day&start=ISO8601&limit=10000
+//   → { "bars": { "BTC/USD": [{ t, o, h, l, c, v, n, vw }, ...], ... } }
+
+/// Pair → internal symbol map for crypto history seeding. Distinct from
+/// CRYPTO_MULTI_VENUE_SYMBOLS (which uses BTCUSDT/etc. for Binance + Bybit)
+/// because the Alpaca endpoint uses BASE/QUOTE with a slash.
+const ALPACA_CRYPTO_HISTORY_MAP: &[(&str, &str)] = &[
+    ("BTC/USD", "cryBTCUSD"),
+    ("ETH/USD", "cryETHUSD"),
+    ("SOL/USD", "crySOLUSD"),
+    ("DOGE/USD", "cryDOGEUSD"),
+    ("XRP/USD", "cryXRPUSD"),
+    ("ADA/USD", "cryADAUSD"),
+    ("PAXG/USD", "cryPAXGUSD"),
+];
+
+#[derive(serde::Deserialize)]
+struct AlpacaBarsResp {
+    bars: std::collections::HashMap<String, Vec<AlpacaBar>>,
+}
+
+#[derive(serde::Deserialize)]
+struct AlpacaBar {
+    #[serde(rename = "t")]
+    timestamp: String, // ISO 8601 (RFC 3339)
+    #[serde(rename = "o")]
+    open: f64,
+    #[serde(rename = "h")]
+    high: f64,
+    #[serde(rename = "l")]
+    low: f64,
+    #[serde(rename = "c")]
+    close: f64,
+}
+
+/// Fetch historical OHLC candles from Alpaca's crypto bars endpoint for
+/// the configured pair set at the given timeframe. Returns a map keyed by
+/// pair (e.g. "BTC/USD") to candle vectors. Caller is responsible for the
+/// pair-to-internal-symbol lookup.
+async fn fetch_alpaca_crypto_bars(
+    client: &reqwest::Client,
+    pairs: &[&str],
+    timeframe: &str, // "1Day" or "1Hour"
+    start: chrono::DateTime<chrono::Utc>,
+    key_id: &str,
+    secret_key: &str,
+) -> Option<std::collections::HashMap<String, Vec<crate::ohlc::Candle>>> {
+    // URL-encode slashes (same trick as the live quotes fetcher).
+    let encoded = pairs.iter().map(|p| p.replace('/', "%2F")).collect::<Vec<_>>().join(",");
+    let url = format!(
+        "https://data.alpaca.markets/v1beta3/crypto/us/bars?symbols={encoded}&timeframe={timeframe}&start={}&limit=10000",
+        start.format("%Y-%m-%dT%H:%M:%SZ")
+    );
+    let resp = client
+        .get(&url)
+        .header("APCA-API-KEY-ID", key_id)
+        .header("APCA-API-SECRET-KEY", secret_key)
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: AlpacaBarsResp = resp.json().await.ok()?;
+    let mut out = std::collections::HashMap::with_capacity(body.bars.len());
+    for (pair, bars) in body.bars {
+        let candles: Vec<crate::ohlc::Candle> = bars
+            .into_iter()
+            .filter_map(|b| {
+                let ts = chrono::DateTime::parse_from_rfc3339(&b.timestamp).ok()?;
+                Some(crate::ohlc::Candle {
+                    ts_s: ts.timestamp(),
+                    open: b.open,
+                    high: b.high,
+                    low: b.low,
+                    close: b.close,
+                })
+            })
+            .collect();
+        out.insert(pair, candles);
+    }
+    Some(out)
+}
+
+/// Spawn the hourly history refresher for all 7 crypto pairs. Fetches D1
+/// (2y of daily bars) and H1 (60d of hourly bars), seeds the in-memory OHLC
+/// store, persists D1 to SQLite. First iteration runs immediately so the
+/// chart isn't empty on boot.
+fn spawn_alpaca_crypto_history_refresh(
+    state: SharedState,
+    client: Arc<reqwest::Client>,
+    key_id: String,
+    secret_key: String,
+) {
+    tokio::spawn(async move {
+        let pairs: Vec<&'static str> =
+            ALPACA_CRYPTO_HISTORY_MAP.iter().map(|(p, _)| *p).collect();
+        let pair_to_internal: std::collections::HashMap<&str, &str> =
+            ALPACA_CRYPTO_HISTORY_MAP.iter().map(|(p, s)| (*p, *s)).collect();
+        let mut interval = time::interval(Duration::from_secs(HISTORY_REFRESH_SECS));
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await; // first tick fires immediately
+
+            // ── D1 history (2y daily candles, persisted) ─────────────────────
+            let d1_start = chrono::Utc::now() - chrono::Duration::days(2 * 365);
+            match fetch_alpaca_crypto_bars(
+                &client,
+                &pairs,
+                "1Day",
+                d1_start,
+                &key_id,
+                &secret_key,
+            )
+            .await
+            {
+                Some(by_pair) if !by_pair.is_empty() => {
+                    let mut inner = state.inner.write().await;
+                    for (pair, candles) in by_pair {
+                        if candles.is_empty() {
+                            continue;
+                        }
+                        if let Some(internal) = pair_to_internal.get(pair.as_str()) {
+                            tracing::info!(
+                                symbol = internal,
+                                pair = %pair,
+                                count = candles.len(),
+                                "seeded D1 history from Alpaca crypto"
+                            );
+                            // Persist D1 to SQLite same as the Yahoo path.
+                            let db = state.db.clone();
+                            let to_persist = candles.clone();
+                            let sym_owned = internal.to_string();
+                            tokio::spawn(async move {
+                                for c in &to_persist {
+                                    if let Err(e) = crate::db::upsert_daily_candle(
+                                        &db, &sym_owned, c.ts_s, c.open, c.high, c.low, c.close,
+                                    )
+                                    .await
+                                    {
+                                        tracing::error!(%e, "failed to upsert daily candle (alpaca crypto)");
+                                        break;
+                                    }
+                                }
+                            });
+                            inner.ohlc.seed(internal, crate::ohlc::Resolution::D1, candles);
+                        }
+                    }
+                }
+                _ => warn!("alpaca crypto D1 history fetch failed"),
+            }
+
+            // ── H1 history (60d hourly candles, in-memory only) ──────────────
+            let h1_start = chrono::Utc::now() - chrono::Duration::days(60);
+            match fetch_alpaca_crypto_bars(
+                &client,
+                &pairs,
+                "1Hour",
+                h1_start,
+                &key_id,
+                &secret_key,
+            )
+            .await
+            {
+                Some(by_pair) if !by_pair.is_empty() => {
+                    let mut inner = state.inner.write().await;
+                    for (pair, candles) in by_pair {
+                        if candles.is_empty() {
+                            continue;
+                        }
+                        if let Some(internal) = pair_to_internal.get(pair.as_str()) {
+                            tracing::info!(
+                                symbol = internal,
+                                pair = %pair,
+                                count = candles.len(),
+                                "seeded H1 history from Alpaca crypto"
+                            );
+                            inner.ohlc.seed(internal, crate::ohlc::Resolution::H1, candles);
+                        }
+                    }
+                }
+                _ => warn!("alpaca crypto H1 history fetch failed"),
             }
         }
     });
