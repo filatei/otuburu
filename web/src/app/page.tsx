@@ -18,6 +18,7 @@ import AuthModal           from '@/components/AuthModal'
 import ProfileModal        from '@/components/ProfileModal'
 import AppDrawer           from '@/components/AppDrawer'
 import DepositModal        from '@/components/DepositModal'
+import GetAppModal         from '@/components/GetAppModal'
 import SymbolActionsSheet     from '@/components/SymbolActionsSheet'
 import SymbolPropertiesModal  from '@/components/SymbolPropertiesModal'
 import AccountSwitcherSheet   from '@/components/AccountSwitcherSheet'
@@ -73,6 +74,7 @@ export default function TradingPage() {
   const [drawerOpen,    setDrawerOpen]    = useState(false)
   const [depositOpen,   setDepositOpen]   = useState(false)
   const [withdrawOpen,  setWithdrawOpen]  = useState(false)
+  const [getAppOpen,    setGetAppOpen]    = useState(false)
   const [mobileTab,     setMobileTab]     = useState<MobileTab>('chart')
   /** Symbol whose MT5-style action sheet is currently open. null = closed. */
   const [actionsFor,    setActionsFor]    = useState<string | null>(null)
@@ -268,7 +270,12 @@ export default function TradingPage() {
             ? () => setAccountSheetOpen(true)
             : undefined
         }
+        onGetApp={() => setGetAppOpen(true)}
       />
+
+      {/* "Get the App" sheet — Android APK + iOS PWA card. Always mounted
+          (cheap, no API calls) so BottomSheet can animate close cleanly. */}
+      <GetAppModal open={getAppOpen} onClose={() => setGetAppOpen(false)} />
 
       {/* Phase 2 multi-account picker — list + switch + create. */}
       <AccountSwitcherSheet

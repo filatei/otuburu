@@ -1,0 +1,15 @@
+# Signed Android APK destination.
+#
+# Build a release APK in `web/android` with:
+#
+#   ./gradlew assembleRelease
+#
+# Then copy the resulting app-release.apk here as otuburu.apk:
+#
+#   cp android/app/build/outputs/apk/release/app-release.apk \
+#      public/download/otuburu.apk
+#
+# Next.js static export will pick it up at /download/otuburu.apk on deploy.
+#
+# The APK is intentionally not committed to git — it's a build artifact and
+# adds ~30-50 MB per version. Drop the file here as part of each release.

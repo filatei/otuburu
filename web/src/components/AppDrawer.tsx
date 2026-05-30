@@ -21,11 +21,14 @@ interface Props {
    *  user switch or create a new one). Optional — when undefined, the
    *  "Switch account" item is hidden. */
   onSwitchAccount?: () => void
+  /** Open the "Get the App" sheet — Android APK + iOS PWA instructions. */
+  onGetApp?:      () => void
 }
 
 export default function AppDrawer({
   open, onClose, user, mode, activeAccountLabel, onModeToggle,
   onLogout, onEditProfile, onDeposit, onWithdraw, onHistory, onSwitchAccount,
+  onGetApp,
 }: Props) {
   const drawerRef = useRef<HTMLDivElement>(null)
 
@@ -156,6 +159,18 @@ export default function AppDrawer({
           <Section title="Display">
             <FullscreenItem onClose={onClose} />
           </Section>
+
+          {onGetApp && (
+            <Section title="Install">
+              <Item
+                icon="📱"
+                label="Get the App"
+                sub="Android APK · iOS Home Screen"
+                badge="new"
+                onClick={() => { onGetApp(); onClose() }}
+              />
+            </Section>
+          )}
 
           <Section title="Help">
             <Item icon="❓" label="Help Center" sub="How contracts work · FAQ" badge="soon" />
