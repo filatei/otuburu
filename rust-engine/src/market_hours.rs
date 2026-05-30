@@ -1,15 +1,11 @@
 //! Market-hours gating for live feeds and trade entry.
 //!
 //! Each instrument class has its own session:
-//!   - **Crypto** (BTC/ETH)               → 24/7. Always open.
-//!   - **Synthetic** (BOOM/CRASH)         → 24/7. We control the generator.
-//!   - **FX** (EUR/USD, GBP/USD)          → Sun 21:00 UTC → Fri 21:00 UTC
-//!                                          (Sydney open through NY close).
-//!   - **Metals** (XAU/XAG)               → Same as FX (interbank spot is a
-//!                                          bullion-bank product on the same
-//!                                          venues as FX).
-//!   - **US indices** (SPX/DJI/NDX)       → 13:30 UTC → 20:00 UTC weekdays
-//!                                          only. We ignore pre/post hours.
+//! - **Crypto** (BTC/ETH) → 24/7. Always open.
+//! - **Synthetic** (BOOM/CRASH) → 24/7. We control the generator.
+//! - **FX** (EUR/USD, GBP/USD) → Sun 21:00 UTC → Fri 21:00 UTC (Sydney open through NY close).
+//! - **Metals** (XAU/XAG) → Same as FX (interbank spot is a bullion-bank product on the same venues as FX).
+//! - **US indices** (SPX/DJI/NDX) → 13:30 UTC → 20:00 UTC weekdays only. We ignore pre/post hours.
 //!
 //! Used in two places:
 //!   1. The Yahoo / Alpaca / metals fetchers skip dispatching ticks when
