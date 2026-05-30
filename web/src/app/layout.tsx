@@ -30,8 +30,17 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  themeColor:   '#0d0d0d',
-  colorScheme:  'dark',
+  // Two themeColor entries — browsers pick the matching one based on the OS
+  // colour scheme. Affects the address-bar tint on Android Chrome and the
+  // PWA status bar on iOS standalone.
+  themeColor:   [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)',  color: '#0d0d0d' },
+  ],
+  // Advertise both schemes so the browser knows we have a light style and
+  // doesn't force the dark UA stylesheet on form controls when the OS is
+  // in light mode.
+  colorScheme:  'light dark',
   width:        'device-width',
   initialScale: 1,
   maximumScale: 1,

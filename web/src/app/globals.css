@@ -4,10 +4,51 @@
 
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
 
+/* ── Theme tokens ────────────────────────────────────────────────────────────
+   Every colour the app uses goes through these CSS variables. The values in
+   :root are the dark-mode defaults; the @media (prefers-color-scheme: light)
+   block below overrides them so the app follows the OS appearance — MT5
+   mobile and most native apps work the same way.
+
+   Brand/up/down stay in the same hue across modes (they carry semantic
+   meaning) but their lightness is tuned for legibility on each background:
+   brand reads as a richer mustard on white, green/red are slightly deeper
+   to keep contrast ratio comfortable.
+
+   To force a mode regardless of OS (future enhancement), add
+   `<html data-theme="light">` or `dark` in layout.tsx and add the same
+   variables under `[data-theme="light"]` / `[data-theme="dark"]` selectors. */
 :root {
-  --color-up:    #22c55e;   /* green  — rise / long  */
-  --color-down:  #ef4444;   /* red    — fall / short */
-  --color-brand: #EAB308;   /* yellow — brand accent */
+  /* Neutrals — dark mode */
+  --c-surface: #0d0d0d;   /* main page background */
+  --c-panel:   #141414;   /* cards, sticky headers, modal bodies */
+  --c-border:  #242424;   /* dividers, input outlines */
+  --c-muted:   #3a3a3a;   /* disabled, progress-track */
+  --c-text:    #f0f0f0;   /* primary copy */
+  --c-dim:     #888888;   /* secondary copy, labels */
+
+  /* Semantic — same in both modes */
+  --c-up:      #22c55e;   /* green: rise / long / win */
+  --c-down:    #ef4444;   /* red:   fall / short / loss */
+  --c-brand:   #EAB308;   /* yellow: brand accent */
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --c-surface: #ffffff;
+    --c-panel:   #f6f6f7;
+    --c-border:  #e3e3e6;
+    --c-muted:   #c2c2c8;
+    --c-text:    #18181b;
+    --c-dim:     #6b6b73;
+
+    /* Slightly darker hues read better on white. Pure #EAB308 yellow
+       on white fails WCAG AA contrast for small text; #b07c08 reads
+       as a rich gold on white without losing identity. */
+    --c-up:    #16a34a;
+    --c-down:  #dc2626;
+    --c-brand: #b07c08;
+  }
 }
 
 * {
@@ -17,8 +58,8 @@
 }
 
 html, body {
-  background: #0d0d0d;
-  color: #e0e0e0;
+  background: var(--c-surface);
+  color: var(--c-text);
   font-family: 'Inter', sans-serif;
   height: 100%;
   /* Use dvh on mobile so the bottom nav sits above the browser chrome */
@@ -36,13 +77,14 @@ html, body {
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: #141414; }
-::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 2px; }
+::-webkit-scrollbar-track { background: var(--c-panel); }
+::-webkit-scrollbar-thumb { background: var(--c-muted); border-radius: 2px; }
 
 .num { font-family: 'JetBrains Mono', monospace; }
 
-/* Pulse animation for live tick */
-@keyframes flash-up   { 0%,100% { color: #f0f0f0; } 50% { color: #22c55e; } }
-@keyframes flash-down { 0%,100% { color: #f0f0f0; } 50% { color: #ef4444; } }
+/* Pulse animation for live tick. Uses var() so the resting colour matches
+   the active theme; the flash colour stays semantic. */
+@keyframes flash-up   { 0%,100% { color: var(--c-text); } 50% { color: var(--c-up);   } }
+@keyframes flash-down { 0%,100% { color: var(--c-text); } 50% { color: var(--c-down); } }
 .flash-up   { animation: flash-up   0.3s ease; }
 .flash-down { animation: flash-down 0.3s ease; }

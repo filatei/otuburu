@@ -4,16 +4,20 @@ const config: Config = {
   content: ['./src/**/*.{js,ts,jsx,tsx,mdx}'],
   theme: {
     extend: {
+      // All colour tokens reference CSS variables defined in globals.css so
+      // the same Tailwind classes (bg-panel, text-text, etc.) automatically
+      // pick up the light/dark palette via @media (prefers-color-scheme).
+      // No theme switcher logic needed — the OS preference drives it.
       colors: {
-        surface: '#0d0d0d',
-        panel:   '#141414',
-        border:  '#242424',
-        muted:   '#3a3a3a',
-        text:    '#f0f0f0',
-        dim:     '#888888',
-        up:      '#22c55e',   // green  — rise / long
-        down:    '#ef4444',   // red    — fall / short
-        brand:   '#EAB308',   // yellow — dominant brand accent
+        surface: 'var(--c-surface)',
+        panel:   'var(--c-panel)',
+        border:  'var(--c-border)',
+        muted:   'var(--c-muted)',
+        text:    'var(--c-text)',
+        dim:     'var(--c-dim)',
+        up:      'var(--c-up)',      // rise / long
+        down:    'var(--c-down)',    // fall / short
+        brand:   'var(--c-brand)',   // dominant brand accent
       },
       fontFamily: {
         mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
