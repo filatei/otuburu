@@ -23,25 +23,26 @@ log "Pulling images..."
 cd "${BACKEND}"
 docker compose pull --quiet
 
-# ── 2. Evict any stale containers holding our ports ──────────────────────────
-log "Clearing stale port bindings..."
-for port in 8082 8083; do
-  cid=$(docker ps --filter "publish=${port}" -q 2>/dev/null || true)
-  if [ -n "${cid}" ]; then
-    log "  Stopping container ${cid} (was holding :${port})"
-    docker stop "${cid}" >/dev/null 2>&1 || true
-    docker rm   "${cid}" >/dev/null 2>&1 || true
-  fi
-done
-
-# ── 3. Restart containers ────────────────────────────────────────────────────
+# ── 2. Restart containers ────────────────────────────────────────────────────
+#
+# `--force-recreate` makes compose handle stop + remove + create as one
+# atomic per-container operation. That replaces the old hand-rolled
+# port-eviction loop that used to live here — the loop raced with
+# `compose up`, hitting "removal of container X is already in progress"
+# whenever a container we'd just `docker rm`'d hadn't finished cleaning
+# up before compose tried to recreate it. The eviction loop existed as a
+# workaround for a Docker <24 bug where compose wouldn't reclaim ports
+# from stopped-but-not-removed containers; that's been fixed for years.
+#
+# `--remove-orphans` still drops any container compose no longer owns
+# (so removed services don't leak across deploys).
 log "Starting services..."
-docker compose up -d --remove-orphans
+docker compose up -d --force-recreate --remove-orphans
 
-# ── 4. Prune old images ──────────────────────────────────────────────────────
+# ── 3. Prune old images ──────────────────────────────────────────────────────
 docker image prune -f --filter "until=24h" >/dev/null 2>&1 || true
 
-# ── 5. Install Apache vhost + reload ─────────────────────────────────────────
+# ── 4. Install Apache vhost + reload ─────────────────────────────────────────
 log "Configuring Apache..."
 VHOST_SRC="${BACKEND}/infra/otuburu.torama.money.conf"
 VHOST_DST="/etc/apache2/sites-available/otuburu.conf"
@@ -68,7 +69,7 @@ else
   log "  sudo apache2ctl configtest && sudo systemctl reload apache2"
 fi
 
-# ── 6. Health checks ─────────────────────────────────────────────────────────
+# ── 5. Health checks ─────────────────────────────────────────────────────────
 log "Waiting for services..."
 sleep 5
 
