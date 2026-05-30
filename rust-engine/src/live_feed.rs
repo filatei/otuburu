@@ -1026,7 +1026,11 @@ async fn fetch_alpaca_crypto_bars(
     secret_key: &str,
 ) -> Option<std::collections::HashMap<String, Vec<crate::ohlc::Candle>>> {
     // URL-encode slashes (same trick as the live quotes fetcher).
-    let encoded = pairs.iter().map(|p| p.replace('/', "%2F")).collect::<Vec<_>>().join(",");
+    let encoded = pairs
+        .iter()
+        .map(|p| p.replace('/', "%2F"))
+        .collect::<Vec<_>>()
+        .join(",");
     let url = format!(
         "https://data.alpaca.markets/v1beta3/crypto/us/bars?symbols={encoded}&timeframe={timeframe}&start={}&limit=10000",
         start.format("%Y-%m-%dT%H:%M:%SZ")
@@ -1074,10 +1078,11 @@ fn spawn_alpaca_crypto_history_refresh(
     secret_key: String,
 ) {
     tokio::spawn(async move {
-        let pairs: Vec<&'static str> =
-            ALPACA_CRYPTO_HISTORY_MAP.iter().map(|(p, _)| *p).collect();
-        let pair_to_internal: std::collections::HashMap<&str, &str> =
-            ALPACA_CRYPTO_HISTORY_MAP.iter().map(|(p, s)| (*p, *s)).collect();
+        let pairs: Vec<&'static str> = ALPACA_CRYPTO_HISTORY_MAP.iter().map(|(p, _)| *p).collect();
+        let pair_to_internal: std::collections::HashMap<&str, &str> = ALPACA_CRYPTO_HISTORY_MAP
+            .iter()
+            .map(|(p, s)| (*p, *s))
+            .collect();
         let mut interval = time::interval(Duration::from_secs(HISTORY_REFRESH_SECS));
         interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
