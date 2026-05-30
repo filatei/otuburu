@@ -58,7 +58,7 @@ const INDEX_HALF_SPREAD_PCT: f64 = 0.0005;
 // match what users see on Exness/IG/etc. within a few cents. The trade-off:
 // exchangerate.host's free tier doesn't carry historical time-series, so the
 // chart's history backfill still comes from Yahoo futures (GC=F/SI=F). That
-// creates a small step (~\$20 for gold) at the boundary between historical
+// creates a small step (~$20 for gold) at the boundary between historical
 // candles and the first live tick. Acceptable until we move to a paid feed.
 
 const EXCHANGERATE_METALS_URL: &str =
@@ -116,7 +116,7 @@ fn spawn_metals_spot(state: SharedState, client: Arc<reqwest::Client>, cadence_m
             }
             if let Some((xau, xag)) = last {
                 dispatch(&state, mid_to_tick("cryXAUUSD", xau, GOLD_HALF_SPREAD_PCT)).await;
-                dispatch(&state, mid_to_tick("XAGUSD",    xag, SILVER_HALF_SPREAD_PCT)).await;
+                dispatch(&state, mid_to_tick("XAGUSD", xag, SILVER_HALF_SPREAD_PCT)).await;
             }
         }
     });
@@ -461,7 +461,7 @@ pub fn start(state: SharedState) {
     // keep the rate-limit footprint low. Pulled every 5 seconds because retail
     // doesn't need millisecond-level metal ticks and the free tier doesn't
     // like aggressive polling. See the spawn_metals_spot block above for the
-    // story on why we moved off Yahoo futures (GC=F/SI=F was \$20 above spot
+    // story on why we moved off Yahoo futures (GC=F/SI=F was $20 above spot
     // because of cost-of-carry, made our prices look wrong vs every other
     // CFD broker).
     spawn_metals_spot(state.clone(), client.clone(), 5_000);
