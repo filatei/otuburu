@@ -72,10 +72,53 @@ pub fn default_contract_specs() -> HashMap<String, ContractSpec> {
                 leverage: 50,
             },
         ),
+        // ── Altcoins (Binance + Bybit median, 24/7) ───────────────────────
+        // Same leverage as BTC/ETH (50x). Contract size 1.0 → users specify
+        // notional in coin units. Fractional-spot UX makes this fine even
+        // for high-priced symbols (SOL ~$160 → $50 buys 0.31 SOL).
+        (
+            "crySOLUSD",
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 50,
+            },
+        ),
+        (
+            "cryDOGEUSD",
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 50,
+            },
+        ),
+        (
+            "cryXRPUSD",
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 50,
+            },
+        ),
+        (
+            "cryADAUSD",
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 50,
+            },
+        ),
         (
             "cryXAUUSD",
             ContractSpec {
                 contract_size: 1.0, // 1 troy-ounce per lot
+                leverage: 20,
+            },
+        ),
+        (
+            // PAXG (Pax Gold) — ERC-20 token backed 1:1 by physical gold,
+            // trades 24/7 on crypto venues (vs. XAU/USD which is FX-gated
+            // Sat-Sun). Fed from Alpaca crypto API. Same underlying as XAU
+            // so we mirror the leverage cap.
+            "cryPAXGUSD",
+            ContractSpec {
+                contract_size: 1.0, // 1 PAXG = 1 troy oz of gold
                 leverage: 20,
             },
         ),

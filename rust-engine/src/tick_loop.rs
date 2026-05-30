@@ -21,7 +21,16 @@ pub fn start(state: SharedState) {
 
     // ── Per-symbol tick tasks (synthetic) ────────────────────────────────────
     // Skip symbols that are handled by live_feed to avoid duplicate ticks.
-    const LIVE_SYMBOLS: &[&str] = &["cryBTCUSD", "cryETHUSD", "cryXAUUSD"];
+    const LIVE_SYMBOLS: &[&str] = &[
+        "cryBTCUSD",
+        "cryETHUSD",
+        "crySOLUSD",
+        "cryDOGEUSD",
+        "cryXRPUSD",
+        "cryADAUSD",
+        "cryXAUUSD",
+        "cryPAXGUSD",
+    ];
     for mut gen in default_generators()
         .into_iter()
         .filter(|g| !LIVE_SYMBOLS.contains(&g.symbol()))

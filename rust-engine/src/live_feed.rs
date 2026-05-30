@@ -210,7 +210,144 @@ async fn fetch_alpaca_quotes(
     Some(result)
 }
 
-// ── Binance book ticker ───────────────────────────────────────────────────────
+// ── Alpaca crypto quotes (PAXG/USD and other 24/7 crypto pairs) ─────────────
+//
+// Separate endpoint from the stock quotes — Alpaca splits crypto onto
+// `/v1beta3/crypto/us/`. Auth headers are identical to the stock endpoint
+// (APCA-API-KEY-ID / APCA-API-SECRET-KEY) so we reuse the same env vars
+// already required for SPX/DJI/NDX.
+//
+// Symbol format is BASE/QUOTE — e.g. "PAXG/USD", "BTC/USD". The URL takes
+// a comma-separated list but the slashes need to be URL-encoded (%2F)
+// because they're path-sensitive otherwise.
+
+/// Internal symbol id → Alpaca crypto pair (with slash).
+const ALPACA_CRYPTO_MAP: &[(&str, &str)] = &[("cryPAXGUSD", "PAXG/USD")];
+
+async fn fetch_alpaca_crypto(
+    client: &reqwest::Client,
+    pairs: &[&str],
+    key_id: &str,
+    secret_key: &str,
+) -> Option<std::collections::HashMap<String, (f64, f64)>> {
+    // URL-encode the slashes so the API treats the whole CSV as one query
+    // param instead of splitting on '/'.
+    let encoded = pairs
+        .iter()
+        .map(|p| p.replace('/', "%2F"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let url = format!(
+        "https://data.alpaca.markets/v1beta3/crypto/us/latest/quotes?symbols={encoded}"
+    );
+    let resp = client
+        .get(&url)
+        .header("APCA-API-KEY-ID", key_id)
+        .header("APCA-API-SECRET-KEY", secret_key)
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    // Crypto endpoint returns the same `{ quotes: { sym: { bp, ap, ... } } }`
+    // shape as the stock one, so reuse AlpacaQuotesResp/AlpacaQuote.
+    let body: AlpacaQuotesResp = resp.json().await.ok()?;
+    let result = body
+        .quotes
+        .into_iter()
+        .filter_map(|(sym, q)| {
+            if q.bid_price > 0.0 && q.ask_price > q.bid_price {
+                Some((sym, (q.bid_price, q.ask_price)))
+            } else {
+                None
+            }
+        })
+        .collect();
+    Some(result)
+}
+
+/// Spawn a polling task for one or more Alpaca crypto pairs. Mirrors
+/// `spawn_alpaca_indices` but pointed at the crypto endpoint. Crypto markets
+/// are 24/7 so no market-hours gate is needed — `is_open` for cryPAXGUSD
+/// always returns true.
+fn spawn_alpaca_crypto(
+    state: SharedState,
+    client: Arc<reqwest::Client>,
+    key_id: String,
+    secret_key: String,
+    cadence_ms: u64,
+) {
+    tokio::spawn(async move {
+        let pairs: Vec<&'static str> = ALPACA_CRYPTO_MAP.iter().map(|(_, p)| *p).collect();
+        // Pair-to-internal lookup so we don't string-walk on each tick.
+        let pair_to_internal: std::collections::HashMap<&str, &str> =
+            ALPACA_CRYPTO_MAP.iter().map(|(s, p)| (*p, *s)).collect();
+        let last: Arc<Mutex<std::collections::HashMap<String, (f64, f64)>>> =
+            Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let mut interval = time::interval(Duration::from_millis(cadence_ms));
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await;
+            match fetch_alpaca_crypto(&client, &pairs, &key_id, &secret_key).await {
+                Some(quotes) if !quotes.is_empty() => {
+                    let mut last_w = last.lock().await;
+                    for (pair, ba) in quotes {
+                        last_w.insert(pair, ba);
+                    }
+                }
+                Some(_) => {
+                    warn!("alpaca crypto fetch returned 0 usable quotes");
+                }
+                None => {
+                    let have_last = !last.lock().await.is_empty();
+                    if have_last {
+                        warn!("alpaca crypto fetch failed — using last known");
+                    } else {
+                        warn!(
+                            "alpaca crypto fetch failed — no prices yet, PAXG silent until first success"
+                        );
+                    }
+                }
+            }
+
+            let snapshot = last.lock().await.clone();
+            for (pair, (bid, ask)) in snapshot {
+                if let Some(internal) = pair_to_internal.get(pair.as_str()) {
+                    dispatch(&state, make_tick(internal, bid, ask)).await;
+                }
+            }
+        }
+    });
+}
+
+// ── Binance + Bybit (multi-source crypto aggregation) ───────────────────────
+//
+// Both venues are polled in parallel each tick. When both respond, we publish
+// the median (= simple average for n=2) of the bids and asks. If exactly one
+// responds we publish that one. If neither responds we stay silent — the
+// staleness check in the order path then rejects new orders, which is the
+// right behaviour during a real venue outage.
+//
+// Why this matters: a single-venue feed is a single point of failure for our
+// house book. Binance had a SOL flash crash in Q3 2024 that a Bybit-aware
+// median would have largely ignored. Median across two top-tier venues is
+// the cheapest meaningful protection we can ship.
+//
+// Symbol convention: every supported pair uses the same `{BASE}USDT` ticker
+// on both venues, so one map drives everything.
+
+/// Internal symbol id → Binance/Bybit pair (same string for both venues).
+const CRYPTO_MULTI_VENUE_SYMBOLS: &[(&str, &str)] = &[
+    ("cryBTCUSD", "BTCUSDT"),
+    ("cryETHUSD", "ETHUSDT"),
+    ("crySOLUSD", "SOLUSDT"),
+    ("cryDOGEUSD", "DOGEUSDT"),
+    ("cryXRPUSD", "XRPUSDT"),
+    ("cryADAUSD", "ADAUSDT"),
+];
 
 #[derive(serde::Deserialize)]
 struct BinanceBookTicker {
@@ -220,10 +357,7 @@ struct BinanceBookTicker {
     ask_price: String,
 }
 
-async fn fetch_binance(
-    client: &reqwest::Client,
-    pair: &str, // e.g. "BTCUSDT"
-) -> Option<(f64, f64)> {
+async fn fetch_binance(client: &reqwest::Client, pair: &str) -> Option<(f64, f64)> {
     let url = format!("https://api.binance.com/api/v3/ticker/bookTicker?symbol={pair}");
     let resp = client
         .get(&url)
@@ -239,6 +373,123 @@ async fn fetch_binance(
     } else {
         None
     }
+}
+
+// Bybit v5 spot tickers endpoint. Public, no auth. Response shape:
+//   { retCode: 0, result: { list: [{ symbol, bid1Price, ask1Price, ... }] } }
+#[derive(serde::Deserialize)]
+struct BybitTickersResp {
+    #[serde(rename = "retCode")]
+    ret_code: i32,
+    result: BybitResult,
+}
+
+#[derive(serde::Deserialize)]
+struct BybitResult {
+    list: Vec<BybitTicker>,
+}
+
+#[derive(serde::Deserialize)]
+struct BybitTicker {
+    #[serde(rename = "bid1Price")]
+    bid_price: String,
+    #[serde(rename = "ask1Price")]
+    ask_price: String,
+}
+
+async fn fetch_bybit(client: &reqwest::Client, pair: &str) -> Option<(f64, f64)> {
+    let url =
+        format!("https://api.bybit.com/v5/market/tickers?category=spot&symbol={pair}");
+    let resp = client
+        .get(&url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .ok()?;
+    let body: BybitTickersResp = resp.json().await.ok()?;
+    if body.ret_code != 0 {
+        return None;
+    }
+    let t = body.result.list.into_iter().next()?;
+    let bid: f64 = t.bid_price.parse().ok()?;
+    let ask: f64 = t.ask_price.parse().ok()?;
+    if bid > 0.0 && ask > bid {
+        Some((bid, ask))
+    } else {
+        None
+    }
+}
+
+/// Spawn a multi-venue polling task for one internal crypto symbol.
+/// Polls Binance and Bybit in parallel every `cadence_ms`. Median when both
+/// respond, single-venue fallback when one fails, silent when both fail.
+fn spawn_multi_source_crypto(
+    state: SharedState,
+    client: Arc<reqwest::Client>,
+    internal_symbol: &'static str,
+    pair: &'static str,
+    cadence_ms: u64,
+) {
+    tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_millis(cadence_ms));
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+        // Lightweight outage counter so we don't spam the log when a venue
+        // goes down for an extended period. We log on the transition, not
+        // every tick.
+        let mut binance_down = false;
+        let mut bybit_down = false;
+
+        loop {
+            interval.tick().await;
+
+            let (bin, byb) =
+                tokio::join!(fetch_binance(&client, pair), fetch_bybit(&client, pair));
+
+            // Transition logging — flag the first failure and the first
+            // recovery after a failure run. Mid-run silence keeps logs
+            // useful during a sustained outage.
+            match (bin.is_some(), binance_down) {
+                (false, false) => {
+                    warn!(symbol = internal_symbol, pair, "binance fetch failed");
+                    binance_down = true;
+                }
+                (true, true) => {
+                    tracing::info!(symbol = internal_symbol, pair, "binance recovered");
+                    binance_down = false;
+                }
+                _ => {}
+            }
+            match (byb.is_some(), bybit_down) {
+                (false, false) => {
+                    warn!(symbol = internal_symbol, pair, "bybit fetch failed");
+                    bybit_down = true;
+                }
+                (true, true) => {
+                    tracing::info!(symbol = internal_symbol, pair, "bybit recovered");
+                    bybit_down = false;
+                }
+                _ => {}
+            }
+
+            let aggregated = match (bin, byb) {
+                (Some((bb, ba)), Some((yb, ya))) => {
+                    // n=2 → median == average. Same formula scales for
+                    // future venues if we use sort-and-pick-middle.
+                    Some(((bb + yb) / 2.0, (ba + ya) / 2.0))
+                }
+                (Some(only), None) | (None, Some(only)) => Some(only),
+                (None, None) => None,
+            };
+
+            if let Some((bid, ask)) = aggregated {
+                dispatch(&state, make_tick(internal_symbol, bid, ask)).await;
+            }
+            // else: both venues down → silent. Frontend sees the tick age
+            // out, the order path's freshness check rejects new orders.
+            // This is intentional — we never want to publish a synthetic
+            // price during a real outage.
+        }
+    });
 }
 
 // ── Yahoo Finance (XAU/USD via spot pair XAUUSD=X) ──────────────────────────
@@ -474,10 +725,12 @@ pub fn start(state: SharedState) {
             .expect("reqwest client build failed"),
     );
 
-    // BTC/USD — 500 ms (Binance bookTicker, real bid/ask)
-    spawn_binance(state.clone(), client.clone(), "BTCUSDT", "cryBTCUSD", 500);
-    // ETH/USD — 500 ms (Binance bookTicker, real bid/ask)
-    spawn_binance(state.clone(), client.clone(), "ETHUSDT", "cryETHUSD", 500);
+    // Multi-venue crypto feed (Binance + Bybit, median bid/ask). Covers
+    // BTC, ETH, SOL, DOGE, XRP, ADA — all polled in parallel at 500 ms
+    // cadence. See CRYPTO_MULTI_VENUE_SYMBOLS for the symbol map.
+    for (internal, pair) in CRYPTO_MULTI_VENUE_SYMBOLS {
+        spawn_multi_source_crypto(state.clone(), client.clone(), internal, pair, 500);
+    }
 
     // Gold + silver — exchangerate.host spot, both fetched in one request to
     // keep the rate-limit footprint low. Pulled every 5 seconds because retail
@@ -495,8 +748,17 @@ pub fn start(state: SharedState) {
     let alpaca_key = std::env::var("APCA_API_KEY_ID").unwrap_or_default();
     let alpaca_secret = std::env::var("APCA_API_SECRET_KEY").unwrap_or_default();
     if !alpaca_key.is_empty() && !alpaca_secret.is_empty() {
-        tracing::info!("alpaca creds present — using Alpaca for SPX/DJI/NDX");
+        tracing::info!("alpaca creds present — using Alpaca for SPX/DJI/NDX + PAXG/USD");
         spawn_alpaca_indices(
+            state.clone(),
+            client.clone(),
+            alpaca_key.clone(),
+            alpaca_secret.clone(),
+            1_000,
+        );
+        // PAXG (tokenized gold) — Alpaca crypto endpoint, 24/7. Same creds
+        // as the stock data plan; their free tier covers crypto data.
+        spawn_alpaca_crypto(
             state.clone(),
             client.clone(),
             alpaca_key,
@@ -505,7 +767,8 @@ pub fn start(state: SharedState) {
         );
     } else {
         tracing::warn!(
-            "alpaca creds missing — falling back to Yahoo for SPX/DJI/NDX (delayed quotes)"
+            "alpaca creds missing — falling back to Yahoo for SPX/DJI/NDX (delayed quotes); \
+             PAXG/USD will be silent until APCA_API_KEY_ID + APCA_API_SECRET_KEY are set"
         );
         spawn_yahoo(
             state.clone(),
@@ -547,39 +810,6 @@ pub fn start(state: SharedState) {
     spawn_yahoo_history_refresh(state.clone(), client.clone(), "SPY", "SPX");
     spawn_yahoo_history_refresh(state.clone(), client.clone(), "DIA", "DJI");
     spawn_yahoo_history_refresh(state, client, "QQQ", "NDX");
-}
-
-fn spawn_binance(
-    state: SharedState,
-    client: Arc<reqwest::Client>,
-    pair: &'static str,
-    symbol: &'static str,
-    cadence_ms: u64,
-) {
-    tokio::spawn(async move {
-        let last: Arc<Mutex<Option<(f64, f64)>>> = Arc::new(Mutex::new(None));
-        let mut interval = time::interval(Duration::from_millis(cadence_ms));
-        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
-
-        loop {
-            interval.tick().await;
-
-            match fetch_binance(&client, pair).await {
-                Some(ba) => {
-                    *last.lock().await = Some(ba);
-                }
-                None => {
-                    warn!(pair, "binance fetch failed — using last known price");
-                }
-            }
-
-            if let Some((bid, ask)) = *last.lock().await {
-                let tick = make_tick(symbol, bid, ask);
-                dispatch(&state, tick).await;
-            }
-            // If still None (first fetch failed), skip this cycle silently.
-        }
-    });
 }
 
 /// Generic Yahoo Finance chart-endpoint feeder. Polls every `cadence_ms`,

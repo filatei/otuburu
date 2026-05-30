@@ -39,7 +39,16 @@ pub enum SymbolClass {
 /// so a config mistake doesn't accidentally freeze a real market.
 pub fn classify(internal_symbol: &str) -> SymbolClass {
     match internal_symbol {
-        "cryBTCUSD" | "cryETHUSD" => SymbolClass::Crypto,
+        // cryPAXGUSD is gold by underlying but lives on crypto venues, so
+        // it inherits the 24/7 calendar — the whole reason we added it.
+        // Altcoins (SOL, DOGE, XRP, ADA) trade 24/7 like BTC/ETH.
+        "cryBTCUSD"
+        | "cryETHUSD"
+        | "cryPAXGUSD"
+        | "crySOLUSD"
+        | "cryDOGEUSD"
+        | "cryXRPUSD"
+        | "cryADAUSD" => SymbolClass::Crypto,
         "cryXAUUSD" | "XAGUSD" => SymbolClass::Metal,
         "SPX" | "DJI" | "NDX" => SymbolClass::Index,
         "frxEURUSD" | "frxGBPUSD" => SymbolClass::Forex,
@@ -158,6 +167,11 @@ mod tests {
         assert_eq!(classify("frxGBPUSD"), SymbolClass::Forex);
         assert_eq!(classify("cryBTCUSD"), SymbolClass::Crypto);
         assert_eq!(classify("cryETHUSD"), SymbolClass::Crypto);
+        assert_eq!(classify("cryPAXGUSD"), SymbolClass::Crypto);
+        assert_eq!(classify("crySOLUSD"), SymbolClass::Crypto);
+        assert_eq!(classify("cryDOGEUSD"), SymbolClass::Crypto);
+        assert_eq!(classify("cryXRPUSD"), SymbolClass::Crypto);
+        assert_eq!(classify("cryADAUSD"), SymbolClass::Crypto);
         assert_eq!(classify("cryXAUUSD"), SymbolClass::Metal);
         assert_eq!(classify("XAGUSD"), SymbolClass::Metal);
         assert_eq!(classify("SPX"), SymbolClass::Index);
