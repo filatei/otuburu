@@ -94,14 +94,9 @@ func main() {
 	protected := r.Group("/", auth.JWTMiddleware())
 	protected.GET("/auth/me", authH.Me)
 
-	walletH := wallet.NewHandler(pool, hd, mailer)
-	protected.GET("/wallet/deposit-address", walletH.DepositAddress)
-	protected.GET("/wallet/balance", walletH.Balance)
-	protected.GET("/wallet/transactions", walletH.Transactions)
-	protected.POST("/wallet/withdraw", walletH.Withdraw)
-	// Phase-2 multi-account: list + create real accounts for a user.
-	protected.GET("/wallet/accounts", walletH.ListAccounts)
-	protected.POST("/wallet/accounts", walletH.CreateAccount)
+	// paystackH built below — wired into walletH so the NGN withdraw path
+	// can call /transferrecipient + /transfer. Nil-safe; NGN endpoints
+	// 503 cleanly when Paystack isn't configured.
 
 	// ── Payment channels ──────────────────────────────────────────────────────
 	// Seed rate from env; RateFetcher will override with live data within seconds.
@@ -118,6 +113,19 @@ func main() {
 
 	paystackH := payments.New(pool, rateFetcher, mailer)
 	paystackH.RegisterRoutes(protected, r.Group("/"))
+
+	// Now that paystackH exists, build the wallet handler and register routes.
+	walletH := wallet.NewHandler(pool, hd, mailer, paystackH)
+	protected.GET("/wallet/deposit-address", walletH.DepositAddress)
+	protected.GET("/wallet/balance", walletH.Balance)
+	protected.GET("/wallet/transactions", walletH.Transactions)
+	protected.POST("/wallet/withdraw", walletH.Withdraw)
+	// Phase-2 multi-account: list + create real accounts for a user.
+	protected.GET("/wallet/accounts", walletH.ListAccounts)
+	protected.POST("/wallet/accounts", walletH.CreateAccount)
+	// Phase-3 NGN withdrawal: account verification + bank payout.
+	protected.GET("/wallet/ngn/resolve", walletH.ResolveNGNAccount)
+	protected.POST("/wallet/withdraw/ngn", walletH.WithdrawNGN)
 
 	// Expose the rate map read-only for the frontend's deposit-preview UI
 	// (Phase 3 NGN/GHS/KES picker). One endpoint, no auth required — the

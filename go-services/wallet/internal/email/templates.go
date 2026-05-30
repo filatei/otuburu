@@ -83,6 +83,65 @@ func WithdrawalSentHTML(name string, usdAmount float64, address string, txid str
 	return fmt.Sprintf(sharedShell, body, sharedFooter)
 }
 
+// NGNWithdrawalInitiatedHTML — confirmation that an NGN bank payout has
+// been initiated via Paystack. Final "sent" notification comes when the
+// bank confirms credit (Paystack webhook transfer.success).
+func NGNWithdrawalInitiatedHTML(name string, usdAmount, ngnAmount float64, accountName, accountNumber, bankCode string) string {
+	masked := "•••• " + lastFourEmail(accountNumber)
+	body := fmt.Sprintf(`
+<h2 style="color:#EAB308;margin:0 0 4px;font-size:18px">Withdrawal initiated</h2>
+<p style="color:#aaa;margin:0 0 16px">Hi %s, your payout to your Nigerian bank account is on its way.</p>
+<div style="background:#141414;border:1px solid #2a2a2a;border-radius:8px;padding:16px;margin:0 0 16px">
+  <p style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:2px;margin:0 0 6px">You'll receive</p>
+  <p style="font-size:26px;font-weight:700;color:#fff;margin:0 0 4px">₦%s</p>
+  <p style="color:#aaa;font-size:12px;margin:0 0 12px">($%.2f debited)</p>
+  <p style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:2px;margin:0 0 6px">Destination</p>
+  <p style="font-size:14px;color:#fff;margin:0 0 4px">%s</p>
+  <p style="color:#aaa;font-size:12px;margin:0">%s &middot; %s</p>
+</div>
+<p style="color:#aaa;font-size:13px;margin:0 0 12px">Bank credit usually arrives within minutes. We'll send a confirmation email once your bank has received the funds.</p>`,
+		htmlEscape(name),
+		formatThousands(ngnAmount),
+		usdAmount,
+		htmlEscape(accountName),
+		htmlEscape(masked),
+		htmlEscape(bankCode),
+	)
+	return fmt.Sprintf(sharedShell, body, sharedFooter)
+}
+
+// formatThousands turns 81632.50 into "81,632.50" — small helper to keep
+// NGN amounts readable in the email body.
+func formatThousands(n float64) string {
+	whole := int64(n)
+	frac := int64((n - float64(whole)) * 100)
+	if frac < 0 {
+		frac = -frac
+	}
+	s := fmt.Sprintf("%d", whole)
+	if whole < 0 {
+		s = s[1:]
+	}
+	out := ""
+	for i, c := range []byte(s) {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out += ","
+		}
+		out += string(c)
+	}
+	if whole < 0 {
+		out = "-" + out
+	}
+	return fmt.Sprintf("%s.%02d", out, frac)
+}
+
+func lastFourEmail(s string) string {
+	if len(s) <= 4 {
+		return s
+	}
+	return s[len(s)-4:]
+}
+
 // WithdrawalRejectedHTML — notification that a withdrawal was declined and
 // the reserved balance has been credited back to the account.
 func WithdrawalRejectedHTML(name string, usdAmount float64, reason string) string {

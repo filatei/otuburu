@@ -76,17 +76,59 @@ CREATE TABLE IF NOT EXISTS ledger (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── Withdrawal requests ───────────────────────────────────────────────────────
+-- ── Withdrawal requests (USDT TRC20 OR NGN bank payout) ──────────────────────
+-- `channel` discriminates: 'usdt' uses the legacy address column for the
+-- TRC20 destination; 'ngn_bank' uses the bank_* columns for a Paystack
+-- transfer. The amount column stays denominated in USD — the engine always
+-- debits the user account in USD; conversion to NGN happens at Paystack
+-- payout time and is recorded in fx_quotes (re-using the deposit table).
 CREATE TABLE IF NOT EXISTS withdrawals (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id    UUID NOT NULL REFERENCES users(id),
     account_id UUID NOT NULL REFERENCES accounts(id),
-    amount     NUMERIC(20,6) NOT NULL CHECK (amount > 0),
-    address    TEXT NOT NULL,            -- destination TRC20 address
-    status     TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','sent','rejected')),
-    txid       TEXT,
+    amount     NUMERIC(20,6) NOT NULL CHECK (amount > 0), -- USD debited
+    address    TEXT,                     -- TRC20 destination (channel='usdt')
+    status     TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','sent','rejected','failed')),
+    txid       TEXT,                     -- on-chain hash OR Paystack transfer code
+    channel    TEXT NOT NULL DEFAULT 'usdt' CHECK (channel IN ('usdt','ngn_bank')),
+    -- NGN bank payout fields (NULL for channel='usdt')
+    bank_code           TEXT,            -- Paystack bank code (e.g. '058' for GTBank)
+    bank_account_number TEXT,
+    bank_account_name   TEXT,            -- verified via /bank/resolve
+    ngn_amount          NUMERIC(20,2),   -- gross NGN sent to the bank
+    paystack_recipient  TEXT,            -- recipient_code returned by /transferrecipient
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Migration block: idempotent. Re-runs of schema.sql apply cleanly on installs
+-- that pre-date the channel + bank_* columns.
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='withdrawals' AND column_name='channel'
+    ) THEN
+        ALTER TABLE withdrawals ADD COLUMN channel TEXT NOT NULL DEFAULT 'usdt';
+        ALTER TABLE withdrawals ADD COLUMN bank_code TEXT;
+        ALTER TABLE withdrawals ADD COLUMN bank_account_number TEXT;
+        ALTER TABLE withdrawals ADD COLUMN bank_account_name TEXT;
+        ALTER TABLE withdrawals ADD COLUMN ngn_amount NUMERIC(20,2);
+        ALTER TABLE withdrawals ADD COLUMN paystack_recipient TEXT;
+        ALTER TABLE withdrawals ADD CONSTRAINT withdrawals_channel_check
+            CHECK (channel IN ('usdt','ngn_bank'));
+    END IF;
+    -- Old status check didn't include 'failed'; rewrite if needed
+    BEGIN
+        ALTER TABLE withdrawals DROP CONSTRAINT IF EXISTS withdrawals_status_check;
+        ALTER TABLE withdrawals ADD CONSTRAINT withdrawals_status_check
+            CHECK (status IN ('pending','approved','sent','rejected','failed'));
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+    -- Old `address NOT NULL` is wrong for NGN payouts
+    BEGIN
+        ALTER TABLE withdrawals ALTER COLUMN address DROP NOT NULL;
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+END $$;
 
 -- ── Seen deposits (prevent double-crediting) ─────────────────────────────────
 CREATE TABLE IF NOT EXISTS seen_deposits (
