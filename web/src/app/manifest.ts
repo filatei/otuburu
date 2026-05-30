@@ -23,24 +23,39 @@ export default function manifest(): MetadataRoute.Manifest {
     categories:       ['finance', 'business'],
     lang:             'en',
     dir:              'ltr',
-    // Icons are .webp output from `@capacitor/assets generate` — supported by
-    // every browser we target (Android Chrome 36+, iOS Safari 14+, all of
-    // Firefox/Edge). Smaller files than PNG with the same visual quality at
-    // these icon sizes. The 'maskable' variants would require a separate
-    // padded source to be safe inside Android's circular/squircle masks;
-    // skipping until we generate them properly.
+    // PNG icons served from web/public/icons/. The 'any' purpose variants
+    // are the standard rectangular icons; the 'maskable' variants are
+    // pre-padded to survive Android's circular / squircle / teardrop
+    // adaptive-icon masks (the launcher crops 20 % off each edge).
+    //
+    // NOTE: web/icons/*.webp is a separate directory — that's the source
+    // pool @capacitor/assets reads from when baking icons into the
+    // Android/iOS native shells. Those files are NOT served at /icons/*
+    // because they live outside web/public/.
     icons: [
       {
-        src:     '/icons/icon-192.webp',
+        src:     '/icons/icon-192.png',
         sizes:   '192x192',
-        type:    'image/webp',
+        type:    'image/png',
         purpose: 'any',
       },
       {
-        src:     '/icons/icon-512.webp',
+        src:     '/icons/icon-512.png',
         sizes:   '512x512',
-        type:    'image/webp',
+        type:    'image/png',
         purpose: 'any',
+      },
+      {
+        src:     '/icons/icon-192-maskable.png',
+        sizes:   '192x192',
+        type:    'image/png',
+        purpose: 'maskable',
+      },
+      {
+        src:     '/icons/icon-512-maskable.png',
+        sizes:   '512x512',
+        type:    'image/png',
+        purpose: 'maskable',
       },
     ],
   }
