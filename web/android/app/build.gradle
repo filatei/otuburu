@@ -30,6 +30,25 @@ repositories {
     }
 }
 
+// Force the legacy kotlin-stdlib-jdk7/jdk8 modules up to 1.8.22 so they
+// match the kotlin-stdlib pulled in by the modern dependencies. Since
+// Kotlin 1.8, the jdk7/jdk8 extensions live INSIDE kotlin-stdlib itself —
+// the standalone jdk7/jdk8 artifacts at 1.8.0+ are empty compatibility
+// shims. Without this forced resolution, Capacitor's cordova-android-plugins
+// shim brings in jdk7/jdk8 at 1.6.21 (which still has real classes), and
+// :app:checkReleaseDuplicateClasses fails on every kotlin.* class that
+// also lives in stdlib 1.8.22.
+configurations.all {
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == 'org.jetbrains.kotlin'
+                && (details.requested.name == 'kotlin-stdlib-jdk7'
+                    || details.requested.name == 'kotlin-stdlib-jdk8')) {
+            details.useVersion '1.8.22'
+            details.because 'Avoid duplicate classes with kotlin-stdlib 1.8+'
+        }
+    }
+}
+
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
