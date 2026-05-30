@@ -1,7 +1,11 @@
 ext {
     minSdkVersion = 23
-    compileSdkVersion = 35
-    targetSdkVersion = 35
+    // Bumped to 36 because Capacitor 8 transitively pulls androidx.browser:1.9.0
+    // which requires API 36. targetSdk follows compileSdk so we opt into the
+    // Android 16 runtime behaviour as well — Android 15 (API 35) and Android 16
+    // (API 36) are both supported here.
+    compileSdkVersion = 36
+    targetSdkVersion = 36
     androidxActivityVersion = '1.9.2'
     androidxAppCompatVersion = '1.7.0'
     androidxCoordinatorLayoutVersion = '1.2.0'
