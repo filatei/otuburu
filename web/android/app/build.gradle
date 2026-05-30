@@ -16,10 +16,40 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+
+    // Release signing reads from gradle properties (set in
+    // ~/.gradle/gradle.properties — NEVER committed) or env vars, in that
+    // order. If neither is set, signingConfigs.release stays empty and
+    // assembleRelease still completes — it just produces the unsigned
+    // variant. That keeps the build green on machines without keystore
+    // access (CI smoke tests, fresh clones) while letting release builders
+    // produce a signed APK with no extra ceremony.
+    signingConfigs {
+        release {
+            def kFile  = project.findProperty('OTUBURU_RELEASE_KEYSTORE')      ?: System.getenv('OTUBURU_RELEASE_KEYSTORE')
+            def kPwd   = project.findProperty('OTUBURU_RELEASE_STORE_PASSWORD') ?: System.getenv('OTUBURU_RELEASE_STORE_PASSWORD')
+            def kAlias = project.findProperty('OTUBURU_RELEASE_KEY_ALIAS')      ?: System.getenv('OTUBURU_RELEASE_KEY_ALIAS')
+            def kKeyPw = project.findProperty('OTUBURU_RELEASE_KEY_PASSWORD')   ?: System.getenv('OTUBURU_RELEASE_KEY_PASSWORD')
+            if (kFile && kPwd && kAlias && kKeyPw) {
+                storeFile     file(kFile)
+                storePassword kPwd
+                keyAlias      kAlias
+                keyPassword   kKeyPw
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Attach the signing config only when it was populated above.
+            // Without this check, AGP errors out on missing storeFile when
+            // a contributor without the keystore tries to ./gradlew
+            // assembleRelease.
+            if (signingConfigs.release.storeFile != null) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
