@@ -36,6 +36,19 @@ pub fn start(state: SharedState) {
             loop {
                 interval.tick().await;
 
+                // Don't keep cached prices fresh once the underlying venue
+                // is closed. Without this, the synthetic generator runs
+                // 24/7 even for FX/metals/indices — refreshing the cached
+                // tick every cadence and defeating the order-path
+                // freshness check (and the frontend's freshness-based
+                // "market open" inference). The live_feed dispatcher
+                // already gates real-quote symbols this way; synthetic
+                // ticks need the same treatment so weekend orders on
+                // frxEURUSD etc. are actually blocked.
+                if !crate::market_hours::is_open(gen.symbol(), chrono::Utc::now()) {
+                    continue;
+                }
+
                 let tick = gen.next_tick();
                 debug!(symbol = %tick.symbol, mid = tick.mid, "tick");
 

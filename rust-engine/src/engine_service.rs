@@ -262,7 +262,20 @@ impl EngineService for EngineServiceImpl {
         let mut inner = self.state.inner.write().await;
 
         // ── Pre-trade risk checks ───────────────────────────────────────────
-        let now_ms = chrono::Utc::now().timestamp_millis();
+        let now = chrono::Utc::now();
+        // Market-hours gate. Refuse new exposure on a closed venue even if
+        // the cached price still looks fresh — synthetic generators stop
+        // emitting once `is_open` returns false, but on a closed-edge tick
+        // there can still be a brief window where the cached value passes
+        // the freshness threshold.
+        if !crate::market_hours::is_open(&r.symbol, now) {
+            return Ok(Response::new(PlaceOrderResponse {
+                result: Some(crate::pb::place_order_response::Result::Error(
+                    format!("market closed for {}", r.symbol),
+                )),
+            }));
+        }
+        let now_ms = now.timestamp_millis();
         let last_tick = inner
             .books
             .values()
@@ -391,7 +404,15 @@ impl EngineService for EngineServiceImpl {
         let mut inner = self.state.inner.write().await;
 
         // ── Pre-trade risk checks ───────────────────────────────────────────
-        let now_ms = chrono::Utc::now().timestamp_millis();
+        let now = chrono::Utc::now();
+        if !crate::market_hours::is_open(&r.symbol, now) {
+            return Ok(Response::new(PlaceBinaryResponse {
+                result: Some(crate::pb::place_binary_response::Result::Error(
+                    format!("market closed for {}", r.symbol),
+                )),
+            }));
+        }
+        let now_ms = now.timestamp_millis();
         let last_ts = inner
             .books
             .values()
@@ -455,7 +476,16 @@ impl EngineService for EngineServiceImpl {
         let mut inner = self.state.inner.write().await;
 
         // ── Pre-trade risk checks ───────────────────────────────────────────
-        let now_ms = chrono::Utc::now().timestamp_millis();
+        let now = chrono::Utc::now();
+        if !crate::market_hours::is_open(&r.symbol, now) {
+            return Ok(Response::new(PlaceSpotResponse {
+                result: Some(crate::pb::place_spot_response::Result::Error(format!(
+                    "market closed for {}",
+                    r.symbol
+                ))),
+            }));
+        }
+        let now_ms = now.timestamp_millis();
         let last_ts = inner
             .books
             .values()

@@ -147,4 +147,39 @@ mod tests {
         assert!(is_open("BOOM500", at(2026, 5, 30, 3, 0)));
         assert!(is_open("CRASH1000", at(2026, 5, 31, 12, 0)));
     }
+
+    /// Regression for the Saturday-EUR/USD bug: every symbol we actually
+    /// route into the order path must be classified correctly. A new
+    /// frx*/cry* pair added without an entry here would default to
+    /// `Crypto` (always-open) and silently allow weekend trades.
+    #[test]
+    fn known_symbols_classify_correctly() {
+        assert_eq!(classify("frxEURUSD"), SymbolClass::Forex);
+        assert_eq!(classify("frxGBPUSD"), SymbolClass::Forex);
+        assert_eq!(classify("cryBTCUSD"), SymbolClass::Crypto);
+        assert_eq!(classify("cryETHUSD"), SymbolClass::Crypto);
+        assert_eq!(classify("cryXAUUSD"), SymbolClass::Metal);
+        assert_eq!(classify("XAGUSD"), SymbolClass::Metal);
+        assert_eq!(classify("SPX"), SymbolClass::Index);
+        assert_eq!(classify("DJI"), SymbolClass::Index);
+        assert_eq!(classify("NDX"), SymbolClass::Index);
+        assert_eq!(classify("BOOM1000"), SymbolClass::Synthetic);
+        assert_eq!(classify("CRASH500"), SymbolClass::Synthetic);
+    }
+
+    /// End-to-end of the bug that prompted this module's existence:
+    /// EUR/USD on a Saturday morning UTC must be closed. If this fails
+    /// it likely means the symbol-id convention drifted between the
+    /// classifier and what the order path actually sends.
+    #[test]
+    fn eurusd_closed_on_saturday() {
+        let sat_morning = at(2026, 5, 30, 10, 0);
+        assert!(!is_open("frxEURUSD", sat_morning));
+        assert!(!is_open("frxGBPUSD", sat_morning));
+        assert!(!is_open("cryXAUUSD", sat_morning));
+        assert!(!is_open("XAGUSD", sat_morning));
+        // Crypto and synthetic stay open.
+        assert!(is_open("cryBTCUSD", sat_morning));
+        assert!(is_open("BOOM500", sat_morning));
+    }
 }
