@@ -1086,15 +1086,8 @@ fn spawn_alpaca_crypto_history_refresh(
 
             // ── D1 history (2y daily candles, persisted) ─────────────────────
             let d1_start = chrono::Utc::now() - chrono::Duration::days(2 * 365);
-            match fetch_alpaca_crypto_bars(
-                &client,
-                &pairs,
-                "1Day",
-                d1_start,
-                &key_id,
-                &secret_key,
-            )
-            .await
+            match fetch_alpaca_crypto_bars(&client, &pairs, "1Day", d1_start, &key_id, &secret_key)
+                .await
             {
                 Some(by_pair) if !by_pair.is_empty() => {
                     let mut inner = state.inner.write().await;
@@ -1125,7 +1118,9 @@ fn spawn_alpaca_crypto_history_refresh(
                                     }
                                 }
                             });
-                            inner.ohlc.seed(internal, crate::ohlc::Resolution::D1, candles);
+                            inner
+                                .ohlc
+                                .seed(internal, crate::ohlc::Resolution::D1, candles);
                         }
                     }
                 }
@@ -1134,15 +1129,8 @@ fn spawn_alpaca_crypto_history_refresh(
 
             // ── H1 history (60d hourly candles, in-memory only) ──────────────
             let h1_start = chrono::Utc::now() - chrono::Duration::days(60);
-            match fetch_alpaca_crypto_bars(
-                &client,
-                &pairs,
-                "1Hour",
-                h1_start,
-                &key_id,
-                &secret_key,
-            )
-            .await
+            match fetch_alpaca_crypto_bars(&client, &pairs, "1Hour", h1_start, &key_id, &secret_key)
+                .await
             {
                 Some(by_pair) if !by_pair.is_empty() => {
                     let mut inner = state.inner.write().await;
@@ -1157,7 +1145,9 @@ fn spawn_alpaca_crypto_history_refresh(
                                 count = candles.len(),
                                 "seeded H1 history from Alpaca crypto"
                             );
-                            inner.ohlc.seed(internal, crate::ohlc::Resolution::H1, candles);
+                            inner
+                                .ohlc
+                                .seed(internal, crate::ohlc::Resolution::H1, candles);
                         }
                     }
                 }
