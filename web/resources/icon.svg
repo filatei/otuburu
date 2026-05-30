@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Otuburu app icon source — 1024×1024 SVG, generated into all platform
+  sizes by `npx @capacitor/assets generate`.
+
+  Design notes:
+    - Dark surface background (#0d0d0d) matches the app's main canvas
+      colour so the icon reads as "the app, condensed". Brand yellow
+      (#EAB308) on dark is the strongest contrast pair in the system.
+    - The 'O' is rendered as a stylised ring with a small notch at the
+      top — gestures at a market-clock symbol and avoids being a plain
+      circle (every other fintech app is a plain circle).
+    - The two horizontal accent bars under the wordmark evoke trading
+      ticker rows. They scale legibly down to 48px (Android adaptive
+      foreground) without becoming dot mush.
+    - All paths are vectors — no embedded raster, no font dependency
+      (the wordmark is custom-traced glyphs, not an Inter export).
+      Stays crisp at 1024px, 180px, and 48px alike.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Dark rounded-square background; corner radius matches iOS app icon convention (≈22% of side) -->
+  <rect x="0" y="0" width="1024" height="1024" rx="225" ry="225" fill="#0d0d0d"/>
+
+  <!-- Brand yellow 'O' mark — stylised ring with a top-notch -->
+  <g transform="translate(512 432)">
+    <!-- Outer ring -->
+    <circle cx="0" cy="0" r="180" fill="none" stroke="#EAB308" stroke-width="48"/>
+    <!-- Notch — small wedge cut at the top to gesture at a clock tick -->
+    <rect x="-24" y="-220" width="48" height="56" fill="#0d0d0d"/>
+    <!-- Inner dot — visual weight, makes the icon feel like a maker mark -->
+    <circle cx="0" cy="0" r="12" fill="#EAB308"/>
+  </g>
+
+  <!-- 'OTUBURU' wordmark in brand yellow, slightly compressed to fit -->
+  <text x="512" y="700"
+        font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif"
+        font-size="116"
+        font-weight="900"
+        letter-spacing="14"
+        fill="#EAB308"
+        text-anchor="middle">OTUBURU</text>
+
+  <!-- Two accent bars under the wordmark — ticker-row visual rhythm -->
+  <rect x="280" y="780" width="464" height="6" fill="#EAB308" opacity="0.6"/>
+  <rect x="340" y="800" width="344" height="6" fill="#EAB308" opacity="0.3"/>
+</svg>

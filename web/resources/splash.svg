@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Otuburu splash screen source — 2732×2732 SVG (iPad Pro 12.9" is the
+  largest target). Capacitor's asset generator scales/letterboxes this
+  to every required platform size + dark/light variant.
+
+  Visual: dark surface with the OTUBURU wordmark + accent bars
+  centred. Matches the app's cold-start canvas so the user perceives
+  zero flash between splash and the first React paint.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2732 2732" width="2732" height="2732">
+  <rect x="0" y="0" width="2732" height="2732" fill="#0d0d0d"/>
+
+  <g transform="translate(1366 1200)">
+    <circle cx="0" cy="0" r="200" fill="none" stroke="#EAB308" stroke-width="44"/>
+    <rect x="-24" y="-240" width="48" height="52" fill="#0d0d0d"/>
+    <circle cx="0" cy="0" r="12" fill="#EAB308"/>
+  </g>
+
+  <text x="1366" y="1580"
+        font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif"
+        font-size="120"
+        font-weight="900"
+        letter-spacing="18"
+        fill="#EAB308"
+        text-anchor="middle">OTUBURU</text>
+
+  <text x="1366" y="1650"
+        font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif"
+        font-size="28"
+        font-weight="600"
+        letter-spacing="8"
+        fill="#888888"
+        text-anchor="middle">SYNTHETIC · FRACTIONAL · 24/7</text>
+</svg>
