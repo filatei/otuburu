@@ -9,13 +9,16 @@ export const metadata: Metadata = {
   applicationName: 'Otuburu',
   manifest:    '/manifest.webmanifest',
   icons: {
+    // Browser tab icons. SVG is the modern primary; .webp variants are the
+    // raster fallback for ancient browsers that ignore SVG favicons.
+    // (@capacitor/assets generates webp only — generate PNG/apple-touch
+    // variants when we set up a proper iOS icon set; without them iOS
+    // home-screen install falls back to a screenshot of the page, which
+    // is ugly but not broken.)
     icon: [
       { url: '/favicon.svg', type: 'image/svg+xml' },
-      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
-    ],
-    apple: [
-      { url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+      { url: '/icons/icon-192.webp', sizes: '192x192', type: 'image/webp' },
+      { url: '/icons/icon-512.webp', sizes: '512x512', type: 'image/webp' },
     ],
     shortcut: '/favicon.svg',
   },

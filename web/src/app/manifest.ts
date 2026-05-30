@@ -23,30 +23,24 @@ export default function manifest(): MetadataRoute.Manifest {
     categories:       ['finance', 'business'],
     lang:             'en',
     dir:              'ltr',
+    // Icons are .webp output from `@capacitor/assets generate` — supported by
+    // every browser we target (Android Chrome 36+, iOS Safari 14+, all of
+    // Firefox/Edge). Smaller files than PNG with the same visual quality at
+    // these icon sizes. The 'maskable' variants would require a separate
+    // padded source to be safe inside Android's circular/squircle masks;
+    // skipping until we generate them properly.
     icons: [
       {
-        src:     '/icons/icon-192.png',
+        src:     '/icons/icon-192.webp',
         sizes:   '192x192',
-        type:    'image/png',
+        type:    'image/webp',
         purpose: 'any',
       },
       {
-        src:     '/icons/icon-512.png',
+        src:     '/icons/icon-512.webp',
         sizes:   '512x512',
-        type:    'image/png',
+        type:    'image/webp',
         purpose: 'any',
-      },
-      {
-        src:     '/icons/icon-192-maskable.png',
-        sizes:   '192x192',
-        type:    'image/png',
-        purpose: 'maskable',
-      },
-      {
-        src:     '/icons/icon-512-maskable.png',
-        sizes:   '512x512',
-        type:    'image/png',
-        purpose: 'maskable',
       },
     ],
   }
