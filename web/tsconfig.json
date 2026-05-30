@@ -16,5 +16,12 @@
     "paths": { "@/*": ["./src/*"] }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  // `capacitor.config.ts` is compiled by Capacitor's own ts-node when running
+  // `npx cap` commands; Next.js doesn't need it in its build graph and CI
+  // doesn't install `@capacitor/cli` (only local dev does), so include it in
+  // the Next.js tsc run and the build fails with "Cannot find module".
+  //
+  // The android/ and ios/ folders that `npx cap add` creates aren't TypeScript
+  // either — exclude them too so the Next.js build never wanders into them.
+  "exclude": ["node_modules", "capacitor.config.ts", "android", "ios", "out"]
 }
