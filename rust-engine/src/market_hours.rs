@@ -93,8 +93,8 @@ fn is_open_us_cash(now: DateTime<Utc>) -> bool {
         return false;
     }
     let minute_of_day = now.hour() * 60 + now.minute();
-    let open  = 13 * 60 + 30; // 13:30 UTC
-    let close = 20 * 60;      // 20:00 UTC
+    let open = 13 * 60 + 30; // 13:30 UTC
+    let close = 20 * 60; // 20:00 UTC
     (open..close).contains(&minute_of_day)
 }
 
