@@ -84,6 +84,12 @@ jobs:
   frontend:
     name: Build frontend
     runs-on: ubuntu-latest
+    # Must declare the same environment as the deploy job so that
+    # GOOGLE_CLIENT_ID (and any other Environment-scoped secret) is
+    # visible here. Without this, NEXT_PUBLIC_GOOGLE_CLIENT_ID gets
+    # baked into the bundle as an empty string and the AuthModal shows
+    # "NEXT_PUBLIC_GOOGLE_CLIENT_ID not set" to live visitors.
+    environment: staging
 
     steps:
       - uses: actions/checkout@v4
