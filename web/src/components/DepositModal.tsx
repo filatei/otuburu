@@ -55,13 +55,25 @@ export default function DepositModal({ user: _user, onClose, open = true }: Prop
     setPsLoading(true)
     setPsErr(null)
     try {
-      const res  = await authFetch(`${API_BASE}/payments/paystack/initiate`, {
+      const res = await authFetch(`${API_BASE}/payments/paystack/initiate`, {
         method: 'POST',
         body:   JSON.stringify({ amount_usd: usd }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? 'Payment initiation failed')
-      // Redirect to Paystack checkout in same tab
+      // Read as text first so we can give a useful error when the server
+      // returns HTML instead of JSON — this happens when Apache fails to
+      // proxy /payments/* and falls back to serving the static frontend
+      // (returns <!DOCTYPE html>...). Without this guard the user sees
+      // "Unexpected token '<'" which doesn't say what to fix.
+      const raw = await res.text()
+      const isHtml = raw.trimStart().startsWith('<')
+      if (isHtml) {
+        throw new Error(
+          `Server returned HTML (HTTP ${res.status}). The /payments/ ` +
+          `route may not be proxied to the wallet service — check Apache.`,
+        )
+      }
+      const data = raw ? JSON.parse(raw) : {}
+      if (!res.ok) throw new Error(data.error ?? `Payment initiation failed (HTTP ${res.status})`)
       window.location.href = data.authorization_url
     } catch (err: any) {
       setPsErr(err.message ?? 'Payment failed. Please try again.')
