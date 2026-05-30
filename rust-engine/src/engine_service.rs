@@ -270,9 +270,10 @@ impl EngineService for EngineServiceImpl {
         // the freshness threshold.
         if !crate::market_hours::is_open(&r.symbol, now) {
             return Ok(Response::new(PlaceOrderResponse {
-                result: Some(crate::pb::place_order_response::Result::Error(
-                    format!("market closed for {}", r.symbol),
-                )),
+                result: Some(crate::pb::place_order_response::Result::Error(format!(
+                    "market closed for {}",
+                    r.symbol
+                ))),
             }));
         }
         let now_ms = now.timestamp_millis();
@@ -407,9 +408,10 @@ impl EngineService for EngineServiceImpl {
         let now = chrono::Utc::now();
         if !crate::market_hours::is_open(&r.symbol, now) {
             return Ok(Response::new(PlaceBinaryResponse {
-                result: Some(crate::pb::place_binary_response::Result::Error(
-                    format!("market closed for {}", r.symbol),
-                )),
+                result: Some(crate::pb::place_binary_response::Result::Error(format!(
+                    "market closed for {}",
+                    r.symbol
+                ))),
             }));
         }
         let now_ms = now.timestamp_millis();
