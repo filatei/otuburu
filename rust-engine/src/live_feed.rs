@@ -46,34 +46,45 @@ const SILVER_HALF_SPREAD_PCT: f64 = 0.0020;
 /// spreads run 0.5–2 points on SPX (~3–10 bps); we sit at the tighter end.
 const INDEX_HALF_SPREAD_PCT: f64 = 0.0005;
 
-// ── Metals spot (XAU/XAG) via exchangerate.host ──────────────────────────────
+// ── Metals spot (XAU/XAG) via fawazahmed0/currency-api ──────────────────────
 //
-// exchangerate.host returns rates as "1 USD = X target" — so an XAU entry of
-// 0.000529 means 0.000529 troy ounces per USD, which inverts to ~$1890/oz.
-// We poll every 5 seconds and dispatch both gold and silver from the same
-// request so we minimise hits on the free tier (no API key required, but
-// they get cranky above ~20 req/sec sustained).
+// We started on exchangerate.host but they moved to a paid model in 2024 —
+// the free tier now returns HTTP 200 + `{ success: false, error: 101 }` for
+// every request without an access_key. Switched to fawazahmed0's CurrencyAPI
+// CDN which is community-maintained, Cloudflare-cached, no API key, no rate
+// limit. Used by hundreds of small fintech projects in production.
 //
-// Compared to Yahoo GC=F/SI=F: these are LBMA-derived spot prices, so they
-// match what users see on Exness/IG/etc. within a few cents. The trade-off:
-// exchangerate.host's free tier doesn't carry historical time-series, so the
-// chart's history backfill still comes from Yahoo futures (GC=F/SI=F). That
-// creates a small step (~$20 for gold) at the boundary between historical
-// candles and the first live tick. Acceptable until we move to a paid feed.
+// Response shape:
+//   {
+//     "date": "2026-05-30",
+//     "usd": { "xau": 0.000379, "xag": 0.0334, "eur": 0.92, ... }
+//   }
+//
+// Each value is "target units per 1 USD" — for XAU that means ounces per USD,
+// which we invert to "USD per ounce" (the price level users expect).
+//
+// IMPORTANT TRADE-OFF: this source refreshes once a day. Gold sits at the
+// previous day's close until the next midnight UTC. Levels are accurate
+// (matches what other CFD brokers show within a few dollars) but there's no
+// intraday tick — chart price line stays flat during the session.
+//
+// If the static feel becomes a problem, the realistic upgrade path is a
+// paid feed (GoldAPI.io ~$3/mo, paid exchangerate.host ~$10/mo, or Refinitiv
+// ~$2k/mo at the high end). The free options are all either daily-refresh
+// (this one) or COMEX futures (Yahoo GC=F, which sits +$20 above spot).
 
-const EXCHANGERATE_METALS_URL: &str =
-    "https://api.exchangerate.host/latest?base=USD&symbols=XAU,XAG";
+const METALS_URL: &str = "https://latest.currency-api.pages.dev/v1/currencies/usd.json";
 
 #[derive(serde::Deserialize)]
-struct ExchangerateResp {
-    rates: std::collections::HashMap<String, f64>,
+struct CurrencyApiResp {
+    usd: std::collections::HashMap<String, f64>,
 }
 
 /// Fetch spot XAU/USD and XAG/USD prices. Returns None on any failure;
 /// caller treats as "use last cached value".
-async fn fetch_exchangerate_metals(client: &reqwest::Client) -> Option<(f64, f64)> {
+async fn fetch_metals_spot(client: &reqwest::Client) -> Option<(f64, f64)> {
     let resp = client
-        .get(EXCHANGERATE_METALS_URL)
+        .get(METALS_URL)
         .timeout(Duration::from_secs(8))
         .send()
         .await
@@ -81,11 +92,11 @@ async fn fetch_exchangerate_metals(client: &reqwest::Client) -> Option<(f64, f64
     if !resp.status().is_success() {
         return None;
     }
-    let body: ExchangerateResp = resp.json().await.ok()?;
-    // The map returns USD→ccy. For XAU, the value is "ounces per USD" so we
-    // invert to "USD per ounce". Same for silver.
-    let xau_per_usd = body.rates.get("XAU").copied()?;
-    let xag_per_usd = body.rates.get("XAG").copied()?;
+    let body: CurrencyApiResp = resp.json().await.ok()?;
+    // Keys are lowercase ISO-4217-ish in this API (xau, xag, eur, ...). Each
+    // is "1 USD = X target", so for metals we invert to get "USD per ounce".
+    let xau_per_usd = body.usd.get("xau").copied()?;
+    let xag_per_usd = body.usd.get("xag").copied()?;
     if xau_per_usd <= 0.0 || xag_per_usd <= 0.0 {
         return None;
     }
@@ -93,7 +104,9 @@ async fn fetch_exchangerate_metals(client: &reqwest::Client) -> Option<(f64, f64
 }
 
 /// Spawn a polling task that dispatches gold AND silver ticks every
-/// `cadence_ms` from a single exchangerate.host fetch.
+/// `cadence_ms` from a single CDN fetch. Source updates only daily so most
+/// polls are CDN cache hits — fine to keep cadence aggressive for boot-time
+/// warm-up, even though intraday values won't change.
 fn spawn_metals_spot(state: SharedState, client: Arc<reqwest::Client>, cadence_ms: u64) {
     tokio::spawn(async move {
         let mut interval = time::interval(Duration::from_millis(cadence_ms));
@@ -102,7 +115,7 @@ fn spawn_metals_spot(state: SharedState, client: Arc<reqwest::Client>, cadence_m
 
         loop {
             interval.tick().await;
-            match fetch_exchangerate_metals(&client).await {
+            match fetch_metals_spot(&client).await {
                 Some(prices) => last = Some(prices),
                 None => {
                     if last.is_none() {
