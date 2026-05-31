@@ -126,6 +126,9 @@ func main() {
 	// Phase-3 NGN withdrawal: account verification + bank payout.
 	protected.GET("/wallet/ngn/resolve", walletH.ResolveNGNAccount)
 	protected.POST("/wallet/withdraw/ngn", walletH.WithdrawNGN)
+	// User-typed contact-us message → ADMIN_EMAIL(S). Auth required so
+	// admins know who sent it; in-memory 1/min rate limit per user.
+	protected.POST("/wallet/contact", walletH.Contact)
 
 	// Expose the rate map read-only for the frontend's deposit-preview UI
 	// (Phase 3 NGN/GHS/KES picker). One endpoint, no auth required — the

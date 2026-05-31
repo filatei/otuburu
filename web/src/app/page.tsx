@@ -18,6 +18,7 @@ import ProfileModal        from '@/components/ProfileModal'
 import AppDrawer           from '@/components/AppDrawer'
 import DepositModal        from '@/components/DepositModal'
 import GetAppModal         from '@/components/GetAppModal'
+import ContactModal        from '@/components/ContactModal'
 import SymbolActionsSheet     from '@/components/SymbolActionsSheet'
 import SymbolPropertiesModal  from '@/components/SymbolPropertiesModal'
 import AccountSwitcherSheet   from '@/components/AccountSwitcherSheet'
@@ -74,6 +75,7 @@ export default function TradingPage() {
   const [depositOpen,   setDepositOpen]   = useState(false)
   const [withdrawOpen,  setWithdrawOpen]  = useState(false)
   const [getAppOpen,    setGetAppOpen]    = useState(false)
+  const [contactOpen,   setContactOpen]   = useState(false)
   const [mobileTab,     setMobileTab]     = useState<MobileTab>('chart')
   /** Symbol whose MT5-style action sheet is currently open. null = closed. */
   const [actionsFor,    setActionsFor]    = useState<string | null>(null)
@@ -270,11 +272,18 @@ export default function TradingPage() {
             : undefined
         }
         onGetApp={() => setGetAppOpen(true)}
+        onContact={user ? () => setContactOpen(true) : undefined}
       />
 
       {/* "Get the App" sheet — Android APK + iOS PWA card. Always mounted
           (cheap, no API calls) so BottomSheet can animate close cleanly. */}
       <GetAppModal open={getAppOpen} onClose={() => setGetAppOpen(false)} />
+
+      {/* Contact-support sheet — only mounted when user is signed in
+          (backend requires auth). Same lifecycle pattern as DepositModal. */}
+      {user && (
+        <ContactModal open={contactOpen} onClose={() => setContactOpen(false)} user={user} />
+      )}
 
       {/* Phase 2 multi-account picker — list + switch + create. */}
       <AccountSwitcherSheet

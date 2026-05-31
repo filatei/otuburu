@@ -23,12 +23,14 @@ interface Props {
   onSwitchAccount?: () => void
   /** Open the "Get the App" sheet — Android APK + iOS PWA instructions. */
   onGetApp?:      () => void
+  /** Open the "Contact support" sheet — message form that emails admin. */
+  onContact?:     () => void
 }
 
 export default function AppDrawer({
   open, onClose, user, mode, activeAccountLabel, onModeToggle,
   onLogout, onEditProfile, onDeposit, onWithdraw, onHistory, onSwitchAccount,
-  onGetApp,
+  onGetApp, onContact,
 }: Props) {
   const drawerRef = useRef<HTMLDivElement>(null)
 
@@ -173,6 +175,9 @@ export default function AppDrawer({
           )}
 
           <Section title="Help">
+            {onContact && (
+              <Item icon="✉️" label="Contact us" sub="Email support directly" badge="live" onClick={() => { onContact(); onClose() }} />
+            )}
             <Item icon="❓" label="Help Center" sub="How contracts work · FAQ" badge="soon" />
             <Item icon="📜" label="Terms & Legal" sub="Risk disclosure · privacy"   badge="soon" />
           </Section>
