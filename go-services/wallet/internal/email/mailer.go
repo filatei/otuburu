@@ -12,6 +12,7 @@
 package email
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net/smtp"
@@ -90,12 +91,77 @@ func (m *Mailer) sendBlocking(to, subject, html string) {
 		auth = smtp.PlainAuth("", m.user, m.pass, m.host)
 	}
 
-	if err := smtp.SendMail(addr, auth, fromAddrOnly(m.from), []string{to}, []byte(msg.String())); err != nil {
+	// Manual SMTP dance so STARTTLS happens even when auth is nil.
+	//
+	// stdlib smtp.SendMail only initiates STARTTLS when auth != nil — a
+	// historical quirk. Gmail's SMTP relay on port 587 REQUIRES STARTTLS
+	// before accepting any payload; without it, the server closes the
+	// connection after EHLO and the client sees `EOF`. In IP-relay mode
+	// (auth=nil, since SMTP_PASS is empty), stdlib SendMail would never
+	// upgrade, every send would fail silently, and the user-visible
+	// 'contact us' / deposit-credited / withdrawal-status emails would
+	// quietly never arrive.
+	if err := m.sendSMTP(addr, auth, fromAddrOnly(m.from), to, []byte(msg.String())); err != nil {
 		slog.Warn("mailer: send failed",
 			"to", to, "subject", subject, "err", err)
 		return
 	}
 	slog.Info("mailer: sent", "to", to, "subject", subject)
+}
+
+// sendSMTP replaces stdlib smtp.SendMail with one that explicitly does
+// STARTTLS even when auth is nil. Otherwise identical to the stdlib path
+// (EHLO → optional STARTTLS → optional AUTH → MAIL FROM → RCPT TO →
+// DATA → QUIT).
+func (m *Mailer) sendSMTP(addr string, auth smtp.Auth, from, to string, msg []byte) error {
+	client, err := smtp.Dial(addr)
+	if err != nil {
+		return fmt.Errorf("dial: %w", err)
+	}
+	defer client.Close()
+
+	// EHLO before checking extensions. smtp.Dial does an initial EHLO
+	// already; Hello() here re-runs it with our own hostname for cleaner
+	// server-side logs, but it's optional.
+	if err := client.Hello("otuburu-wallet"); err != nil {
+		return fmt.Errorf("hello: %w", err)
+	}
+
+	// Upgrade to TLS when the server advertises STARTTLS. For
+	// smtp-relay.gmail.com:587 this is mandatory; the connection
+	// is closed silently if we skip it.
+	if ok, _ := client.Extension("STARTTLS"); ok {
+		cfg := &tls.Config{ServerName: m.host, MinVersion: tls.VersionTLS12}
+		if err := client.StartTLS(cfg); err != nil {
+			return fmt.Errorf("starttls: %w", err)
+		}
+	}
+
+	if auth != nil {
+		if ok, _ := client.Extension("AUTH"); ok {
+			if err := client.Auth(auth); err != nil {
+				return fmt.Errorf("auth: %w", err)
+			}
+		}
+	}
+
+	if err := client.Mail(from); err != nil {
+		return fmt.Errorf("mail from: %w", err)
+	}
+	if err := client.Rcpt(to); err != nil {
+		return fmt.Errorf("rcpt to: %w", err)
+	}
+	w, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("data: %w", err)
+	}
+	if _, err := w.Write(msg); err != nil {
+		return fmt.Errorf("write body: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("close body: %w", err)
+	}
+	return client.Quit()
 }
 
 // fromAddrOnly extracts the angle-bracketed address from a From header
