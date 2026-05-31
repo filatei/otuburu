@@ -10,7 +10,6 @@ import Chart             from '@/components/Chart'
 import TradePanel        from '@/components/TradePanel'
 import Positions         from '@/components/Positions'
 import MobileSymbolsTab  from '@/components/MobileSymbolsTab'
-import MobileChartTiles  from '@/components/MobileChartTiles'
 import MobilePositions   from '@/components/MobilePositions'
 import MobileTradeForm   from '@/components/MobileTradeForm'
 import AccountStatsPanel from '@/components/AccountStatsPanel'
@@ -371,23 +370,18 @@ export default function TradingPage() {
             />
           )}
           {mobileTab === 'chart' && (
-            <div className="h-full flex flex-col overflow-hidden">
-              <MobileChartTiles
-                symbol={selected}
+            // Pure-chart tab — no trade controls. MT-style: the chart is
+            // for charting; rise/fall/buy/sell live in the dedicated Trade
+            // tab (and the per-symbol actions sheet from the Symbols tab).
+            // Keeping the chart full-bleed makes timeframe + indicator
+            // analysis less cramped on small screens.
+            <div className="h-full overflow-hidden">
+              <Chart
+                candles={candles} lastTick={lastTick} symbol={selected}
                 info={selectedInfo}
-                lastTick={lastTick}
-                account={account}
                 accountId={accountId}
-                onTraded={handleTraded}
+                binaries={binaries} positions={positions} spots={spots} settledHistory={settledHistory}
               />
-              <div className="flex-1 overflow-hidden">
-                <Chart
-                  candles={candles} lastTick={lastTick} symbol={selected}
-                  info={selectedInfo}
-                  accountId={accountId}
-                  binaries={binaries} positions={positions} spots={spots} settledHistory={settledHistory}
-                />
-              </div>
             </div>
           )}
           {mobileTab === 'trade' && (

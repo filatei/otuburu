@@ -71,7 +71,12 @@ html, body {
    keep-out zones (left/right). Applied to fixed app chrome so content
    doesn't hide under the device hardware. */
 .safe-top    { padding-top:    env(safe-area-inset-top,    0px); }
-.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+/* Android WebViews often report env(safe-area-inset-bottom) as 0 even when
+ * the gesture-nav pill overlaps the bottom of the page. max() gives us a
+ * guaranteed 12px floor so the bottom tab bar isn't visually clipped under
+ * the Android system nav on devices using gesture navigation. iOS Safari
+ * already reports the inset correctly so this is a no-op there. */
+.safe-bottom { padding-bottom: max(env(safe-area-inset-bottom, 0px), 12px); }
 .safe-left   { padding-left:   env(safe-area-inset-left,   0px); }
 .safe-right  { padding-right:  env(safe-area-inset-right,  0px); }
 

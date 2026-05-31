@@ -74,6 +74,26 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
+	// CORS — same shape as wallet's middleware. Wildcard origin is fine here
+	// because:
+	//   (a) all sensitive routes are bearer-token authed (and a wildcard
+	//       CORS doesn't allow credentials/cookies anyway), and
+	//   (b) the Capacitor APK loads from the https://localhost origin,
+	//       which is the immediate reason CORS is needed at all — the same
+	//       header that satisfies it also satisfies any future native shell
+	//       (iOS uses capacitor://localhost). Mobile WebViews + cross-origin
+	//       fetches were silently 404'ing the symbol list with "0 SYMBOLS".
+	r.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	})
+
 	r.GET("/ws", hub.HandleUpgrade)
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})

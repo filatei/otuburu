@@ -26,7 +26,7 @@
 // cached shell). The next page open detects the new SW version, evicts
 // the old SHELL_CACHE, and re-fetches index.html — which then pulls in
 // the new chunk hashes via the new <script> tags.
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const SHELL_CACHE   = `otuburu-shell-${CACHE_VERSION}`;
 const STATIC_CACHE  = `otuburu-static-${CACHE_VERSION}`;
 
