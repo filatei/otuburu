@@ -21,7 +21,12 @@
  *   - Everything else: network-only.
  */
 
-const CACHE_VERSION = 'v1';
+// Bump this whenever a build-time change matters (env-var injection,
+// new chunks landing, anything where existing clients need to drop their
+// cached shell). The next page open detects the new SW version, evicts
+// the old SHELL_CACHE, and re-fetches index.html — which then pulls in
+// the new chunk hashes via the new <script> tags.
+const CACHE_VERSION = 'v2';
 const SHELL_CACHE   = `otuburu-shell-${CACHE_VERSION}`;
 const STATIC_CACHE  = `otuburu-static-${CACHE_VERSION}`;
 
