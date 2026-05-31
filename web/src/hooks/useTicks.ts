@@ -7,6 +7,41 @@ const WS_URL   = API_BASE.replace(/^http/, 'ws') + '/ws'
 
 const CANDLE_SECONDS = 5  // aggregate ticks into 5-second candles
 
+// localStorage key for the last-seen tick map. Hydrated on mount so a page
+// reload immediately shows the last known bid/ask for every symbol (greyed
+// out by MobileSymbolsTab when isMarketOpen returns false). Without this,
+// closed-market symbols show "—" until the engine sends a fresh tick — which
+// never happens for venues that are actually closed.
+const LAST_TICKS_KEY = 'otuburu.lastTicks.v1'
+/** How old a persisted tick can be before we discard it. 7 days covers
+ *  weekend gaps for FX/metals and long holiday periods for indices.
+ *  Anything older is probably misleading at render time. */
+const MAX_STALE_MS = 7 * 24 * 60 * 60 * 1000
+
+function hydrateTickCache(): Record<string, Tick> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = window.localStorage.getItem(LAST_TICKS_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, Tick>
+    const cutoff = Date.now() - MAX_STALE_MS
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([, t]) => t?.ts_ms != null && t.ts_ms > cutoff),
+    )
+  } catch {
+    return {}
+  }
+}
+
+function persistTickCache(ticks: Record<string, Tick>) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(LAST_TICKS_KEY, JSON.stringify(ticks))
+  } catch {
+    /* quota exhausted or storage disabled — silent, this is best-effort */
+  }
+}
+
 // onState is called whenever the gateway pushes a {"type":"state",...} message.
 // useAccount passes its applyState here so it receives engine state via WebSocket
 // instead of polling GET /api/state every second.
@@ -15,10 +50,25 @@ export function useTicks(
   onState?:  (data: unknown) => void,
   accountId?: string,
 ) {
-  const [lastTick,  setLastTick]  = useState<Tick | null>(null)
-  const [allTicks,  setAllTicks]  = useState<Record<string, Tick>>({})
+  // Hydrate the per-symbol tick cache from localStorage on first render.
+  // Closed-market symbols (FX/metals/indices on weekends, indices outside
+  // 13:30-20:00 UTC) won't receive ticks from the engine until their
+  // session reopens, so without hydration the row reads "—" instead of
+  // last known price.
+  const [lastTick,  setLastTick]  = useState<Tick | null>(() => hydrateTickCache()[symbol] ?? null)
+  const [allTicks,  setAllTicks]  = useState<Record<string, Tick>>(() => hydrateTickCache())
   const [candles,   setCandles]   = useState<Candle[]>([])
   const [connected, setConnected] = useState(false)
+
+  // Persist the latest tick map whenever it grows. We throttle implicitly
+  // via the state update batching — each setState triggers at most one
+  // localStorage write per render cycle.
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
+    persistTimerRef.current = setTimeout(() => persistTickCache(allTicks), 500)
+    return () => { if (persistTimerRef.current) clearTimeout(persistTimerRef.current) }
+  }, [allTicks])
 
   const wsRef      = useRef<WebSocket | null>(null)
   const candleRef  = useRef<Candle | null>(null)
@@ -92,7 +142,11 @@ export function useTicks(
   useEffect(() => {
     setCandles([])
     candleRef.current = null
-    setLastTick(null)
+    // Don't wipe lastTick to null — instead seed from the hydrated cache for
+    // the new symbol. If a fresh tick arrives the WS handler will replace
+    // it; if the market is closed the user still sees the last known price
+    // (greyed by the renderer's wall-clock check) instead of "—".
+    setLastTick(allTicks[symbol] ?? null)
     connect(accountId)
     return () => {
       retryTimer.current && clearTimeout(retryTimer.current)

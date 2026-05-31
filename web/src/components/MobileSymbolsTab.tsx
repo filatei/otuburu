@@ -130,17 +130,23 @@ function SymbolRow({ info, tick, range, pnl, selected, onSelect }: {
             placeholders). */}
         <div className="flex flex-col items-end gap-0.5">
           {!tick ? (
-            <span className="text-sm text-dim">—</span>
-          ) : !open ? (
-            // CLOSED chip + greyed-out last bid/ask so users still see the
-            // level. Trade buttons in the Trade form are gated independently.
-            <div className="flex flex-col items-end gap-0.5">
+            // No tick ever cached — first-time visitor + closed market.
+            // Still show a CLOSED hint instead of bare "—".
+            !open ? (
               <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-muted/40 text-dim">
                 Closed
               </span>
-              <span className="num text-[11px] text-dim/70">
-                {formatPrice(info, tick.bid, dp)} / {formatPrice(info, tick.ask, dp)}
-              </span>
+            ) : (
+              <span className="text-sm text-dim">—</span>
+            )
+          ) : !open ? (
+            // Closed market with a cached last tick (typical case after the
+            // first session). Show full-size bid/ask tiles but in a muted
+            // tone so they read as historical, not live. Trade buttons in
+            // the Trade form are gated independently via is_open.
+            <div className="flex items-center gap-3 num opacity-60 grayscale">
+              <PriceTile label="Bid" value={formatPrice(info, tick.bid, dp)} flash={null} colour="down" />
+              <PriceTile label="Ask" value={formatPrice(info, tick.ask, dp)} flash={null} colour="up" />
             </div>
           ) : (
             <div className="flex items-center gap-3 num">
