@@ -23,26 +23,42 @@ log "Pulling images..."
 cd "${BACKEND}"
 docker compose pull --quiet
 
-# ── 2. Restart containers ────────────────────────────────────────────────────
+# ── 2. Clean up orphan containers from interrupted prior deploys ────────────
+#
+# When `docker compose up` is killed mid-recreate (e.g. SSH timeout, OOM),
+# Docker can leave a container with a hashed-prefix fallback name like
+# `<hash>_backend-engine-1`. Subsequent compose runs see the canonical
+# name as free and try to take it, but Docker's name-uniqueness check
+# also matches the prefixed orphan's underlying name and rejects with:
+#   "Conflict. The container name '/<hash>_backend-engine-1' is already
+#    in use by container <id>. You have to remove (or rename)..."
+# This loop kills any container whose name CONTAINS one of our service
+# suffixes — covers both clean and hash-prefixed orphans. Safe because
+# compose recreates them all anyway in step 3.
+log "Cleaning up orphan containers from previous deploys..."
+for svc in postgres engine gateway wallet staking; do
+  orphans=$(docker ps -aq --filter "name=backend-${svc}-1" 2>/dev/null || true)
+  if [ -n "${orphans}" ]; then
+    log "  Removing ${svc} container(s): ${orphans}"
+    docker rm -f ${orphans} >/dev/null 2>&1 || true
+  fi
+done
+
+# ── 3. Restart containers ────────────────────────────────────────────────────
 #
 # `--force-recreate` makes compose handle stop + remove + create as one
-# atomic per-container operation. That replaces the old hand-rolled
-# port-eviction loop that used to live here — the loop raced with
-# `compose up`, hitting "removal of container X is already in progress"
-# whenever a container we'd just `docker rm`'d hadn't finished cleaning
-# up before compose tried to recreate it. The eviction loop existed as a
-# workaround for a Docker <24 bug where compose wouldn't reclaim ports
-# from stopped-but-not-removed containers; that's been fixed for years.
+# atomic per-container operation. Combined with the orphan cleanup above,
+# this handles both clean redeploys and recovery from interrupted ones.
 #
 # `--remove-orphans` still drops any container compose no longer owns
 # (so removed services don't leak across deploys).
 log "Starting services..."
 docker compose up -d --force-recreate --remove-orphans
 
-# ── 3. Prune old images ──────────────────────────────────────────────────────
+# ── 4. Prune old images ──────────────────────────────────────────────────────
 docker image prune -f --filter "until=24h" >/dev/null 2>&1 || true
 
-# ── 4. Install Apache vhost + reload ─────────────────────────────────────────
+# ── 5. Install Apache vhost + reload ─────────────────────────────────────────
 log "Configuring Apache..."
 VHOST_SRC="${BACKEND}/infra/otuburu.torama.money.conf"
 VHOST_DST="/etc/apache2/sites-available/otuburu.conf"
@@ -69,7 +85,7 @@ else
   log "  sudo apache2ctl configtest && sudo systemctl reload apache2"
 fi
 
-# ── 5. Health checks ─────────────────────────────────────────────────────────
+# ── 6. Health checks ─────────────────────────────────────────────────────────
 log "Waiting for services..."
 sleep 5
 
