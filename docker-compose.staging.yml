@@ -86,6 +86,14 @@ services:
       SMTP_USER:         ${SMTP_USER:-}
       SMTP_PASS:         ${SMTP_PASS:-}
       SMTP_FROM:         ${SMTP_FROM:-Otuburu <noreply@torama.money>}
+      # Admin email recipient(s) — used by /wallet/contact (user→admin
+      # contact form) and any other admin notification flows. ADMIN_EMAILS
+      # takes priority (comma-separated for a team); ADMIN_EMAIL is the
+      # single-recipient fallback. Both already populated in .env from
+      # GitHub Secrets, but they need to be passed through here for the
+      # container to see them.
+      ADMIN_EMAIL:       ${ADMIN_EMAIL:-filatei@gtsng.com}
+      ADMIN_EMAILS:      ${ADMIN_EMAILS:-filatei@gtsng.com}
     ports:
       - "127.0.0.1:8083:8083"
     networks:
