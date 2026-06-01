@@ -70,7 +70,13 @@ html, body {
 /* Safe area insets — iOS notch (top), home indicator (bottom), landscape
    keep-out zones (left/right). Applied to fixed app chrome so content
    doesn't hide under the device hardware. */
-.safe-top    { padding-top:    env(safe-area-inset-top,    0px); }
+/* Same Android-WebView quirk affects the TOP — env(safe-area-inset-top) is
+ * frequently reported as 0 even when the status bar overlays the WebView,
+ * causing the header to be clipped (hamburger + OTUBURU sit flush against
+ * the device's top edge under the clock/battery icons). 24px floor clears
+ * the typical Android status bar height (24-28dp). iOS Safari reports the
+ * inset correctly so this is a no-op there. */
+.safe-top    { padding-top:    max(env(safe-area-inset-top,    0px), 24px); }
 /* Android WebViews often report env(safe-area-inset-bottom) as 0 even when
  * the gesture-nav pill overlaps the bottom of the page. max() gives us a
  * guaranteed 12px floor so the bottom tab bar isn't visually clipped under
