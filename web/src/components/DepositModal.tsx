@@ -24,8 +24,11 @@ export default function DepositModal({ user: _user, onClose, open = true }: Prop
   const [addrErr,    setAddrErr]    = useState<string | null>(null)
   const [copied,     setCopied]     = useState(false)
 
-  // Paystack tab state
-  const [amountUSD,    setAmountUSD]    = useState('')
+  // Paystack tab state — primary input is NGN (what Nigerian users actually
+  // think in); USD equivalent is shown below + sent to the backend after
+  // conversion via the live customer rate from /payments/rates.
+  const [amountNGN,    setAmountNGN]    = useState('')
+  const [ngnRate,      setNgnRate]      = useState<number | null>(null) // NGN per 1 USD (customer rate, includes 2% spread)
   const [psLoading,    setPsLoading]    = useState(false)
   const [psErr,        setPsErr]        = useState<string | null>(null)
 
@@ -41,6 +44,23 @@ export default function DepositModal({ user: _user, onClose, open = true }: Prop
       .finally(() => setAddrLoading(false))
   }, [tab, address])
 
+  // Fetch live NGN customer rate when the NGN tab opens. Refreshed every
+  // hour server-side, so a one-shot fetch per modal-open is fine. Public
+  // endpoint, no auth needed.
+  useEffect(() => {
+    if (tab !== 'ngn' || ngnRate !== null) return
+    let cancelled = false
+    fetch(`${API_BASE}/payments/rates`)
+      .then(r => r.ok ? r.json() : Promise.reject(r))
+      .then(d => {
+        if (cancelled) return
+        const rate = d?.currencies?.NGN?.customer
+        if (typeof rate === 'number' && rate > 0) setNgnRate(rate)
+      })
+      .catch(() => { /* silent — UI falls back to 'live rate at checkout' copy */ })
+    return () => { cancelled = true }
+  }, [tab, ngnRate])
+
   const handleCopy = () => {
     if (!address) return
     navigator.clipboard.writeText(address).then(() => {
@@ -50,13 +70,26 @@ export default function DepositModal({ user: _user, onClose, open = true }: Prop
   }
 
   const handlePaystack = async () => {
-    const usd = parseFloat(amountUSD)
-    if (!usd || usd < 5) { setPsErr('Minimum deposit is $5'); return }
+    const ngn = parseFloat(amountNGN)
+    if (!ngn || ngn < 100) { setPsErr('Enter a valid NGN amount.'); return }
+    if (!ngnRate) { setPsErr('Could not load NGN rate — please try again.'); return }
+    // Backend validates min $5 USD; we mirror that as NGN equivalent so the
+    // user gets the right error message client-side without a round-trip.
+    const usd = ngn / ngnRate
+    if (usd < 5) {
+      const minNGN = Math.ceil(5 * ngnRate / 100) * 100  // round up to next ₦100
+      setPsErr(`Minimum deposit is ₦${minNGN.toLocaleString('en-NG')} (~$5).`)
+      return
+    }
     setPsLoading(true)
     setPsErr(null)
     try {
       const res = await authFetch(`${API_BASE}/payments/paystack/initiate`, {
         method: 'POST',
+        // Backend takes USD; we convert from the NGN the user typed using
+        // the same customer rate the preview displays. Locked rate at
+        // Paystack confirmation may differ by a few naira — fx_quotes
+        // audit row captures the exact pair used per deposit.
         body:   JSON.stringify({ amount_usd: usd }),
       })
       // Read as text first so we can give a useful error when the server
@@ -161,36 +194,50 @@ export default function DepositModal({ user: _user, onClose, open = true }: Prop
 
               <div>
                 <label className="text-dim text-xs font-semibold uppercase tracking-wider block mb-1.5">
-                  Amount (USD)
+                  Amount (NGN)
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-dim font-semibold">$</span>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-dim font-semibold">₦</span>
                   <input
                     type="number"
-                    min="5"
-                    step="1"
-                    placeholder="50"
-                    value={amountUSD}
-                    onChange={e => setAmountUSD(e.target.value)}
+                    inputMode="numeric"
+                    min="100"
+                    step="100"
+                    placeholder="10,000"
+                    value={amountNGN}
+                    onChange={e => { setAmountNGN(e.target.value); setPsErr(null) }}
                     className="w-full bg-surface border border-border rounded-xl pl-7 pr-4 py-3 text-text text-sm focus:outline-none focus:border-brand/60"
                   />
                 </div>
-                <p className="text-dim text-xs mt-1">Minimum $5 · equivalent NGN shown at checkout</p>
+                <div className="flex items-baseline justify-between mt-1">
+                  <p className="text-dim text-xs">
+                    {ngnRate
+                      ? `Minimum ~₦${Math.ceil(5 * ngnRate / 100) * 100} (≈ $5)`
+                      : 'Loading current NGN rate…'}
+                  </p>
+                  {ngnRate && amountNGN && parseFloat(amountNGN) > 0 && (
+                    <p className="text-text text-xs font-semibold">
+                      ≈ ${(parseFloat(amountNGN) / ngnRate).toFixed(2)}
+                    </p>
+                  )}
+                </div>
               </div>
 
-              {/* Preset quick-select amounts */}
+              {/* Preset quick-select amounts — NGN values keyed to common
+                  starting deposits for Nigerian retail. ₦10k ≈ $6, ₦25k ≈ $16,
+                  ₦50k ≈ $33, ₦100k ≈ $65 at ~₦1500/USD. */}
               <div className="flex gap-2">
-                {[10, 25, 50, 100].map(amt => (
+                {[10_000, 25_000, 50_000, 100_000].map(amt => (
                   <button
                     key={amt}
-                    onClick={() => setAmountUSD(String(amt))}
+                    onClick={() => { setAmountNGN(String(amt)); setPsErr(null) }}
                     className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors ${
-                      amountUSD === String(amt)
+                      amountNGN === String(amt)
                         ? 'bg-brand/20 border-brand/50 text-brand'
                         : 'bg-surface border-border text-dim hover:text-text hover:border-brand/30'
                     }`}
                   >
-                    ${amt}
+                    ₦{(amt / 1000)}k
                   </button>
                 ))}
               </div>
@@ -218,7 +265,7 @@ export default function DepositModal({ user: _user, onClose, open = true }: Prop
 
               <button
                 onClick={handlePaystack}
-                disabled={psLoading || !amountUSD}
+                disabled={psLoading || !amountNGN || !ngnRate}
                 className="w-full py-3 bg-brand hover:bg-brand/90 disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
               >
                 {psLoading ? (

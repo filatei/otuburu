@@ -274,9 +274,13 @@ jobs:
             # ── Alpaca real-time market data (engine) ─────────────────────────
             APCA_API_KEY_ID=${{ secrets.APCA_API_KEY_ID }}
             APCA_API_SECRET_KEY=${{ secrets.APCA_API_SECRET_KEY }}
-            # ── Staking service ────────────────────────────────────────────────
+            # ── Paystack (NGN deposits + NGN withdrawals via Transfer API) ────
             PAYSTACK_SECRET_KEY=${{ secrets.PAYSTACK_SECRET_KEY }}
             PAYSTACK_PUBLIC_KEY=${{ secrets.PAYSTACK_PUBLIC_KEY }}
+            # Paystack success-callback base. Without this, Paystack returns
+            # users to a bare '?deposit=success' (relative) on their hosted
+            # page which is rejected as an invalid redirect.
+            APP_URL=${{ secrets.APP_URL || 'https://otuburu.torama.money' }}
             USD_TO_NGN_RATE=${{ secrets.USD_TO_NGN_RATE || '1600' }}
             SMTP_HOST=${{ secrets.SMTP_HOST || 'smtp-relay.gmail.com' }}
             SMTP_PORT=${{ secrets.SMTP_PORT || '587' }}

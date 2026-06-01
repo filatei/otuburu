@@ -94,6 +94,16 @@ services:
       # container to see them.
       ADMIN_EMAIL:       ${ADMIN_EMAIL:-filatei@gtsng.com}
       ADMIN_EMAILS:      ${ADMIN_EMAILS:-filatei@gtsng.com}
+      # Paystack — NGN deposit (POST /payments/paystack/initiate) and
+      # NGN withdrawal (Transfer API). If unset, payments.New() returns
+      # nil and RegisterRoutes is a no-op, which means the wallet returns
+      # a gin 404 'page not found' on /payments/paystack/initiate. Was
+      # the silent failure mode behind the user-visible
+      # 'Unexpected non-whitespace character after JSON at position 4'.
+      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
+      PAYSTACK_PUBLIC_KEY: ${PAYSTACK_PUBLIC_KEY:-}
+      # Frontend redirect target for Paystack's success callback URL.
+      APP_URL:           ${APP_URL:-https://otuburu.torama.money}
     ports:
       - "127.0.0.1:8083:8083"
     networks:
