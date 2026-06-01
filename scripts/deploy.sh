@@ -59,9 +59,17 @@ docker compose up -d --force-recreate --remove-orphans
 docker image prune -f --filter "until=24h" >/dev/null 2>&1 || true
 
 # ── 5. Install Apache vhost + reload ─────────────────────────────────────────
+#
+# Vhost target is `aaa-otuburu.conf` not `otuburu.conf` so it loads
+# alphabetically before certbot's auto-generated `otuburu-le-ssl.conf`.
+# Apache picks the first matching :443 vhost it encounters for a given
+# ServerName — letterboxing ours first prevents certbot's stale config
+# from shadowing our managed one (which broke /payments/* for a deploy
+# cycle until manually diagnosed). We also dissite the certbot vhost
+# proactively in case it gets recreated by a future renew run.
 log "Configuring Apache..."
 VHOST_SRC="${BACKEND}/infra/otuburu.torama.money.conf"
-VHOST_DST="/etc/apache2/sites-available/otuburu.conf"
+VHOST_DST="/etc/apache2/sites-available/aaa-otuburu.conf"
 
 if [ -f "${VHOST_SRC}" ]; then
   # Enable required modules (idempotent)
@@ -74,8 +82,19 @@ if [ -f "${VHOST_SRC}" ]; then
       || log "WARNING: could not copy vhost (needs sudo). Run manually: sudo cp ${VHOST_SRC} ${VHOST_DST}"
   fi
 
-  # Enable site (idempotent)
-  sudo -n a2ensite otuburu 2>/dev/null || true
+  # Enable our site (idempotent)
+  sudo -n a2ensite aaa-otuburu 2>/dev/null || true
+
+  # Disable certbot's auto-generated shadow vhost if it exists. Certbot
+  # creates `otuburu-le-ssl.conf` during initial SSL provisioning and may
+  # recreate it during a `certbot renew --apache` if the apache hook
+  # detects no SSL vhost for the cert. We already ship full SSL config in
+  # our managed vhost (cert + key + options-ssl-apache include) so the
+  # shadow is redundant — and harmful, since it precedes ours alphabetically
+  # and used to shadow all our proxy rules.
+  sudo -n a2dissite otuburu-le-ssl 2>/dev/null || true
+  # Also disable the legacy non-prefixed name if it exists from older deploys
+  sudo -n a2dissite otuburu 2>/dev/null || true
 fi
 
 if sudo -n apache2ctl configtest 2>/dev/null && sudo -n systemctl reload apache2 2>/dev/null; then
