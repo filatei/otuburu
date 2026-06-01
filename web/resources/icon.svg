@@ -1,46 +1,69 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Otuburu app icon source — 1024×1024 SVG, generated into all platform
-  sizes by `npx @capacitor/assets generate`.
+  Otuburu app icon — glowing yellow "O" on near-black background.
 
-  Design notes:
-    - Dark surface background (#0d0d0d) matches the app's main canvas
-      colour so the icon reads as "the app, condensed". Brand yellow
-      (#EAB308) on dark is the strongest contrast pair in the system.
-    - The 'O' is rendered as a stylised ring with a small notch at the
-      top — gestures at a market-clock symbol and avoids being a plain
-      circle (every other fintech app is a plain circle).
-    - The two horizontal accent bars under the wordmark evoke trading
-      ticker rows. They scale legibly down to 48px (Android adaptive
-      foreground) without becoming dot mush.
-    - All paths are vectors — no embedded raster, no font dependency
-      (the wordmark is custom-traced glyphs, not an Inter export).
-      Stays crisp at 1024px, 180px, and 48px alike.
+  Design rationale:
+    - 1024×1024 source; @capacitor/assets generates all density variants
+      from this.
+    - Brand mark stays inside the central ~66% safe area so Android's
+      adaptive icon mask (circular / squircle / teardrop, varies by
+      launcher) doesn't crop. 360px-radius safe circle.
+    - Brand yellow #f5b800 with a top highlight #fde047 fading to a
+      bottom shadow #d49600 — gives the ring a subtle emissive feel
+      without going skeumorphic.
+    - A soft radial halo behind the O reads as 'glow' at small home-
+      screen sizes (Android renders down to 48dp ≈ 144px in launcher).
+    - One discreet upward tick mark above the O — trading-app cue,
+      doesn't crowd the letterform.
+    - No wordmark — at icon scale (~48dp on a real phone), six glyphs
+      become illegible mush. The "O" alone reads.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <!-- Dark rounded-square background; corner radius matches iOS app icon convention (≈22% of side) -->
-  <rect x="0" y="0" width="1024" height="1024" rx="225" ry="225" fill="#0d0d0d"/>
+  <defs>
+    <!-- Soft yellow radial glow behind the O. Opacity falls off so the
+         halo doesn't terminate in a hard ring at any zoom. -->
+    <radialGradient id="haloGrad" cx="512" cy="512" r="450" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#fde047" stop-opacity="0.45"/>
+      <stop offset="45%"  stop-color="#f5b800" stop-opacity="0.20"/>
+      <stop offset="80%"  stop-color="#f5b800" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#0d0d0d" stop-opacity="0"/>
+    </radialGradient>
 
-  <!-- Brand yellow 'O' mark — stylised ring with a top-notch -->
-  <g transform="translate(512 432)">
-    <!-- Outer ring -->
-    <circle cx="0" cy="0" r="180" fill="none" stroke="#EAB308" stroke-width="48"/>
-    <!-- Notch — small wedge cut at the top to gesture at a clock tick -->
-    <rect x="-24" y="-220" width="48" height="56" fill="#0d0d0d"/>
-    <!-- Inner dot — visual weight, makes the icon feel like a maker mark -->
-    <circle cx="0" cy="0" r="12" fill="#EAB308"/>
+    <!-- Top-light / bottom-warm gradient on the O ring itself.
+         Gives the letterform a subtle 3D feel without being heavy. -->
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#fde047"/>
+      <stop offset="50%"  stop-color="#f5b800"/>
+      <stop offset="100%" stop-color="#d49600"/>
+    </linearGradient>
+
+    <!-- Outer glow blur around the O. stdDeviation tuned so glow reads
+         at icon scale but doesn't smear into the halo. -->
+    <filter id="oGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="14" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Base surface — dark, matches app shell.
+       Square fill (not rounded) — Android's adaptive icon mask handles
+       the corner radius at the launcher level. -->
+  <rect width="1024" height="1024" fill="#0d0d0d"/>
+
+  <!-- Yellow halo behind the mark -->
+  <circle cx="512" cy="512" r="450" fill="url(#haloGrad)"/>
+
+  <!-- The O — thick ring, glowing -->
+  <g filter="url(#oGlow)">
+    <circle cx="512" cy="512" r="240" fill="none" stroke="url(#ringGrad)" stroke-width="80"/>
   </g>
 
-  <!-- 'OTUBURU' wordmark in brand yellow, slightly compressed to fit -->
-  <text x="512" y="700"
-        font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif"
-        font-size="116"
-        font-weight="900"
-        letter-spacing="14"
-        fill="#EAB308"
-        text-anchor="middle">OTUBURU</text>
-
-  <!-- Two accent bars under the wordmark — ticker-row visual rhythm -->
-  <rect x="280" y="780" width="464" height="6" fill="#EAB308" opacity="0.6"/>
-  <rect x="340" y="800" width="344" height="6" fill="#EAB308" opacity="0.3"/>
+  <!-- Tiny upward arrow above the O — trading angle without crowding -->
+  <g opacity="0.85">
+    <path d="M 480 195 L 512 155 L 544 195 L 524 195 L 524 260 L 500 260 L 500 195 Z"
+          fill="#f5b800"/>
+  </g>
 </svg>

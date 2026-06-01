@@ -138,7 +138,7 @@ export default function AppDrawer({
           </Section>
 
           <Section title="Finance">
-            <Item icon="💳" label="Deposit USDT"        sub="Your personal TRC20 address" badge="live" onClick={() => { onDeposit(); onClose() }} />
+            <Item icon="💳" label="Deposit"             sub="USDT (TRC20) or NGN (Paystack)" badge="live" onClick={() => { onDeposit(); onClose() }} />
             <Item icon="🏦" label="Withdraw"            sub="USDT (TRC20) or NGN bank"    badge="live" onClick={() => { onWithdraw(); onClose() }} />
             <Item icon="📋" label="Transaction History" sub="Deposits & withdrawals"       badge="live" onClick={() => { onHistory(); onClose() }} />
           </Section>
