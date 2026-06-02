@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import type { SymbolInfo } from '@/types'
+import { authFetch } from '@/lib/api'
 import { useTicks }   from '@/hooks/useTicks'
 import { useAccount } from '@/hooks/useAccount'
 import { useAuth }    from '@/hooks/useAuth'
@@ -67,7 +68,14 @@ type MobileTab = 'symbols' | 'chart' | 'trade' | 'positions'
 export default function TradingPage() {
   const [symbols,       setSymbols]       = useState<SymbolInfo[]>([])
   const [selected,      setSelected]      = useState('frxEURUSD')
-  const [mode,          setMode]          = useState<'demo' | 'real'>('demo')
+  // Mode persists in localStorage so the redirect back from Paystack
+  // (or any other navigation that triggers a full page reload) doesn't
+  // toss the user back to demo mode after they were actively in real.
+  // SSR-safe: useState initialiser only runs on the client.
+  const [mode,          setMode]          = useState<'demo' | 'real'>(() => {
+    if (typeof window === 'undefined') return 'demo'
+    return (window.localStorage.getItem('otuburu.mode') as 'demo' | 'real') ?? 'demo'
+  })
   const [authOpen,      setAuthOpen]      = useState(false)
   const [authError,     setAuthError]     = useState<string | null>(null)
   const [profileOpen,   setProfileOpen]   = useState(false)
@@ -101,6 +109,59 @@ export default function TradingPage() {
     if (!authLoading && !user) setAuthOpen(true)
     if (user) setAuthOpen(false)
   }, [authLoading, user])
+
+  // Persist mode changes so a redirect (Paystack callback, OAuth return,
+  // etc.) doesn't reset the user to demo. Pair with the localStorage
+  // hydration in the useState initialiser above.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('otuburu.mode', mode)
+  }, [mode])
+
+  // ── Paystack verify-on-return ────────────────────────────────────────────
+  //
+  // Paystack redirects to APP_URL?deposit=success&reference=OTU-... after a
+  // successful checkout. The webhook is the authoritative credit path, but
+  // we can't trust it to fire reliably in every test scenario. Verifying
+  // synchronously here gives the user immediate balance feedback AND works
+  // as a fallback if the webhook never arrives. Both paths use the same
+  // creditPaystack() Postgres flow with a status='pending' guard, so
+  // they're safe to race.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !user) return
+    const params = new URLSearchParams(window.location.search)
+    const reference = params.get('reference') ?? params.get('trxref')
+    if (!reference) return
+
+    // Force real mode — the user just paid; the deposit lands on the real
+    // account. Without this they'd land back in demo and wonder where
+    // their money went.
+    setMode('real')
+
+    // Clean the URL immediately so a refresh / back-button doesn't re-verify
+    // (idempotent on the server, but cleaner UX).
+    window.history.replaceState({}, '', window.location.pathname)
+
+    authFetch(`${API_BASE}/payments/paystack/verify`, {
+      method: 'POST',
+      body:   JSON.stringify({ reference }),
+    })
+      .then(async r => {
+        const data = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(data?.error ?? `verify failed (${r.status})`)
+        return data as { status: string; amount_usd?: number }
+      })
+      .then(d => {
+        refreshBalances()
+        // TODO: surface a toast — for now console + balance flash is the cue
+        console.info('[paystack] verify', d.status, 'usd', d.amount_usd)
+      })
+      .catch(err => {
+        console.warn('[paystack] verify failed', err)
+        // Even on failure, refresh in case the webhook beat us
+        refreshBalances()
+      })
+  }, [user, refreshBalances])
 
   useEffect(() => {
     fetch(`${API_BASE}/api/symbols`)

@@ -91,6 +91,13 @@ func (h *Handler) RegisterRoutes(protected *gin.RouterGroup, public *gin.RouterG
 		return // Paystack disabled
 	}
 	protected.POST("/payments/paystack/initiate", h.Initiate)
+	// Synchronous credit-on-return — the frontend calls this when the user
+	// lands back at our callback URL after Paystack checkout. We verify the
+	// reference against Paystack's REST API server-side and credit the
+	// account immediately if successful. Same creditPaystack() flow as the
+	// webhook path, with idempotency (UPDATE ... status='pending' guard),
+	// so whichever path finishes first wins and the other no-ops.
+	protected.POST("/payments/paystack/verify", h.Verify)
 	public.POST("/payments/paystack/webhook", h.Webhook)
 }
 
@@ -245,6 +252,132 @@ func (h *Handler) Webhook(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusOK)
+}
+
+// Verify is the synchronous credit-on-return path. Called by the frontend
+// after Paystack redirects the user back with a ?reference= query param.
+// We trust the JWT for user identity, then hit Paystack's /transaction/
+// verify API server-side to confirm the payment actually succeeded.
+// Idempotent with the webhook path — both call creditPaystack which gates
+// on the paystack_payments status='pending' guard.
+//
+// POST /payments/paystack/verify
+// Body: { "reference": "OTU-..." }
+//
+// Response:
+//   200 + { "status": "confirmed", "amount_usd": 12.34 } — credit applied
+//        OR { "status": "already_confirmed" }            — webhook beat us to it
+//   400 + { "error": "..." } — bad input
+//   402 + { "error": "payment not successful" } — Paystack says not paid
+//   404 + { "error": "reference not found" } — never seen this ref
+//   500 + { "error": "..." } — internal
+func (h *Handler) Verify(c *gin.Context) {
+	claims := c.MustGet("claims").(*auth.Claims)
+	var req struct {
+		Reference string `json:"reference" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// Look up our row first — gives us the account_id + the quoted USD that
+	// the user saw at initiate time. Also lets us short-circuit if we've
+	// already credited (e.g. webhook arrived just before this call).
+	var accountID, status string
+	var amountUSD float64
+	err := h.db.QueryRow(ctx,
+		`SELECT account_id, amount_usd, status FROM paystack_payments
+		 WHERE reference=$1 AND user_id=$2`,
+		req.Reference, claims.UserID,
+	).Scan(&accountID, &amountUSD, &status)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "reference not found for this user"})
+		return
+	}
+	if status == "confirmed" {
+		c.JSON(http.StatusOK, gin.H{
+			"status":     "already_confirmed",
+			"amount_usd": amountUSD,
+		})
+		return
+	}
+
+	// Hit Paystack to confirm the payment actually succeeded. They expose
+	// /transaction/verify/{reference} which returns the canonical status —
+	// trustworthy because the call is authenticated with our secret key,
+	// not user-provided input.
+	psResp, err := h.paystackVerify(ctx, req.Reference)
+	if err != nil {
+		slog.Warn("paystack verify call failed", "ref", req.Reference, "err", err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "could not reach Paystack"})
+		return
+	}
+	if psResp.Status != "success" {
+		// Could be 'failed', 'abandoned', 'pending'. None of these credit.
+		c.JSON(http.StatusPaymentRequired, gin.H{
+			"error":          "payment not successful",
+			"paystack_status": psResp.Status,
+		})
+		return
+	}
+
+	// Credit using the same flow the webhook uses — UPDATE ... status='pending'
+	// guard makes this safe to race with an arriving webhook.
+	if err := h.creditPaystack(ctx, req.Reference, accountID, amountUSD, psResp.Amount); err != nil {
+		slog.Error("paystack credit failed (verify path)", "ref", req.Reference, "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "credit failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":     "confirmed",
+		"amount_usd": amountUSD,
+	})
+}
+
+// paystackVerifyResp mirrors the subset of Paystack's /transaction/verify
+// response we actually use. Full doc:
+// https://paystack.com/docs/api/transaction/#verify
+type paystackVerifyResp struct {
+	Status   string `json:"status"`  // 'success', 'failed', 'abandoned', 'pending'
+	Amount   int64  `json:"amount"`  // kobo
+	Currency string `json:"currency"`
+	Reference string `json:"reference"`
+}
+
+func (h *Handler) paystackVerify(ctx context.Context, reference string) (*paystackVerifyResp, error) {
+	url := "https://api.paystack.co/transaction/verify/" + reference
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+h.secretKey)
+	httpReq.Header.Set("Cache-Control", "no-cache")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("paystack verify HTTP %d", resp.StatusCode)
+	}
+	var envelope struct {
+		Status  bool                `json:"status"`  // true on success
+		Message string              `json:"message"`
+		Data    paystackVerifyResp  `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return nil, err
+	}
+	if !envelope.Status {
+		return nil, fmt.Errorf("paystack: %s", envelope.Message)
+	}
+	return &envelope.Data, nil
 }
 
 func (h *Handler) creditPaystack(ctx context.Context, ref, accountID string, amountUSD float64, amountKobo int64) error {
