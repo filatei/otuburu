@@ -7,6 +7,7 @@ import type {
 import { RESOLUTIONS } from '@/types'
 import { useChartHistory } from '@/hooks/useChartHistory'
 import { displayNameOf, divisorOf, toDisplayPrice } from '@/lib/symbols'
+import { INDICATORS } from '@/lib/indicators'
 
 interface Props {
   candles:          Candle[]
@@ -29,11 +30,23 @@ export default function Chart({
   const { candles: histCandles, trades: histTrades, loading } =
     useChartHistory(symbol, resolution, accountId)
 
-  // Reset to default (M1) when symbol changes — gives users actual candle
-  // history immediately instead of waiting for live ticks to accumulate.
+  // Reset to M1 when symbol changes — but if M1 ends up empty after the
+  // fetch settles (typical for closed FX/metal/index markets where M1
+  // isn't backfilled), auto-bump to H1 so the user sees something useful
+  // instead of "No M1 data yet". The auto-bump only fires once per symbol
+  // change, so user-initiated timeframe selections aren't overridden.
+  const autoBumpedRef = useRef(false)
   useEffect(() => {
+    autoBumpedRef.current = false
     setResolution('M1')
   }, [symbol])
+  useEffect(() => {
+    if (autoBumpedRef.current || loading) return
+    if (resolution === 'M1' && histCandles.length === 0) {
+      autoBumpedRef.current = true
+      setResolution('H1')
+    }
+  }, [resolution, loading, histCandles.length])
 
   return (
     <div className="flex flex-col w-full h-full">
@@ -338,6 +351,33 @@ function HistoricalChart({ symbol, info, resolution, candles, trades, loading, p
   /** Open-trade entry lines — same machinery as LiveChart so users see
    *  their open positions overlaid regardless of the timeframe they pick. */
   const tradeLinesRef = useRef<Map<string, import('lightweight-charts').IPriceLine>>(new Map())
+  /** Active indicator overlays. Map from indicator id (e.g. 'sma20') to
+   *  the Lightweight Charts line series. Mutates as the user toggles
+   *  items in the Indicators menu. */
+  const indicatorSeriesRef = useRef<Map<string, import('lightweight-charts').ISeriesApi<'Line'>>>(new Map())
+
+  // ── OHLC hover overlay state ──────────────────────────────────────────────
+  // Updated on every crosshair move; null when cursor leaves the chart area.
+  // Renders as a small top-right pill so it doesn't overlap the symbol +
+  // resolution badge at top-left or the position price lines.
+  const [hoverOHLC, setHoverOHLC] = useState<{
+    open: number; high: number; low: number; close: number; time: number
+  } | null>(null)
+
+  // ── Active indicators — persisted in localStorage ─────────────────────────
+  // Off by default; user opts in via the menu. We store as a comma-separated
+  // list of indicator ids so the localStorage value is human-readable in
+  // DevTools.
+  const [activeIndicators, setActiveIndicators] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    const raw = window.localStorage.getItem('otuburu.chart.indicators') ?? ''
+    return new Set(raw.split(',').map(s => s.trim()).filter(Boolean))
+  })
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('otuburu.chart.indicators', Array.from(activeIndicators).join(','))
+  }, [activeIndicators])
+  const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false)
 
   // Create chart once per mount
   useEffect(() => {
@@ -375,6 +415,31 @@ function HistoricalChart({ symbol, info, resolution, candles, trades, loading, p
       chartRef.current  = chart
       seriesRef.current = series
 
+      // Crosshair → OHLC overlay. The handler runs on every mouse-move
+      // within the chart bounds and receives a param with seriesData
+      // keyed by series ref. We pluck the candle under the cursor and
+      // push it into hoverOHLC state for the overlay component to render.
+      chart.subscribeCrosshairMove(param => {
+        if (!param.time || !param.point) {
+          setHoverOHLC(null)
+          return
+        }
+        const bar = param.seriesData.get(series) as
+          | { open: number; high: number; low: number; close: number }
+          | undefined
+        if (!bar) {
+          setHoverOHLC(null)
+          return
+        }
+        setHoverOHLC({
+          open:  bar.open,
+          high:  bar.high,
+          low:   bar.low,
+          close: bar.close,
+          time:  typeof param.time === 'number' ? param.time : 0,
+        })
+      })
+
       const ro = new ResizeObserver(() => {
         if (containerRef.current) {
           chart.applyOptions({
@@ -389,6 +454,7 @@ function HistoricalChart({ symbol, info, resolution, candles, trades, loading, p
 
     return () => {
       tradeLinesRef.current.clear()
+      indicatorSeriesRef.current.clear()
       chart?.remove()
     }
   }, []) // eslint-disable-line
@@ -414,13 +480,62 @@ function HistoricalChart({ symbol, info, resolution, candles, trades, loading, p
         open:  c.open  / divisor,
         high:  c.high  / divisor,
         low:   c.low   / divisor,
-        close: c.close / divisor,
+        close: c.close /  divisor,
       }))
     )
     // scrollToRealTime instead of fitContent — keep the fixed barSpacing
     // density and just position the latest candle at the right edge.
     chartRef.current?.timeScale().scrollToRealTime()
   }, [candles, divisor])
+
+  // Indicator overlays — reconcile the active set against the rendered
+  // line series. Removes series for un-toggled indicators, adds new ones
+  // for newly toggled ones, and updates each active indicator's data on
+  // every candle change. Display values are divided like the candles
+  // so the line overlays on the same price scale.
+  useEffect(() => {
+    if (!chartRef.current) return
+    let cancelled = false
+    import('lightweight-charts').then(({ LineStyle: _LineStyle }) => {
+      if (cancelled || !chartRef.current) return
+      const chart = chartRef.current
+      const map = indicatorSeriesRef.current
+
+      // Add series for newly-activated indicators
+      for (const def of INDICATORS) {
+        const isActive = activeIndicators.has(def.id)
+        const has = map.has(def.id)
+        if (isActive && !has) {
+          const s = chart.addLineSeries({
+            color:           def.color,
+            lineWidth:       2,
+            priceLineVisible: false,
+            lastValueVisible: false,
+          })
+          map.set(def.id, s)
+        }
+        if (!isActive && has) {
+          chart.removeSeries(map.get(def.id)!)
+          map.delete(def.id)
+        }
+      }
+
+      // Push fresh data into each active series
+      for (const def of INDICATORS) {
+        if (!activeIndicators.has(def.id)) continue
+        const series = map.get(def.id)
+        if (!series) continue
+        const points = def.compute(candles)
+        series.setData(
+          points.map(p => ({
+            time:  p.time as import('lightweight-charts').Time,
+            value: p.value / divisor,
+          })),
+        )
+      }
+    })
+    return () => { cancelled = true }
+  }, [candles, divisor, activeIndicators])
 
   // Trade markers from API history
   useEffect(() => {
@@ -452,6 +567,71 @@ function HistoricalChart({ symbol, info, resolution, candles, trades, loading, p
         <span className="text-brand text-xs font-semibold bg-brand/10 px-1.5 py-0.5 rounded">
           {resolution}
         </span>
+        {/* OHLC hover panel — only renders while the cursor is over the
+            chart and lands on a bar. Stays beside the symbol+timeframe
+            badge so the eye doesn't need to jump corners. */}
+        {hoverOHLC && (
+          <span className="text-[10px] text-dim/80 num bg-panel/70 backdrop-blur-sm rounded px-1.5 py-0.5 border border-border/40">
+            O <span className="text-text">{hoverOHLC.open.toFixed(4)}</span>{'  '}
+            H <span className="text-up">{hoverOHLC.high.toFixed(4)}</span>{'  '}
+            L <span className="text-down">{hoverOHLC.low.toFixed(4)}</span>{'  '}
+            C <span className="text-text">{hoverOHLC.close.toFixed(4)}</span>
+          </span>
+        )}
+      </div>
+
+      {/* Indicators menu — top-right. Closed by default; click the button
+          to expand the toggle list. Choices persist in localStorage so
+          the user's preferred set survives a page reload. */}
+      <div className="absolute top-3 right-3 z-10 pointer-events-auto">
+        <button
+          type="button"
+          onClick={() => setIndicatorMenuOpen(v => !v)}
+          className="flex items-center gap-1 px-2 py-1 rounded bg-panel/70 border border-border/40 hover:border-brand/60 text-[11px] text-dim hover:text-text transition-colors backdrop-blur-sm"
+        >
+          <span>ƒ</span>
+          <span>Indicators</span>
+          {activeIndicators.size > 0 && (
+            <span className="text-brand font-semibold">· {activeIndicators.size}</span>
+          )}
+        </button>
+        {indicatorMenuOpen && (
+          <div className="mt-1 bg-panel border border-border rounded-lg shadow-lg p-1 min-w-[140px]">
+            {INDICATORS.map(def => {
+              const active = activeIndicators.has(def.id)
+              return (
+                <button
+                  key={def.id}
+                  type="button"
+                  onClick={() => {
+                    setActiveIndicators(prev => {
+                      const next = new Set(prev)
+                      if (active) next.delete(def.id)
+                      else next.add(def.id)
+                      return next
+                    })
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-[11px] hover:bg-surface transition-colors text-left"
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-sm shrink-0"
+                    style={{ background: active ? def.color : 'transparent', border: `1px solid ${def.color}` }}
+                  />
+                  <span className={active ? 'text-text' : 'text-dim'}>{def.label}</span>
+                </button>
+              )
+            })}
+            {activeIndicators.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setActiveIndicators(new Set())}
+                className="w-full px-2 py-1.5 mt-1 border-t border-border/60 text-[10px] text-dim hover:text-down transition-colors text-center"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div ref={containerRef} className="w-full h-full" />
@@ -463,8 +643,19 @@ function HistoricalChart({ symbol, info, resolution, candles, trades, loading, p
           done AND nothing came back — never block the canvas with a spinner.
           See: feedback_mt5_silent_ux.md */}
       {!loading && candles.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center text-dim text-sm pointer-events-none">
-          No {resolution} data yet — trade data builds over time.
+        <div className="absolute inset-0 flex items-center justify-center text-center text-dim text-sm pointer-events-none px-6">
+          <div>
+            <p>No {resolution} data for {displayName} yet.</p>
+            {/* Backfilled timeframes — present these as the next try.
+                M1/M5/M15/M30 are tick-built and stay empty for closed-
+                session symbols until ticks resume. H1/D1 always have
+                Yahoo/Alpaca history. */}
+            {(resolution === 'M1' || resolution === 'M5' || resolution === 'M15' || resolution === 'M30') && (
+              <p className="text-[11px] text-dim/60 mt-2">
+                Try <span className="text-text">H1</span> or <span className="text-text">D1</span> for historical context.
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -829,13 +829,13 @@ impl Book {
                     //     direction would otherwise auto-lose.
                     let (won, payout) = if tick.mid > b.entry_mid {
                         match b.direction {
-                            Direction::Up   => (true,  b.stake * PAYOUT_MULTIPLIER),
+                            Direction::Up => (true, b.stake * PAYOUT_MULTIPLIER),
                             Direction::Down => (false, 0.0),
                         }
                     } else if tick.mid < b.entry_mid {
                         match b.direction {
-                            Direction::Up   => (false, 0.0),
-                            Direction::Down => (true,  b.stake * PAYOUT_MULTIPLIER),
+                            Direction::Up => (false, 0.0),
+                            Direction::Down => (true, b.stake * PAYOUT_MULTIPLIER),
                         }
                     } else {
                         // tick.mid == b.entry_mid — tie. Refund.
