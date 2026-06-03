@@ -26,6 +26,9 @@ interface Props {
   /** Called when a row is tapped. Parent decides what to do — currently
    *  this opens the SymbolActionsSheet for that symbol. */
   onSelect: (symbol: string) => void
+  /** Optional: open the watchlist manager so the user can add hidden
+   *  symbols. When set, the header gains a "+ Add" affordance. */
+  onManage?: () => void
 }
 
 const TYPE_BADGE: Record<string, string> = {
@@ -36,7 +39,7 @@ const TYPE_BADGE: Record<string, string> = {
   INDEX:      'text-[#5dade2]',
 }
 
-export default function MobileSymbolsTab({ symbols, ticks, selected, dailyPnl, onSelect }: Props) {
+export default function MobileSymbolsTab({ symbols, ticks, selected, dailyPnl, onSelect, onManage }: Props) {
   // Session High/Low per symbol, observed off the live tick stream. Resets
   // at UTC midnight. MT5 shows the same pair under each Quotes row.
   const sessionHL = useSessionHL(ticks)
@@ -45,7 +48,17 @@ export default function MobileSymbolsTab({ symbols, ticks, selected, dailyPnl, o
     <div className="h-full overflow-y-auto bg-panel">
       <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-dim border-b border-border bg-surface/40 sticky top-0 z-10 flex items-center justify-between">
         <span>Quotes · {symbols.length} symbols</span>
-        <span className="text-dim/70">Tap for actions</span>
+        {onManage ? (
+          <button
+            type="button"
+            onClick={onManage}
+            className="text-brand font-semibold hover:text-brand/80 transition-colors"
+          >
+            + Add
+          </button>
+        ) : (
+          <span className="text-dim/70">Tap for actions</span>
+        )}
       </div>
       <ul className="divide-y divide-border">
         {symbols.map(info => (

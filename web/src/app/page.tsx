@@ -20,6 +20,7 @@ import AppDrawer           from '@/components/AppDrawer'
 import DepositModal        from '@/components/DepositModal'
 import TransferModal       from '@/components/TransferModal'
 import MT5TradeTicket      from '@/components/MT5TradeTicket'
+import ManageSymbolsSheet  from '@/components/ManageSymbolsSheet'
 import GetAppModal         from '@/components/GetAppModal'
 import ContactModal        from '@/components/ContactModal'
 import SymbolActionsSheet     from '@/components/SymbolActionsSheet'
@@ -29,6 +30,8 @@ import WithdrawSheet          from '@/components/WithdrawSheet'
 import { provisionAccount } from '@/hooks/useAccount'
 import { useAutoFullscreen } from '@/hooks/useAutoFullscreen'
 import { useDailyPnLBySymbol } from '@/hooks/useDailyPnL'
+import { useWatchlist } from '@/hooks/useWatchlist'
+import { getWatchlist } from '@/lib/watchlist'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 
@@ -97,6 +100,9 @@ export default function TradingPage() {
   /** Symbol whose MT5-style trade ticket is currently open. null = closed.
    *  Opens via SymbolActionsSheet → New Order. */
   const [ticketFor,     setTicketFor]     = useState<string | null>(null)
+  /** Watchlist manager sheet open state. Lets the user toggle hidden
+   *  symbols into Quotes. */
+  const [manageOpen,    setManageOpen]    = useState(false)
   /** Phase 2 multi-account: when in real mode, which real account is active.
    *  Persisted per-user in localStorage so a session restore picks up where
    *  the user left off. Falls back to the first real account on first session. */
@@ -175,7 +181,14 @@ export default function TradingPage() {
       .then((d: { symbols: SymbolInfo[] }) => {
         const ordered = orderSymbols(d.symbols ?? [])
         setSymbols(ordered)
-        if (ordered.length) setSelected(ordered[0].symbol)
+        if (!ordered.length) return
+        // Land on the first watchlist symbol the engine actually serves —
+        // avoids the awkward "chart shows a symbol that's missing from
+        // Quotes" state on first paint. Falls back to ordered[0] if the
+        // watchlist intersection is empty (user manually cleared it).
+        const watchlistIds = new Set(getWatchlist())
+        const firstWatched = ordered.find(s => watchlistIds.has(s.symbol))
+        setSelected((firstWatched ?? ordered[0]).symbol)
       })
       .catch(() => {})
   }, [])
@@ -221,6 +234,13 @@ export default function TradingPage() {
   const { lastTick, allTicks, candles, connected } = useTicks(selected, applyState, accountId)
 
   const selectedInfo = symbols.find(s => s.symbol === selected) ?? null
+
+  // Watchlist filter — only the user's curated symbols show in SymbolBar +
+  // MobileSymbolsTab. Order is preserved from the source list (orderSymbols
+  // already sorted by asset class + alpha) for consistent positioning;
+  // the watchlist set is a membership filter, not a re-ordering layer.
+  const watchlist = useWatchlist()
+  const visibleSymbols = symbols.filter(s => watchlist.idSet.has(s.symbol))
 
   const handleGoogleLogin = useCallback(async (credential: string) => {
     setAuthError(null)
@@ -334,6 +354,16 @@ export default function TradingPage() {
         />
       )}
 
+      {/* Watchlist manager — list every engine symbol, toggle in/out of
+          the user's local watchlist. Persistence + state lives in
+          useWatchlist; this sheet is presentation only. Always-mounted so
+          BottomSheet can animate close after toggle. */}
+      <ManageSymbolsSheet
+        open={manageOpen}
+        onClose={() => setManageOpen(false)}
+        symbols={symbols}
+      />
+
       {/* MT5-style full-screen trade ticket — mounted on demand from
           SymbolActionsSheet → New Order. The ticket subscribes to the
           symbol's live tick via the allTicks map so BID/ASK refresh
@@ -419,7 +449,7 @@ export default function TradingPage() {
           uncluttered. */}
       <div className="hidden md:block">
         <SymbolBar
-          symbols={symbols}
+          symbols={visibleSymbols}
           ticks={allTicks}
           selected={selected}
           onSelect={sym => { setSelected(sym); setMobileTab('chart') }}
@@ -465,7 +495,7 @@ export default function TradingPage() {
         <div className="flex-1 overflow-hidden">
           {mobileTab === 'symbols' && (
             <MobileSymbolsTab
-              symbols={symbols}
+              symbols={visibleSymbols}
               ticks={allTicks}
               selected={selected}
               dailyPnl={dailyPnl}
@@ -473,6 +503,7 @@ export default function TradingPage() {
               // chooses Chart / New Order / Close Profitable / Close Losers
               // / Properties. Direct-jump-to-chart is gone.
               onSelect={(s) => setActionsFor(s)}
+              onManage={() => setManageOpen(true)}
             />
           )}
           {mobileTab === 'chart' && (
