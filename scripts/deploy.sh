@@ -72,40 +72,39 @@ SCHEMA_FILE="${BACKEND}/schema.sql"
 if [ ! -f "${SCHEMA_FILE}" ]; then
   die "schema.sql missing at ${SCHEMA_FILE} — was it SCPd by deploy.yml?"
 fi
-(
-  # Subshell + `set -a` so plain `var=value` lines export, then revert.
-  # Isolation matters: the deploy script must not inherit POSTGRES_*
-  # secrets into its own env (which is logged on failure).
-  set -a
-  # shellcheck disable=SC1091
-  source "${BACKEND}/.env"
-  set +a
-  : "${POSTGRES_USER:?missing in .env}"
-  : "${POSTGRES_DB:?missing in .env}"
+# Parse POSTGRES_USER + POSTGRES_DB from .env. We deliberately do NOT
+# `source` the file — values like WALLET_MNEMONIC contain unquoted spaces
+# (BIP39 phrases are multi-word), which bash interprets as commands and
+# blows up with "<first-word>: command not found". The docker-compose
+# parser is lenient about that; bash isn't. grep + cut handles just the
+# two scalar fields we care about and ignores everything else.
+PG_USER=$(grep -E '^POSTGRES_USER=' "${BACKEND}/.env" | head -1 | cut -d= -f2-)
+PG_DB=$(grep -E '^POSTGRES_DB=' "${BACKEND}/.env" | head -1 | cut -d= -f2-)
+[ -n "${PG_USER}" ] || die "POSTGRES_USER missing from ${BACKEND}/.env"
+[ -n "${PG_DB}"   ] || die "POSTGRES_DB missing from ${BACKEND}/.env"
 
-  PG_CONTAINER=$(docker compose ps -q postgres)
-  [ -n "${PG_CONTAINER}" ] || die "no postgres container running"
+PG_CONTAINER=$(docker compose ps -q postgres)
+[ -n "${PG_CONTAINER}" ] || die "no postgres container running"
 
-  # Postgres may still be initialising when `compose up` returns. Wait
-  # up to 30s for the server to accept connections — typical cold-start
-  # is 2-4s, hot restart is sub-second.
-  for i in $(seq 1 30); do
-    if docker exec "${PG_CONTAINER}" \
-         pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; then
-      break
-    fi
-    if [ "$i" -eq 30 ]; then die "postgres not ready after 30s"; fi
-    sleep 1
-  done
+# Postgres may still be initialising when `compose up` returns. Wait up
+# to 30s for the server to accept connections — typical cold-start is
+# 2-4s, hot restart is sub-second.
+for i in $(seq 1 30); do
+  if docker exec "${PG_CONTAINER}" \
+       pg_isready -U "${PG_USER}" -d "${PG_DB}" >/dev/null 2>&1; then
+    break
+  fi
+  if [ "$i" -eq 30 ]; then die "postgres not ready after 30s"; fi
+  sleep 1
+done
 
-  # Copy in + apply. /tmp inside the container is fine — gone on next
-  # restart; nothing here we want to preserve.
-  docker cp "${SCHEMA_FILE}" "${PG_CONTAINER}:/tmp/schema.sql"
-  docker exec "${PG_CONTAINER}" \
-    psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" \
-         -f /tmp/schema.sql \
-    || die "schema apply failed — see psql output above"
-)
+# Copy in + apply. /tmp inside the container is fine — gone on next
+# restart; nothing here we want to preserve.
+docker cp "${SCHEMA_FILE}" "${PG_CONTAINER}:/tmp/schema.sql"
+docker exec "${PG_CONTAINER}" \
+  psql -v ON_ERROR_STOP=1 -U "${PG_USER}" -d "${PG_DB}" \
+       -f /tmp/schema.sql \
+  || die "schema apply failed — see psql output above"
 ok "Schema migrations applied"
 
 # ── 4. Prune old images ──────────────────────────────────────────────────────
