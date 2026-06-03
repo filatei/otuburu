@@ -51,18 +51,47 @@ interface Props {
   onPlaced?: () => void
 }
 
-/** Quick-step chip values, in lots. Mirrors the MT5 mobile defaults. */
-const VOLUME_STEPS = [-5, -1, -0.1, +0.1, +1, +5] as const
-
 /** Volume bounds — 0.01 minimum / 100 maximum. Tweak per instrument once
  *  we add per-symbol margin requirements; for now uniform. */
 const MIN_LOTS = 0.01
 const MAX_LOTS = 100
 
+/** volumeProfile — per-asset-class lot defaults + quick-step chips. The
+ *  numbers reflect REAL market prices now that the display divisor is
+ *  gone: gold at $4,500, BTC at $77k, SPY at $720. Defaults aim for a
+ *  notional in the $50–$1,000 range so cent-account users get something
+ *  meaningful without one tap on +5 sending them to $400k notional.
+ *
+ *  steps: six chips arranged as [−big, −med, −small, +small, +med, +big].
+ *  Always proportional to default so each chip "feels" similarly sized
+ *  across asset classes. */
+function volumeProfile(info: SymbolInfo | null): { default: number; steps: number[] } {
+  switch (info?.type) {
+    case 'CRYPTO':
+    case 'METAL':
+      // 0.01 lot on gold at $4,500 = $45 notional. 0.01 lot on BTC at
+      // $77k = $770 notional (1 lot = ~1 BTC). Fine baselines.
+      return { default: 0.01, steps: [-0.5, -0.1, -0.01, 0.01, 0.1, 0.5] }
+    case 'INDEX':
+    case 'BOOM_CRASH':
+      // SPY at $720, BOOM500 synthetic similar. 0.1 lot ≈ $72 notional.
+      return { default: 0.1, steps: [-1, -0.5, -0.1, 0.1, 0.5, 1] }
+    case 'FX':
+    default:
+      // EURUSD-style: 1 lot = 100k base. 1.0 default with ±5/±1/±0.1
+      // mirrors the historic MT5 mobile defaults.
+      return { default: 1.0, steps: [-5, -1, -0.1, 0.1, 1, 5] }
+  }
+}
+
 export default function MT5TradeTicket({
   open, onClose, info, tick, accountId, onPlaced,
 }: Props) {
-  const [lots,   setLots]   = useState(2.5)
+  // Asset-class-aware defaults — see volumeProfile above. Computed once
+  // per open so changing symbols requires a fresh ticket (matches MT5
+  // mobile, where each ticket binds to one instrument).
+  const profile = volumeProfile(info)
+  const [lots,   setLots]   = useState(profile.default)
   const [tp,     setTp]     = useState<number | null>(null)
   const [sl,     setSl]     = useState<number | null>(null)
   const [busy,   setBusy]   = useState<'BUY' | 'SELL' | null>(null)
@@ -70,11 +99,16 @@ export default function MT5TradeTicket({
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
   // Reset on every fresh open so a stale prior value doesn't surprise.
+  // Re-seed `lots` from the profile so a user who toggled to a different
+  // symbol still gets a sensible default for that asset class.
   useEffect(() => {
     if (!open) return
-    setLots(2.5); setTp(null); setSl(null); setBusy(null); setErr(null)
+    setLots(profile.default); setTp(null); setSl(null); setBusy(null); setErr(null)
     setAdvancedOpen(false)
-  }, [open])
+    // profile is recomputed every render from `info`; we only want this
+    // reset to run on open + symbol change, not on every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, info?.symbol])
 
   // Lock body scroll while ticket is up so the underlying page doesn't
   // wobble on iOS rubber-band drags.
@@ -148,10 +182,12 @@ export default function MT5TradeTicket({
           </button>
         </div>
 
-        {/* Volume row — chips around the central number. */}
+        {/* Volume row — chips around the central number. Step values come
+            from the per-asset-class volumeProfile so cent-account users
+            don't end up with one-tap-to-$400k-notional defaults. */}
         <div className="px-4 py-4 border-b border-border">
           <div className="grid grid-cols-7 gap-1.5 items-stretch">
-            {VOLUME_STEPS.slice(0, 3).map(d => (
+            {profile.steps.slice(0, 3).map(d => (
               <button
                 key={d}
                 type="button"
@@ -160,9 +196,9 @@ export default function MT5TradeTicket({
               >{d}</button>
             ))}
             <div className="py-2 rounded-md bg-surface/40 flex items-center justify-center text-text text-base font-bold num">
-              {lots.toFixed(2)}
+              {lots.toFixed(lots < 0.1 ? 3 : 2)}
             </div>
-            {VOLUME_STEPS.slice(3).map(d => (
+            {profile.steps.slice(3).map(d => (
               <button
                 key={d}
                 type="button"
