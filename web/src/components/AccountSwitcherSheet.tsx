@@ -2,8 +2,13 @@
 import { useState } from 'react'
 import clsx from 'clsx'
 import type { UserAccount } from '@/types'
+import { kindLabel } from '@/types'
 import { createAccountApi } from '@/lib/api'
 import BottomSheet from './BottomSheet'
+
+/** Kinds the user can pick when creating a real account. Excludes 'demo'
+ *  (auto-created by /auth/google, not user-spawned). */
+type CreatableKind = 'real_standard' | 'real_cent' | 'real_micro'
 
 /**
  * AccountSwitcherSheet — list the user's real accounts, switch between
@@ -30,12 +35,14 @@ export default function AccountSwitcherSheet({
 
   const [creating, setCreating]   = useState(false)
   const [newLabel, setNewLabel]   = useState('')
+  const [newKind,  setNewKind]    = useState<CreatableKind>('real_standard')
   const [busy,     setBusy]       = useState(false)
   const [error,    setError]      = useState<string | null>(null)
 
   const reset = () => {
     setCreating(false)
     setNewLabel('')
+    setNewKind('real_standard')
     setBusy(false)
     setError(null)
   }
@@ -46,7 +53,7 @@ export default function AccountSwitcherSheet({
     setBusy(true)
     setError(null)
     try {
-      const { account, token } = await createAccountApi(label)
+      const { account, token } = await createAccountApi(label, newKind)
       onCreated(account.id, token)
       reset()
       onClose()
@@ -74,7 +81,14 @@ export default function AccountSwitcherSheet({
                 {a.id === selectedId ? '✓' : a.label[0]?.toUpperCase()}
               </span>
               <span className="flex-1 min-w-0">
-                <span className="block text-text text-sm font-semibold truncate">{a.label}</span>
+                <span className="flex items-center gap-1.5">
+                  <span className="text-text text-sm font-semibold truncate">{a.label}</span>
+                  {kindLabel(a.kind) && (
+                    <span className="text-[8px] font-bold tracking-wider px-1 py-0.5 rounded bg-brand/15 text-brand">
+                      {kindLabel(a.kind)}
+                    </span>
+                  )}
+                </span>
                 <span className="block text-dim text-[11px] num">
                   ${a.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
@@ -112,6 +126,48 @@ export default function AccountSwitcherSheet({
               className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-text text-sm focus:outline-none focus:border-brand/60"
               onKeyDown={e => { if (e.key === 'Enter') handleCreate() }}
             />
+
+            {/* Kind picker — Standard / Cent / Micro. Three-up tile picker
+                so the trade-offs (deposit feel, lot size) are visible at
+                a glance. Cent/micro are PSYCHOLOGICAL leverage — same
+                broker risk per real-USD as standard. */}
+            <label className="block text-dim text-[10px] uppercase tracking-wider pt-1">Account type</label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['real_standard', 'real_cent', 'real_micro'] as const).map(k => {
+                const selected = newKind === k
+                const tile = k === 'real_standard'
+                  ? { name: 'Standard', sub: '$1 = $1',     mult: '1×' }
+                  : k === 'real_cent'
+                  ? { name: 'Cent',     sub: '$10 → $1,000', mult: '×100' }
+                  : { name: 'Micro',    sub: '$1 → $1,000',  mult: '×1000' }
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setNewKind(k)}
+                    className={clsx(
+                      'p-2.5 rounded-lg border text-left transition-colors',
+                      selected
+                        ? 'bg-brand/10 border-brand/50'
+                        : 'bg-surface border-border hover:border-brand/30',
+                    )}
+                  >
+                    <p className="text-text text-xs font-bold">{tile.name}</p>
+                    <p className="text-dim text-[9px] mt-0.5">{tile.sub}</p>
+                    <p className={clsx(
+                      'text-[10px] num font-semibold mt-1',
+                      selected ? 'text-brand' : 'text-dim/80',
+                    )}>{tile.mult}</p>
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-[10px] text-dim/80 leading-snug">
+              Cent / Micro multiply your deposit nominally so smaller real
+              amounts feel like larger trading accounts. Same broker risk;
+              same spreads. You can't change kind after creation.
+            </p>
+
             {error && <p className="text-down text-xs">{error}</p>}
             <div className="flex gap-2">
               <button
@@ -130,9 +186,6 @@ export default function AccountSwitcherSheet({
                 {busy ? 'Creating…' : 'Create'}
               </button>
             </div>
-            <p className="text-[10px] text-dim/80">
-              New accounts start at $0. Deposit USDT or NGN to fund.
-            </p>
           </div>
         )}
       </div>

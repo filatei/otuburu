@@ -186,8 +186,9 @@ export default function TradingPage() {
     if (selectedRealId && owned.includes(selectedRealId)) return selectedRealId
     return owned[0] ?? user.account_id ?? null
   })()
-  const activeAccountLabel: string | undefined =
-    user?.accounts?.find(a => a.id === realAccountId)?.label
+  const activeAccount = user?.accounts?.find(a => a.id === realAccountId)
+  const activeAccountLabel: string | undefined = activeAccount?.label
+  const activeAccountKind = activeAccount?.kind
 
   // Hydrate selectedRealId from localStorage once the user is known.
   useEffect(() => {
@@ -334,6 +335,7 @@ export default function TradingPage() {
         user={user}
         mode={mode}
         activeAccountLabel={activeAccountLabel}
+        activeAccountKind={activeAccountKind}
         engineBalance={account?.balance ?? null}
         onModeToggle={() => setMode(m => m === 'demo' ? 'real' : 'demo')}
         onLogout={logout}

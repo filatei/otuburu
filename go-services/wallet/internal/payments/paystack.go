@@ -26,6 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"otuburu.money/wallet/internal/accountkind"
 	"otuburu.money/wallet/internal/auth"
 	"otuburu.money/wallet/internal/email"
 )
@@ -404,6 +405,17 @@ func (h *Handler) creditPaystack(ctx context.Context, ref, accountID string, amo
 	interbank   := h.rates.GetUSDToNGN()
 	custRate    := customerRate(interbank)
 
+	// Apply the account's kind multiplier so a $10 deposit into a cent
+	// account credits $1,000 cent-units. Fetched outside the tx — kind is
+	// immutable post-creation so there's no read-modify-write race here.
+	var kind string
+	if err := h.db.QueryRow(ctx,
+		`SELECT kind FROM accounts WHERE id=$1`, accountID,
+	).Scan(&kind); err != nil {
+		return err
+	}
+	scaled := usdCredited * accountkind.Scale(kind)
+
 	tx, err := h.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -412,15 +424,18 @@ func (h *Handler) creditPaystack(ctx context.Context, ref, accountID string, amo
 
 	if _, err = tx.Exec(ctx,
 		`UPDATE accounts SET balance = balance + $1 WHERE id = $2`,
-		usdCredited, accountID,
+		scaled, accountID,
 	); err != nil {
 		return err
 	}
 
+	// Ledger row records the SCALED account-unit movement so reconcile
+	// against accounts.balance is a straight sum. The fx_quotes row below
+	// still captures the real USD/NGN values for the FX audit trail.
 	if _, err = tx.Exec(ctx,
 		`INSERT INTO ledger (account_id, type, amount, status, ref, note)
 		 VALUES ($1,'deposit',$2,'confirmed',$3,$4)`,
-		accountID, usdCredited, ref,
+		accountID, scaled, ref,
 		fmt.Sprintf("Paystack NGN deposit (ref %s)", ref),
 	); err != nil {
 		return err

@@ -202,11 +202,16 @@ func (h *Handler) Me(c *gin.Context) {
 		Label   string  `json:"label"`
 		Type    string  `json:"type"`
 		Balance float64 `json:"balance"`
+		// kind drives the savings ↔ account scaling factor on transfers.
+		// 'real_standard' = 1×, 'real_cent' = 100×, 'real_micro' = 1000×.
+		// Demo accounts are always 'demo' (no scaling). See accounts.kind
+		// schema CHECK for the canonical enumeration.
+		Kind string `json:"kind"`
 	}
 
 	// Single query for every account the user owns. Demo + real in one shot.
 	rows, err := h.db.Query(ctx,
-		`SELECT id, label, type, balance FROM accounts
+		`SELECT id, label, type, balance, kind FROM accounts
 		 WHERE user_id = $1
 		 ORDER BY type DESC, created_at`, // 'real' before 'demo' lexicographically — order kept stable
 		claims.UserID,
@@ -222,7 +227,7 @@ func (h *Handler) Me(c *gin.Context) {
 	var primaryRealID, demoID string
 	for rows.Next() {
 		var r acctRow
-		if err := rows.Scan(&r.ID, &r.Label, &r.Type, &r.Balance); err != nil {
+		if err := rows.Scan(&r.ID, &r.Label, &r.Type, &r.Balance, &r.Kind); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "scan: " + err.Error()})
 			return
 		}

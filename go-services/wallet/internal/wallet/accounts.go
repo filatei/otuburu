@@ -24,6 +24,16 @@ type accountDTO struct {
 	Label   string  `json:"label"`
 	Type    string  `json:"type"`
 	Balance float64 `json:"balance"`
+	Kind    string  `json:"kind"`
+}
+
+// validKinds bounds the values POST /wallet/accounts will accept. Demo is
+// rejected here because demo accounts are auto-created by /auth/google and
+// can't be user-spawned. The check matches accounts.kind's CHECK constraint.
+var validKinds = map[string]struct{}{
+	"real_standard": {},
+	"real_cent":     {},
+	"real_micro":    {},
 }
 
 // GET /wallet/accounts — list every account the user owns (demo + all real).
@@ -33,7 +43,7 @@ func (h *Handler) ListAccounts(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	rows, err := h.db.Query(ctx,
-		`SELECT id, label, type, balance FROM accounts
+		`SELECT id, label, type, balance, kind FROM accounts
 		 WHERE user_id = $1
 		 ORDER BY type DESC, created_at`,
 		claims.UserID,
@@ -47,7 +57,7 @@ func (h *Handler) ListAccounts(c *gin.Context) {
 	var out []accountDTO
 	for rows.Next() {
 		var a accountDTO
-		if err := rows.Scan(&a.ID, &a.Label, &a.Type, &a.Balance); err != nil {
+		if err := rows.Scan(&a.ID, &a.Label, &a.Type, &a.Balance, &a.Kind); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -73,6 +83,10 @@ func (h *Handler) CreateAccount(c *gin.Context) {
 
 	var req struct {
 		Label string `json:"label" binding:"required"`
+		// kind selects the scaling factor on deposits + transfers into
+		// this account. Defaults to 'real_standard' when omitted so older
+		// clients that only send {label} keep working.
+		Kind string `json:"kind"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "label required"})
@@ -81,6 +95,14 @@ func (h *Handler) CreateAccount(c *gin.Context) {
 	label := strings.TrimSpace(req.Label)
 	if label == "" || len(label) > 40 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "label must be 1–40 chars"})
+		return
+	}
+	kind := req.Kind
+	if kind == "" {
+		kind = "real_standard"
+	}
+	if _, ok := validKinds[kind]; !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "kind must be real_standard, real_cent, or real_micro"})
 		return
 	}
 
@@ -112,10 +134,10 @@ func (h *Handler) CreateAccount(c *gin.Context) {
 	// Insert the new account (balance 0 — must be funded via deposit).
 	var newID string
 	if err = tx.QueryRow(ctx,
-		`INSERT INTO accounts (user_id, type, label, balance)
-		 VALUES ($1, 'real', $2, 0)
+		`INSERT INTO accounts (user_id, type, label, balance, kind)
+		 VALUES ($1, 'real', $2, 0, $3)
 		 RETURNING id`,
-		claims.UserID, label,
+		claims.UserID, label, kind,
 	).Scan(&newID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "insert: " + err.Error()})
 		return
@@ -147,6 +169,7 @@ func (h *Handler) CreateAccount(c *gin.Context) {
 			Label:   label,
 			Type:    "real",
 			Balance: 0,
+			Kind:    kind,
 		},
 		"token": tok,
 	})

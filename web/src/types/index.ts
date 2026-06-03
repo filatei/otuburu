@@ -15,6 +15,34 @@ export interface UserAccount {
   label:   string
   type:    'demo' | 'real'
   balance: number
+  /** Phase-4 scaling kind. 'real_standard' (1×), 'real_cent' (100×), or
+   *  'real_micro' (1000×) — applied to deposits + savings/account transfers.
+   *  Demo accounts always carry 'demo'. Optional on the type for back-compat
+   *  with older /auth/me payloads that pre-date this field. */
+  kind?:   AccountKind
+}
+
+export type AccountKind = 'real_standard' | 'real_cent' | 'real_micro' | 'demo'
+
+/** kindScale — multiplier applied when funds flow from a USD pool
+ *  (savings, deposits) into this account, or the divisor when they flow
+ *  back out. Centralised so the UI hint and the backend agree. */
+export function kindScale(kind: AccountKind | undefined): number {
+  switch (kind) {
+    case 'real_cent':  return 100
+    case 'real_micro': return 1000
+    default:           return 1
+  }
+}
+
+/** kindLabel — short user-facing badge ('CENT', 'MICRO') or '' for
+ *  standard/demo so callers can render a conditional pill. */
+export function kindLabel(kind: AccountKind | undefined): string {
+  switch (kind) {
+    case 'real_cent':  return 'CENT'
+    case 'real_micro': return 'MICRO'
+    default:           return ''
+  }
 }
 
 export interface SymbolInfo {

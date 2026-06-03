@@ -55,10 +55,13 @@ export async function listAccounts(): Promise<UserAccount[]> {
  *  Returns the created account plus a refreshed JWT that includes the new
  *  id in its `aids` claim, so the caller can immediately trade against it
  *  without re-authenticating. */
-export async function createAccountApi(label: string): Promise<{ account: UserAccount; token: string }> {
+export async function createAccountApi(
+  label: string,
+  kind: 'real_standard' | 'real_cent' | 'real_micro' = 'real_standard',
+): Promise<{ account: UserAccount; token: string }> {
   const res = await authFetch(`${API_BASE}/wallet/accounts`, {
     method: 'POST',
-    body:   JSON.stringify({ label }),
+    body:   JSON.stringify({ label, kind }),
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data?.error ?? 'Failed to create account')

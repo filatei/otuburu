@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import type { AuthUser } from '@/hooks/useAuth'
+import type { AccountKind } from '@/types'
+import { kindLabel } from '@/types'
 import { setFullscreenPref } from '@/hooks/useAutoFullscreen'
 
 interface Props {
@@ -11,6 +13,10 @@ interface Props {
   /** Label of the currently active real account — shown in the user card
    *  when mode === 'real'. Phase 2: replaces the implicit "Real" label. */
   activeAccountLabel?: string
+  /** Phase-4 kind of the currently active real account. When non-standard,
+   *  a CENT/MICRO badge renders next to the label so users always know
+   *  what units the balance is in. */
+  activeAccountKind?: AccountKind
   /** Live engine-side balance for the currently selected account+mode.
    *  Overrides the static deposit-total in user.real_balance so the
    *  drawer's balance matches what the header shows after trades settle.
@@ -37,9 +43,9 @@ interface Props {
 }
 
 export default function AppDrawer({
-  open, onClose, user, mode, activeAccountLabel, engineBalance, onModeToggle,
-  onLogout, onEditProfile, onDeposit, onWithdraw, onHistory, onSwitchAccount,
-  onTransfer, onGetApp, onContact,
+  open, onClose, user, mode, activeAccountLabel, activeAccountKind,
+  engineBalance, onModeToggle, onLogout, onEditProfile, onDeposit,
+  onWithdraw, onHistory, onSwitchAccount, onTransfer, onGetApp, onContact,
 }: Props) {
   const drawerRef = useRef<HTMLDivElement>(null)
 
@@ -117,12 +123,19 @@ export default function AppDrawer({
                 account is active (Phase 2 multi-account). */}
             <div className="flex items-center justify-between pt-3 border-t border-border">
               <div className="min-w-0">
-                <p className="text-[10px] text-dim uppercase tracking-wider mb-0.5">
-                  {mode === 'demo'
-                    ? 'Demo Balance'
-                    : activeAccountLabel
-                      ? `Real · ${activeAccountLabel}`
-                      : 'Real Balance'}
+                <p className="text-[10px] text-dim uppercase tracking-wider mb-0.5 flex items-center gap-1.5">
+                  <span className="truncate">
+                    {mode === 'demo'
+                      ? 'Demo Balance'
+                      : activeAccountLabel
+                        ? `Real · ${activeAccountLabel}`
+                        : 'Real Balance'}
+                  </span>
+                  {mode === 'real' && kindLabel(activeAccountKind) && (
+                    <span className="text-[8px] font-bold tracking-wider px-1 py-0.5 rounded bg-brand/15 text-brand shrink-0">
+                      {kindLabel(activeAccountKind)}
+                    </span>
+                  )}
                 </p>
                 <p className="num text-lg font-bold text-text">
                   ${balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

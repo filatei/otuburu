@@ -40,8 +40,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 
+	"otuburu.money/wallet/internal/accountkind"
 	"otuburu.money/wallet/internal/auth"
 )
+
+// accountKind looks up an account's kind. Returns 'real_standard' on miss
+// so callers can't accidentally see a 0-multiplier from accountkind.Scale.
+func (h *Handler) accountKind(ctx context.Context, id string) string {
+	var kind string
+	if err := h.db.QueryRow(ctx,
+		`SELECT kind FROM accounts WHERE id=$1`, id,
+	).Scan(&kind); err != nil || kind == "" {
+		return "real_standard"
+	}
+	return kind
+}
 
 // transferLeg is a side of a transfer in the request body.
 //
@@ -171,16 +184,22 @@ func (h *Handler) doTransfer(
 
 // ── Path A: savings → account ────────────────────────────────────────────────
 //
+// Convention: req.Amount is in SOURCE units (USD for savings). The
+// destination is credited req.Amount * Scale(destKind) so a $10 transfer
+// into a cent account credits 1000 cent-units.
+//
 // Order of operations:
-//  1. Lock savings_wallets row, validate balance >= amount, debit savings,
-//     write transfers row 'pending', commit. After this, the user's savings
-//     is debited and a pending transfer is recorded.
-//  2. Call engine AdjustBalance(+amount). On success: mirror to accounts
-//     table + write transfer_in ledger row + mark transfer 'completed'.
+//  1. Lock savings_wallets row, validate balance >= amount, debit savings
+//     (USD), write transfers row 'pending', commit. After this, the user's
+//     savings is debited and a pending transfer is recorded.
+//  2. Call engine AdjustBalance(+scaledAmount). On success: mirror to
+//     accounts table + write transfer_in ledger row + mark 'completed'.
 //  3. On engine failure: REFUND savings (best-effort), mark transfer 'failed'.
 func (h *Handler) transferSavingsToAccount(
 	ctx context.Context, userID string, req *transferRequest,
 ) (string, string, string, int) {
+	destKind := h.accountKind(ctx, req.To.ID)
+	scaledAmount := req.Amount * accountkind.Scale(destKind)
 	tx, err := h.db.Begin(ctx)
 	if err != nil {
 		return "", "", "db tx begin: " + err.Error(), http.StatusInternalServerError
@@ -228,8 +247,9 @@ func (h *Handler) transferSavingsToAccount(
 		return "", "", err.Error(), http.StatusInternalServerError
 	}
 
-	// Engine credit. If this fails, refund savings.
-	adj, err := h.callAdjustBalance(ctx, req.To.ID, req.Amount,
+	// Engine credit in destination account-units. If this fails, refund
+	// savings the original USD amount the user committed.
+	adj, err := h.callAdjustBalance(ctx, req.To.ID, scaledAmount,
 		fmt.Sprintf("transfer %s in from savings", transferID))
 	if err != nil {
 		h.failTransfer(ctx, transferID, "engine credit failed: "+err.Error())
@@ -245,20 +265,29 @@ func (h *Handler) transferSavingsToAccount(
 			http.StatusUnprocessableEntity
 	}
 
-	// Mirror engine's new balance into Postgres + record ledger + mark completed.
-	h.finalizeAccountLeg(ctx, transferID, req.To.ID, adj.NewBalance, +req.Amount, "transfer_in")
+	// Mirror engine's new balance into Postgres + record ledger (in
+	// account-units) + mark completed.
+	h.finalizeAccountLeg(ctx, transferID, req.To.ID, adj.NewBalance, +scaledAmount, "transfer_in")
 	return transferID, "completed", "", 0
 }
 
 // ── Path B: account → savings ────────────────────────────────────────────────
 //
+// Convention: req.Amount is in SOURCE units (account-units for cent/micro).
+// Savings is credited req.Amount / Scale(srcKind) USD. So pulling 1000 from
+// a cent account credits $10 to savings.
+//
 // Engine debit goes first because it can reject on free-margin. Only after
-// the engine accepts do we touch Postgres. No compensation window for a
-// single-leg transfer that touches the engine first.
+// the engine accepts do we touch Postgres. The compensation path runs the
+// reverse engine adjust if any subsequent step fails — keeps the engine
+// and Postgres aligned even when the DB hiccups.
 func (h *Handler) transferAccountToSavings(
 	ctx context.Context, userID string, req *transferRequest,
 ) (string, string, string, int) {
-	// Step 1: engine debit. Can reject.
+	srcKind := h.accountKind(ctx, req.From.ID)
+	usdToSavings := req.Amount / accountkind.Scale(srcKind)
+
+	// Step 1: engine debit (in source account-units). Can reject on free-margin.
 	adj, err := h.callAdjustBalance(ctx, req.From.ID, -req.Amount,
 		"transfer to savings")
 	if err != nil {
@@ -268,7 +297,7 @@ func (h *Handler) transferAccountToSavings(
 		return "", "", adj.RejectReason, http.StatusUnprocessableEntity
 	}
 
-	// Step 2: DB tx — credit savings, mirror account balance, write ledger,
+	// Step 2: DB tx — credit savings (USD), mirror account balance, write ledger,
 	// record transfer 'completed'. If this fails, compensate the engine debit.
 	tx, err := h.db.Begin(ctx)
 	if err != nil {
@@ -286,7 +315,7 @@ func (h *Handler) transferAccountToSavings(
 	}
 	if _, err = tx.Exec(ctx,
 		`UPDATE savings_wallets SET balance = balance + $1, updated_at = NOW() WHERE user_id=$2`,
-		req.Amount, userID,
+		usdToSavings, userID,
 	); err != nil {
 		h.compensateAdjust(ctx, req.From.ID, +req.Amount, "compensate failed savings credit")
 		return "", "", err.Error(), http.StatusInternalServerError
@@ -298,6 +327,9 @@ func (h *Handler) transferAccountToSavings(
 		return "", "", err.Error(), http.StatusInternalServerError
 	}
 
+	// transfers.amount stores the SOURCE-side units (what the user typed) —
+	// admin reconciliation can compare it directly against the from-account's
+	// ledger row. Savings-side audit lives in savings_wallets.updated_at.
 	var transferID string
 	if err = tx.QueryRow(ctx,
 		`INSERT INTO transfers (user_id, from_kind, from_id, to_kind, to_id,
@@ -332,10 +364,26 @@ func (h *Handler) transferAccountToSavings(
 // succeeded, leg 2 (credit dst) failed. We compensate leg 1 with a reverse
 // delta. If THAT fails, the transfer is left 'failed' and an admin needs to
 // reconcile — the note captures what's outstanding.
+//
+// Cross-kind conversion: req.Amount is in SOURCE account-units. The
+// destination is credited req.Amount * Scale(destKind) / Scale(srcKind).
+// Examples:
+//
+//	standard → cent:  $50 source → $5000 cent-units
+//	cent → standard:  $5000 source → $50 standard
+//	cent → micro:     $500 cent → $5000 micro
+//
+// The compensation amount also uses srcUnits — undoes the original debit.
 func (h *Handler) transferAccountToAccount(
 	ctx context.Context, userID string, req *transferRequest,
 ) (string, string, string, int) {
-	// Leg 1: engine debit src. Can reject on free-margin.
+	srcKind := h.accountKind(ctx, req.From.ID)
+	dstKind := h.accountKind(ctx, req.To.ID)
+	srcScale := accountkind.Scale(srcKind)
+	dstScale := accountkind.Scale(dstKind)
+	dstAmount := req.Amount * (dstScale / srcScale)
+
+	// Leg 1: engine debit src (in source units). Can reject on free-margin.
 	debit, err := h.callAdjustBalance(ctx, req.From.ID, -req.Amount,
 		"transfer to account "+req.To.ID)
 	if err != nil {
@@ -345,8 +393,8 @@ func (h *Handler) transferAccountToAccount(
 		return "", "", debit.RejectReason, http.StatusUnprocessableEntity
 	}
 
-	// Leg 2: engine credit dst. If this fails we MUST refund src.
-	credit, err := h.callAdjustBalance(ctx, req.To.ID, +req.Amount,
+	// Leg 2: engine credit dst (in dest units). If this fails we MUST refund src.
+	credit, err := h.callAdjustBalance(ctx, req.To.ID, +dstAmount,
 		"transfer in from account "+req.From.ID)
 	if err != nil {
 		// Compensate src — best-effort. If compensation also fails, log loud.
@@ -366,7 +414,7 @@ func (h *Handler) transferAccountToAccount(
 	tx, err := h.db.Begin(ctx)
 	if err != nil {
 		h.compensateAdjust(ctx, req.From.ID, +req.Amount, "compensate failed db begin")
-		h.compensateAdjust(ctx, req.To.ID, -req.Amount, "compensate failed db begin")
+		h.compensateAdjust(ctx, req.To.ID, -dstAmount, "compensate failed db begin")
 		return "", "", err.Error(), http.StatusInternalServerError
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
@@ -375,17 +423,19 @@ func (h *Handler) transferAccountToAccount(
 		`UPDATE accounts SET balance=$1 WHERE id=$2`, debit.NewBalance, req.From.ID,
 	); err != nil {
 		h.compensateAdjust(ctx, req.From.ID, +req.Amount, "compensate failed src mirror")
-		h.compensateAdjust(ctx, req.To.ID, -req.Amount, "compensate failed src mirror")
+		h.compensateAdjust(ctx, req.To.ID, -dstAmount, "compensate failed src mirror")
 		return "", "", err.Error(), http.StatusInternalServerError
 	}
 	if _, err = tx.Exec(ctx,
 		`UPDATE accounts SET balance=$1 WHERE id=$2`, credit.NewBalance, req.To.ID,
 	); err != nil {
 		h.compensateAdjust(ctx, req.From.ID, +req.Amount, "compensate failed dst mirror")
-		h.compensateAdjust(ctx, req.To.ID, -req.Amount, "compensate failed dst mirror")
+		h.compensateAdjust(ctx, req.To.ID, -dstAmount, "compensate failed dst mirror")
 		return "", "", err.Error(), http.StatusInternalServerError
 	}
 
+	// transfers.amount stores the SOURCE-side units. The dest-side amount
+	// is recoverable from kind + scale lookups; no need to store both.
 	var transferID string
 	if err = tx.QueryRow(ctx,
 		`INSERT INTO transfers (user_id, from_kind, from_id, to_kind, to_id,
@@ -395,7 +445,7 @@ func (h *Handler) transferAccountToAccount(
 		userID, req.From.ID, req.To.ID, req.Amount, req.IdempotencyKey, req.Note,
 	).Scan(&transferID); err != nil {
 		h.compensateAdjust(ctx, req.From.ID, +req.Amount, "compensate failed transfer row")
-		h.compensateAdjust(ctx, req.To.ID, -req.Amount, "compensate failed transfer row")
+		h.compensateAdjust(ctx, req.To.ID, -dstAmount, "compensate failed transfer row")
 		return "", "", err.Error(), http.StatusInternalServerError
 	}
 
@@ -404,16 +454,16 @@ func (h *Handler) transferAccountToAccount(
 		 ($1, 'transfer_out', $2, $3, 'transfer to account ' || $4),
 		 ($5, 'transfer_in',  $6, $3, 'transfer from account ' || $7)`,
 		req.From.ID, -req.Amount, transferID, req.To.ID,
-		req.To.ID, +req.Amount, req.From.ID,
+		req.To.ID, +dstAmount, req.From.ID,
 	); err != nil {
 		h.compensateAdjust(ctx, req.From.ID, +req.Amount, "compensate failed ledger")
-		h.compensateAdjust(ctx, req.To.ID, -req.Amount, "compensate failed ledger")
+		h.compensateAdjust(ctx, req.To.ID, -dstAmount, "compensate failed ledger")
 		return "", "", err.Error(), http.StatusInternalServerError
 	}
 
 	if err = tx.Commit(ctx); err != nil {
 		h.compensateAdjust(ctx, req.From.ID, +req.Amount, "compensate failed commit")
-		h.compensateAdjust(ctx, req.To.ID, -req.Amount, "compensate failed commit")
+		h.compensateAdjust(ctx, req.To.ID, -dstAmount, "compensate failed commit")
 		return "", "", err.Error(), http.StatusInternalServerError
 	}
 	return transferID, "completed", "", 0

@@ -21,6 +21,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"otuburu.money/wallet/internal/accountkind"
 	"otuburu.money/wallet/internal/email"
 )
 
@@ -172,20 +173,32 @@ func (m *Monitor) credit(ctx context.Context, t trc20Transfer, accountID string)
 		return
 	}
 
-	// Credit account balance
+	// Scale the USDT amount by the destination account's kind so a $10
+	// deposit into a cent account credits $1,000 cent-units. Kind is
+	// immutable post-creation — safe to read outside the row lock.
+	var kind string
+	if err = tx.QueryRow(ctx,
+		`SELECT kind FROM accounts WHERE id=$1`, accountID,
+	).Scan(&kind); err != nil {
+		return
+	}
+	scaled := amount * accountkind.Scale(kind)
+
+	// Credit account balance in scaled units.
 	_, err = tx.Exec(ctx,
 		`UPDATE accounts SET balance = balance + $1 WHERE id = $2`,
-		amount, accountID,
+		scaled, accountID,
 	)
 	if err != nil {
 		return
 	}
 
-	// Record ledger entry
+	// Ledger row records the scaled value so a straight sum reconciles
+	// against accounts.balance.
 	_, err = tx.Exec(ctx,
 		`INSERT INTO ledger (account_id, type, amount, status, ref, note)
 		 VALUES ($1,'deposit',$2,'confirmed',$3,$4)`,
-		accountID, amount, t.TransactionID,
+		accountID, scaled, t.TransactionID,
 		fmt.Sprintf("USDT deposit from %s", t.From),
 	)
 	if err != nil {

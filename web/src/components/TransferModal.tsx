@@ -23,6 +23,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AuthUser } from '@/hooks/useAuth'
 import type { UserAccount } from '@/types'
+import { kindLabel, kindScale } from '@/types'
 import { authFetch } from '@/lib/api'
 import BottomSheet from './BottomSheet'
 
@@ -98,6 +99,13 @@ export default function TransferModal({ open, onClose, user, onTransferred }: Pr
   const amountNum = parseFloat(amount) || 0
   const overMax = amountNum > sourceMax + 1e-6
   const canSubmit = !!from && !!to && amountNum > 0 && !overMax && !busy
+
+  // Cross-kind conversion preview: how much the destination receives
+  // given the user's amount in source-units. scale(savings) = 1.
+  const sourceScale = from?.kind === 'savings' ? 1 : kindScale(from?.account.kind)
+  const destScale   = to?.kind === 'savings'   ? 1 : kindScale(to?.account.kind)
+  const destReceives = amountNum * (destScale / sourceScale)
+  const isCrossKind = !!from && !!to && sourceScale !== destScale
 
   const handleSubmit = async () => {
     if (!from || !to) return
@@ -206,6 +214,14 @@ export default function TransferModal({ open, onClose, user, onTransferred }: Pr
               Open positions reserve the difference.
             </p>
           )}
+          {isCrossKind && amountNum > 0 && (
+            <p className="text-[10px] text-brand mt-1.5 leading-relaxed">
+              ↳ Destination receives <span className="num font-semibold">${destReceives.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              {to?.kind === 'account' && kindLabel(to.account.kind) && (
+                <> {kindLabel(to.account.kind).toLowerCase()}-units</>
+              )}
+            </p>
+          )}
           {overMax && (
             <p className="text-[10px] text-down mt-1.5 font-medium">
               Exceeds available ${sourceMax.toFixed(2)}.
@@ -300,7 +316,12 @@ function LegPicker({ legs, value, onChange, getBalance, disabledLeg }: LegPicker
             <div className="min-w-0">
               <p className="text-sm font-medium flex items-center gap-1.5">
                 {leg.kind === 'savings' && <span>🏛️</span>}
-                {label}
+                <span className="truncate">{label}</span>
+                {leg.kind === 'account' && kindLabel(leg.account.kind) && (
+                  <span className="text-[8px] font-bold tracking-wider px-1 py-0.5 rounded bg-brand/15 text-brand shrink-0">
+                    {kindLabel(leg.account.kind)}
+                  </span>
+                )}
               </p>
               <p className="text-[10px] text-dim leading-tight">{sub}</p>
             </div>
