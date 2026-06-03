@@ -21,6 +21,10 @@ export interface AuthUser {
   /** Phase 2: every account the user owns (1 demo + N real). May be empty
    *  briefly on first login before /auth/me populates. */
   accounts?:    UserAccount[]
+  /** Phase 4: savings wallet balance — the SOLE source for withdrawals.
+   *  Users transfer funds from trading accounts into Savings, then withdraw
+   *  from there. May be 0 for users who haven't transferred anything yet. */
+  savings_balance?: number
 }
 
 export function useAuth() {

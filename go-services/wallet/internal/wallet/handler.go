@@ -14,16 +14,37 @@ import (
 )
 
 type Handler struct {
-	db       *pgxpool.Pool
-	hd       *HDWallet
-	mailer   *email.Mailer
-	paystack *payments.Handler // optional, may be nil if Paystack disabled
+	db             *pgxpool.Pool
+	hd             *HDWallet
+	mailer         *email.Mailer
+	paystack       *payments.Handler // optional, may be nil if Paystack disabled
+	gatewayURL     string            // wallet→gateway URL for /internal/*
+	internalSecret string            // shared with gateway for X-Internal-Secret
+	httpClient     *http.Client      // reused across transfer + balance-sync calls
 }
 
 // NewHandler builds the wallet HTTP handler. `mailer` and `paystack` may be
 // nil — emails / NGN withdrawal just become no-op endpoints in that case.
-func NewHandler(db *pgxpool.Pool, hd *HDWallet, mailer *email.Mailer, paystack *payments.Handler) *Handler {
-	return &Handler{db: db, hd: hd, mailer: mailer, paystack: paystack}
+// `gatewayURL` + `internalSecret` are required for transfers (POST
+// /wallet/transfers calls gateway's /internal/adjust-balance to move funds
+// in/out of trading accounts).
+func NewHandler(
+	db *pgxpool.Pool,
+	hd *HDWallet,
+	mailer *email.Mailer,
+	paystack *payments.Handler,
+	gatewayURL string,
+	internalSecret string,
+) *Handler {
+	return &Handler{
+		db:             db,
+		hd:             hd,
+		mailer:         mailer,
+		paystack:       paystack,
+		gatewayURL:     gatewayURL,
+		internalSecret: internalSecret,
+		httpClient:     &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
 // GET /wallet/deposit-address — returns (or creates) the user's TRC20 deposit address.
@@ -107,7 +128,8 @@ func depositAddressResponse(address string) gin.H {
 	}
 }
 
-// GET /wallet/balance — real + demo balances
+// GET /wallet/balance — real + demo + savings balances.
+// Bundled together so useAuth.refreshBalances() doesn't need three round-trips.
 func (h *Handler) Balance(c *gin.Context) {
 	claims := c.MustGet("claims").(*auth.Claims)
 	ctx := c.Request.Context()
@@ -116,9 +138,15 @@ func (h *Handler) Balance(c *gin.Context) {
 	h.db.QueryRow(ctx, `SELECT balance FROM accounts WHERE id=$1`, claims.AccountID).Scan(&realBal) //nolint:errcheck
 	h.db.QueryRow(ctx, `SELECT balance FROM accounts WHERE id=$1`, claims.DemoID).Scan(&demoBal)   //nolint:errcheck
 
+	// ensureSavingsBalance lazy-creates the row. Errors don't fail the whole
+	// response — we report 0 and let the dedicated /wallet/savings endpoint
+	// surface any persistent DB issue.
+	savingsBal, _ := ensureSavingsBalance(ctx, h.db, claims.UserID)
+
 	c.JSON(http.StatusOK, gin.H{
-		"real": realBal,
-		"demo": demoBal,
+		"real":    realBal,
+		"demo":    demoBal,
+		"savings": savingsBal,
 	})
 }
 
@@ -172,33 +200,23 @@ func (h *Handler) Transactions(c *gin.Context) {
 }
 
 // POST /wallet/withdraw — request a USDT withdrawal.
-// Body: { amount, address, account_id? } — when account_id is omitted, falls
-// back to the JWT's legacy AccountID (single-account behaviour). Phase 2
-// callers can pass an explicit real account id; we verify ownership via
-// claims.OwnsAccount before debiting.
+// Body: { amount, address }
+//
+// Phase-4 change: withdrawals always originate from the user's Savings
+// wallet. Callers no longer pass account_id — if they do, it's ignored.
+// The frontend's "withdraw from this trading account" flow is now two
+// steps: (1) POST /wallet/transfers (account → savings), (2) this endpoint.
+// Forcing the park-first step protects open positions and gives the user
+// a clean reconcile target for payout obligations.
 func (h *Handler) Withdraw(c *gin.Context) {
 	claims := c.MustGet("claims").(*auth.Claims)
 
 	var req struct {
-		Amount    float64 `json:"amount"     binding:"required,min=10"`
-		Address   string  `json:"address"    binding:"required"`
-		AccountID string  `json:"account_id"` // optional; defaults to legacy primary real
+		Amount  float64 `json:"amount"  binding:"required,min=10"`
+		Address string  `json:"address" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Resolve which account to debit. Default to the JWT's primary real
-	// for back-compat with single-account clients; explicit account_id is
-	// validated against the user's ownership claim. Demo accounts cannot
-	// be withdrawn from — only real money goes on-chain.
-	accountID := req.AccountID
-	if accountID == "" {
-		accountID = claims.AccountID
-	}
-	if accountID == "" || accountID == claims.DemoID || !claims.OwnsAccount(accountID) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "account not owned by caller or demo"})
 		return
 	}
 
@@ -210,37 +228,43 @@ func (h *Handler) Withdraw(c *gin.Context) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// Deduct from the chosen real account's balance (optimistic lock via
-	// CHECK constraint that balance can't go negative). The query also
-	// pins type='real' as a belt-and-braces guard so a stale demo UUID in
-	// the claim can't ever drain a real balance.
+	// Lazy-create the savings row, then lock it for the debit. The CHECK
+	// (balance >= 0) on savings_wallets gives us the same belt-and-braces
+	// guard against draining below zero that the accounts table had.
+	if _, err = tx.Exec(ctx,
+		`INSERT INTO savings_wallets (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
+		claims.UserID,
+	); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "savings init failed"})
+		return
+	}
 	result, err := tx.Exec(ctx,
-		`UPDATE accounts SET balance = balance - $1
-		 WHERE id = $2 AND type='real' AND balance >= $1`,
-		req.Amount, accountID,
+		`UPDATE savings_wallets SET balance = balance - $1, updated_at = NOW()
+		 WHERE user_id = $2 AND balance >= $1`,
+		req.Amount, claims.UserID,
 	)
 	if err != nil || result.RowsAffected() == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "insufficient balance"})
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error": "insufficient savings — transfer funds into Savings first",
+		})
 		return
 	}
 
 	var wID string
 	err = tx.QueryRow(ctx,
-		`INSERT INTO withdrawals (user_id, account_id, amount, address)
-		 VALUES ($1,$2,$3,$4) RETURNING id`,
-		claims.UserID, accountID, req.Amount, req.Address,
+		`INSERT INTO withdrawals (user_id, account_id, amount, address, source, channel)
+		 VALUES ($1, NULL, $2, $3, 'savings', 'usdt') RETURNING id`,
+		claims.UserID, req.Amount, req.Address,
 	).Scan(&wID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "insert failed"})
 		return
 	}
 
-	// Ledger debit
-	tx.Exec(ctx, //nolint:errcheck
-		`INSERT INTO ledger (account_id, type, amount, status, ref, note)
-		 VALUES ($1,'withdrawal',$2,'pending',$3,'Withdrawal request pending approval')`,
-		accountID, -req.Amount, wID,
-	)
+	// Note: no ledger row written here. The ledger table requires
+	// account_id NOT NULL (it FKs to accounts), and Savings legs are
+	// audited via the `transfers` table when funds are moved into Savings.
+	// The `withdrawals` row itself is the source of truth for this debit.
 
 	if err := tx.Commit(ctx); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "commit failed"})
@@ -305,8 +329,11 @@ func (h *Handler) ResolveNGNAccount(c *gin.Context) {
 //	  "bank_code":           "058",        // Paystack bank id (e.g. GTBank)
 //	  "bank_account_number": "0123456789",
 //	  "bank_account_name":   "ADAMU BELLO", // verified via ResolveNGNAccount
-//	  "account_id":          "<uuid>"      // optional; defaults to primary real
 //	}
+//
+// Phase-4 change: like the USDT path, this now sources from Savings. The
+// frontend's "withdraw to bank from this account" flow becomes two steps:
+// (1) POST /wallet/transfers (account → savings), (2) this endpoint.
 //
 // NGN amount paid out = amount × interbank × (1 − 2% spread). Debit happens
 // in the same db tx as the withdrawal insert; the Paystack /transferrecipient
@@ -324,20 +351,9 @@ func (h *Handler) WithdrawNGN(c *gin.Context) {
 		BankCode          string  `json:"bank_code"            binding:"required"`
 		BankAccountNumber string  `json:"bank_account_number"  binding:"required"`
 		BankAccountName   string  `json:"bank_account_name"    binding:"required"`
-		AccountID         string  `json:"account_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Resolve account_id (multi-account-aware, same pattern as USDT path).
-	accountID := req.AccountID
-	if accountID == "" {
-		accountID = claims.AccountID
-	}
-	if accountID == "" || accountID == claims.DemoID || !claims.OwnsAccount(accountID) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "account not owned by caller or demo"})
 		return
 	}
 
@@ -359,25 +375,35 @@ func (h *Handler) WithdrawNGN(c *gin.Context) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// Debit USD with the same belt-and-braces guard as the USDT path.
+	// Debit Savings with the same balance-guarded UPDATE as the USDT path.
+	if _, err = tx.Exec(ctx,
+		`INSERT INTO savings_wallets (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
+		claims.UserID,
+	); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "savings init failed"})
+		return
+	}
 	result, err := tx.Exec(ctx,
-		`UPDATE accounts SET balance = balance - $1
-		 WHERE id = $2 AND type='real' AND balance >= $1`,
-		req.Amount, accountID,
+		`UPDATE savings_wallets SET balance = balance - $1, updated_at = NOW()
+		 WHERE user_id = $2 AND balance >= $1`,
+		req.Amount, claims.UserID,
 	)
 	if err != nil || result.RowsAffected() == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "insufficient balance"})
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error": "insufficient savings — transfer funds into Savings first",
+		})
 		return
 	}
 
 	var wID string
 	err = tx.QueryRow(ctx,
 		`INSERT INTO withdrawals
-		   (user_id, account_id, amount, status, channel,
+		   (user_id, account_id, amount, status, source, channel,
 		    bank_code, bank_account_number, bank_account_name, ngn_amount)
-		 VALUES ($1,$2,$3,'pending','ngn_bank',$4,$5,$6,$7)
+		 VALUES ($1, NULL, $2, 'pending', 'savings', 'ngn_bank',
+		         $3, $4, $5, $6)
 		 RETURNING id`,
-		claims.UserID, accountID, req.Amount,
+		claims.UserID, req.Amount,
 		req.BankCode, req.BankAccountNumber, req.BankAccountName, ngnPayout,
 	).Scan(&wID)
 	if err != nil {
@@ -385,13 +411,9 @@ func (h *Handler) WithdrawNGN(c *gin.Context) {
 		return
 	}
 
-	tx.Exec(ctx, //nolint:errcheck
-		`INSERT INTO ledger (account_id, type, amount, status, ref, note)
-		 VALUES ($1,'withdrawal',$2,'pending',$3,$4)`,
-		accountID, -req.Amount, wID,
-		fmt.Sprintf("NGN bank payout pending — %s …%s",
-			req.BankAccountName, lastFour(req.BankAccountNumber)),
-	)
+	// No ledger row: same reasoning as the USDT path. Savings debits are
+	// audited via the `transfers` table (when funds entered Savings) and
+	// the `withdrawals` row itself for the outbound leg.
 
 	if err := tx.Commit(ctx); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "commit failed"})
@@ -469,9 +491,3 @@ func (h *Handler) WithdrawNGN(c *gin.Context) {
 	})
 }
 
-func lastFour(s string) string {
-	if len(s) <= 4 {
-		return s
-	}
-	return s[len(s)-4:]
-}

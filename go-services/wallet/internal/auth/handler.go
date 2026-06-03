@@ -240,12 +240,23 @@ func (h *Handler) Me(c *gin.Context) {
 	var name, picture string
 	h.db.QueryRow(ctx, `SELECT COALESCE(name,''), COALESCE(picture,'') FROM users WHERE id=$1`, claims.UserID).Scan(&name, &picture) //nolint:errcheck
 
+	// Savings balance — lazy-create then read. Returns 0 if the row was
+	// just inserted, which is the right "first-login" experience.
+	var savingsBal float64
+	h.db.Exec(ctx, //nolint:errcheck
+		`INSERT INTO savings_wallets (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+		claims.UserID)
+	h.db.QueryRow(ctx, //nolint:errcheck
+		`SELECT balance FROM savings_wallets WHERE user_id=$1`,
+		claims.UserID).Scan(&savingsBal)
+
 	c.JSON(http.StatusOK, gin.H{
-		"user_id":      claims.UserID,
-		"email":        claims.Email,
-		"name":         name,
-		"picture":      picture,
-		"accounts":     accounts,        // new shape (preferred)
+		"user_id":         claims.UserID,
+		"email":           claims.Email,
+		"name":            name,
+		"picture":         picture,
+		"accounts":        accounts, // new shape (preferred)
+		"savings_balance": savingsBal,
 		// Legacy back-compat fields — point at first real account
 		"real_balance": primaryRealBal,
 		"demo_balance": demoBal,

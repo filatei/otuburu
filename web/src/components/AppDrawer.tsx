@@ -26,6 +26,10 @@ interface Props {
    *  user switch or create a new one). Optional — when undefined, the
    *  "Switch account" item is hidden. */
   onSwitchAccount?: () => void
+  /** Open the Transfer modal — moves funds between {Savings, trading accounts}.
+   *  Optional so older callers compile; when undefined, the Savings card
+   *  hides its Transfer buttons. Phase 4. */
+  onTransfer?:    () => void
   /** Open the "Get the App" sheet — Android APK + iOS PWA instructions. */
   onGetApp?:      () => void
   /** Open the "Contact support" sheet — message form that emails admin. */
@@ -35,7 +39,7 @@ interface Props {
 export default function AppDrawer({
   open, onClose, user, mode, activeAccountLabel, engineBalance, onModeToggle,
   onLogout, onEditProfile, onDeposit, onWithdraw, onHistory, onSwitchAccount,
-  onGetApp, onContact,
+  onTransfer, onGetApp, onContact,
 }: Props) {
   const drawerRef = useRef<HTMLDivElement>(null)
 
@@ -138,6 +142,55 @@ export default function AppDrawer({
           </div>
         )}
 
+        {/* ── Savings card (Phase 4) ───────────────────────────────────────
+            Only shown in real mode — demo accounts don't have a savings
+            wallet. Sits right under the user card so the relationship
+            between trading balance and savings is visually obvious.
+            "Transfer" opens the modal (parking funds before withdrawal);
+            "Withdraw" is a shortcut to the WithdrawSheet which now sources
+            from this savings balance. */}
+        {user && mode === 'real' && (
+          <div className="mx-3 mb-1 bg-surface rounded-xl p-4 border border-border shrink-0">
+            <div className="flex items-center justify-between mb-3">
+              <div className="min-w-0">
+                <p className="text-[10px] text-dim uppercase tracking-wider mb-0.5 flex items-center gap-1.5">
+                  <span>🏛️</span> Savings
+                </p>
+                <p className="num text-lg font-bold text-text">
+                  ${(user.savings_balance ?? 0).toLocaleString('en-US', {
+                    minimumFractionDigits: 2, maximumFractionDigits: 2,
+                  })}
+                </p>
+              </div>
+              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-brand/15 text-brand shrink-0">
+                Withdrawals only
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {onTransfer && (
+                <button
+                  onClick={() => { onTransfer(); onClose() }}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold bg-brand/10 border border-brand/30 text-brand hover:bg-brand/20 transition-colors"
+                >
+                  ↔ Transfer
+                </button>
+              )}
+              <button
+                onClick={() => { onWithdraw(); onClose() }}
+                disabled={(user.savings_balance ?? 0) <= 0}
+                className="px-3 py-2 rounded-lg text-xs font-semibold border transition-colors bg-up/10 border-up/30 text-up hover:bg-up/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ↑ Withdraw
+              </button>
+            </div>
+            {(user.savings_balance ?? 0) <= 0 && (
+              <p className="text-[10px] text-dim mt-2 leading-relaxed">
+                Move funds from a trading account into Savings before withdrawing.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* ── Menu sections ─────────────────────────────────────────────── */}
         <div className="flex-1 px-3 py-2 space-y-4">
 
@@ -150,7 +203,9 @@ export default function AppDrawer({
 
           <Section title="Finance">
             <Item icon="💳" label="Deposit"             sub="USDT (TRC20) or NGN (Paystack)" badge="live" onClick={() => { onDeposit(); onClose() }} />
-            <Item icon="🏦" label="Withdraw"            sub="USDT (TRC20) or NGN bank"    badge="live" onClick={() => { onWithdraw(); onClose() }} />
+            {onTransfer && (
+              <Item icon="↔" label="Transfer"            sub="Move funds between accounts + Savings" badge="new" onClick={() => { onTransfer(); onClose() }} />
+            )}
             <Item icon="📋" label="Transaction History" sub="Deposits & withdrawals"       badge="live" onClick={() => { onHistory(); onClose() }} />
           </Section>
 

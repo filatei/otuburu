@@ -115,7 +115,10 @@ func main() {
 	paystackH.RegisterRoutes(protected, r.Group("/"))
 
 	// Now that paystackH exists, build the wallet handler and register routes.
-	walletH := wallet.NewHandler(pool, hd, mailer, paystackH)
+	// gatewayURL + INTERNAL_SECRET drive the engine-side legs of transfers;
+	// without them, /wallet/transfers fails fast at the first AdjustBalance call.
+	walletH := wallet.NewHandler(pool, hd, mailer, paystackH,
+		os.Getenv("GATEWAY_URL"), os.Getenv("INTERNAL_SECRET"))
 	protected.GET("/wallet/deposit-address", walletH.DepositAddress)
 	protected.GET("/wallet/balance", walletH.Balance)
 	protected.GET("/wallet/transactions", walletH.Transactions)
@@ -123,6 +126,10 @@ func main() {
 	// Phase-2 multi-account: list + create real accounts for a user.
 	protected.GET("/wallet/accounts", walletH.ListAccounts)
 	protected.POST("/wallet/accounts", walletH.CreateAccount)
+	// Phase-4 savings wallet — the sole origin for withdrawals.
+	protected.GET("/wallet/savings", walletH.Savings)
+	// Phase-4 transfers — move funds between {savings, account} legs.
+	protected.POST("/wallet/transfers", walletH.Transfer)
 	// Phase-3 NGN withdrawal: account verification + bank payout.
 	protected.GET("/wallet/ngn/resolve", walletH.ResolveNGNAccount)
 	protected.POST("/wallet/withdraw/ngn", walletH.WithdrawNGN)

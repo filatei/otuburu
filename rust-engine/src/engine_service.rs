@@ -9,15 +9,15 @@ use uuid::Uuid;
 use order_book::{Direction, Side};
 
 use crate::pb::{
-    engine_service_server::EngineService, AccountState, BinaryOption as PbBinary,
-    Candle as PbCandle, ClosePositionRequest, ClosePositionResponse, CloseSpotRequest,
-    CloseSpotResponse, ClosedPosition, ClosedSpot, CreateAccountRequest, CreateAccountResponse,
-    GetCandlesRequest, GetCandlesResponse, GetStateRequest, GetSymbolsRequest, GetSymbolsResponse,
-    GetTradeHistoryRequest, GetTradeHistoryResponse, HouseStats, ListAccountsRequest,
-    ListAccountsResponse, PlaceBinaryRequest, PlaceBinaryResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PlaceSpotRequest, PlaceSpotResponse, Position as PbPosition,
-    SettledTrade as PbSettledTrade, SpotPosition as PbSpot, StateSnapshot, SubscribeTicksRequest,
-    SymbolInfo, Tick as PbTick,
+    engine_service_server::EngineService, AccountState, AdjustBalanceRequest,
+    AdjustBalanceResponse, BinaryOption as PbBinary, Candle as PbCandle, ClosePositionRequest,
+    ClosePositionResponse, CloseSpotRequest, CloseSpotResponse, ClosedPosition, ClosedSpot,
+    CreateAccountRequest, CreateAccountResponse, GetCandlesRequest, GetCandlesResponse,
+    GetStateRequest, GetSymbolsRequest, GetSymbolsResponse, GetTradeHistoryRequest,
+    GetTradeHistoryResponse, HouseStats, ListAccountsRequest, ListAccountsResponse,
+    PlaceBinaryRequest, PlaceBinaryResponse, PlaceOrderRequest, PlaceOrderResponse,
+    PlaceSpotRequest, PlaceSpotResponse, Position as PbPosition, SettledTrade as PbSettledTrade,
+    SpotPosition as PbSpot, StateSnapshot, SubscribeTicksRequest, SymbolInfo, Tick as PbTick,
 };
 use crate::state::SharedState;
 
@@ -665,6 +665,73 @@ impl EngineService for EngineServiceImpl {
         };
 
         Ok(Response::new(ListAccountsResponse { accounts }))
+    }
+
+    // ── Adjust balance (transfer flow) ───────────────────────────────────────
+    //
+    // The wallet service calls this once per leg of an internal transfer.
+    // Unlike CreateAccount's silent no-op when positions are open, this RPC
+    // happily updates the balance — but refuses any debit that would push
+    // free margin below zero. The response carries the new balance + new
+    // free_margin so the caller can render an immediate confirmation without
+    // a second ListAccounts trip.
+    //
+    // Idempotency lives in the wallet (transfers.idempotency_key); the engine
+    // treats every call as independent. A misbehaving caller that retries
+    // without an idempotency key will double-apply — that's a wallet bug,
+    // not an engine one.
+    async fn adjust_balance(
+        &self,
+        req: Request<AdjustBalanceRequest>,
+    ) -> Result<Response<AdjustBalanceResponse>, Status> {
+        let r = req.into_inner();
+        let account_id = parse_account_id(&r.account_id)?;
+
+        if !r.delta.is_finite() || r.delta == 0.0 {
+            return Err(Status::invalid_argument(
+                "delta must be a non-zero finite number",
+            ));
+        }
+
+        let mut inner = self.state.inner.write().await;
+        let book = inner.books.get_mut(&account_id).ok_or_else(|| {
+            Status::not_found(format!("account {} not found in engine", account_id))
+        })?;
+
+        // Free-margin floor: only enforce on debits. Credits always pass.
+        if r.delta < 0.0 {
+            let free = book.free_margin();
+            if free + r.delta < 0.0 {
+                return Ok(Response::new(AdjustBalanceResponse {
+                    accepted: false,
+                    reject_reason: format!(
+                        "insufficient free margin: requested ${:.2}, available ${:.2}",
+                        -r.delta, free
+                    ),
+                    new_balance: book.account.balance,
+                    new_free_margin: free,
+                }));
+            }
+        }
+
+        book.account.balance += r.delta;
+        let new_balance = book.account.balance;
+        let new_free_margin = book.free_margin();
+
+        tracing::info!(
+            %account_id,
+            delta = r.delta,
+            new_balance,
+            reason = %r.reason,
+            "adjust_balance applied",
+        );
+
+        Ok(Response::new(AdjustBalanceResponse {
+            accepted: true,
+            reject_reason: String::new(),
+            new_balance,
+            new_free_margin,
+        }))
     }
 
     // ── Get OHLC candles ─────────────────────────────────────────────────────

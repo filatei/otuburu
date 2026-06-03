@@ -143,6 +143,12 @@ service EngineService {
   // Account management
   rpc CreateAccount  (CreateAccountRequest)   returns (CreateAccountResponse);
   rpc ListAccounts   (ListAccountsRequest)    returns (ListAccountsResponse);
+  // Apply a signed delta to a live account's balance — used by the wallet
+  // service for internal transfers (savings ↔ account, account ↔ account).
+  // Unlike CreateAccount, this RPC happily updates accounts with open
+  // positions, but rejects any debit that would push equity below the
+  // free-margin floor (current free_margin + delta < 0).
+  rpc AdjustBalance  (AdjustBalanceRequest)   returns (AdjustBalanceResponse);
 
   // Chart history (OHLC candles)
   rpc GetCandles     (GetCandlesRequest)      returns (GetCandlesResponse);
@@ -295,6 +301,23 @@ message ListAccountsRequest {
 
 message ListAccountsResponse {
   repeated AccountState accounts = 1;
+}
+
+// AdjustBalance — apply a signed USD delta. positive credits, negative debits.
+// The engine rejects with accepted=false when delta<0 and -delta>free_margin,
+// returning the current free_margin so the caller can surface a precise
+// "you can move at most $X" message to the user without an extra round-trip.
+message AdjustBalanceRequest {
+  string account_id = 1;
+  double delta      = 2;  // positive = credit, negative = debit
+  string reason     = 3;  // free-form, ends up in engine logs only
+}
+
+message AdjustBalanceResponse {
+  bool   accepted        = 1;
+  string reject_reason   = 2;  // empty when accepted=true
+  double new_balance     = 3;
+  double new_free_margin = 4;
 }
 
 // ── Chart history ─────────────────────────────────────────────────────────────

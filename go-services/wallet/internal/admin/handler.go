@@ -280,15 +280,21 @@ func (h *Handler) Withdrawals(c *gin.Context) {
 // ApproveWithdrawal broadcasts USDT from treasury and marks the withdrawal sent.
 // NOTE: the user's balance was already deducted at request time (in Withdraw handler).
 // We must NOT deduct it again here.
+//
+// Savings-sourced rows have account_id IS NULL — no per-account ledger row
+// is written for those (the withdrawals row itself is the audit). The user
+// is identified via user_id which is always present.
 func (h *Handler) ApproveWithdrawal(c *gin.Context) {
 	ctx := c.Request.Context()
 	wid := c.Param("id")
 
-	var accountID, toAddr, status string
+	var userID, source, toAddr, status string
+	var accountID *string // nullable for savings-sourced rows
 	var amount float64
 	err := h.db.QueryRow(ctx,
-		`SELECT account_id, amount, address, status FROM withdrawals WHERE id=$1`, wid,
-	).Scan(&accountID, &amount, &toAddr, &status)
+		`SELECT user_id, account_id, COALESCE(source,'account'), amount, address, status
+		 FROM withdrawals WHERE id=$1`, wid,
+	).Scan(&userID, &accountID, &source, &amount, &toAddr, &status)
 	if err != nil {
 		c.JSON(404, gin.H{"error": "withdrawal not found"})
 		return
@@ -315,27 +321,38 @@ func (h *Handler) ApproveWithdrawal(c *gin.Context) {
 		return
 	}
 
-	// Mark sent + write ledger entry.  Balance was already deducted at request time.
+	// Mark sent. Balance was already deducted at request time. Only write
+	// a per-account ledger row when the source was a trading account
+	// (legacy rows or future re-routing); savings-sourced rows have no
+	// account_id and the withdrawals row is the canonical audit entry.
 	tx, _ := h.db.Begin(ctx)
 	defer tx.Rollback(ctx) //nolint:errcheck
 	tx.Exec(ctx, `UPDATE withdrawals SET status='sent', txid=$1 WHERE id=$2`, txid, wid)
-	tx.Exec(ctx,
-		`INSERT INTO ledger (account_id, type, amount, status, ref, note)
-		 VALUES ($1,'withdrawal',$2,'confirmed',$3,'Withdrawal sent to external address')`,
-		accountID, -amount, txid,
-	)
+	if source == "account" && accountID != nil {
+		tx.Exec(ctx,
+			`INSERT INTO ledger (account_id, type, amount, status, ref, note)
+			 VALUES ($1,'withdrawal',$2,'confirmed',$3,'Withdrawal sent to external address')`,
+			*accountID, -amount, txid,
+		)
+	}
 	tx.Commit(ctx) //nolint:errcheck
 
 	slog.Info("withdrawal sent", "id", wid, "amount", amount, "to", toAddr, "txid", txid)
 
 	// Notify the user — best-effort, fire-and-forget.
-	h.notifyWithdrawalSent(ctx, accountID, amount, toAddr, txid)
+	h.notifyWithdrawalSent(ctx, userID, amount, toAddr, txid)
 
 	c.JSON(200, gin.H{"status": "sent", "txid": txid})
 }
 
 // RejectWithdrawal marks a pending withdrawal as rejected and refunds the reserved balance.
 // The balance was deducted at request time (in Withdraw), so we must return it here.
+//
+// Refund target depends on the withdrawal's source:
+//   - source='savings' → credit savings_wallets.balance (no ledger row, no
+//     account_id to reference)
+//   - source='account' → credit accounts.balance + write a transfer_refund
+//     ledger row (legacy behaviour for rows that pre-date Phase 4)
 func (h *Handler) RejectWithdrawal(c *gin.Context) {
 	ctx := c.Request.Context()
 	wid := c.Param("id")
@@ -345,11 +362,13 @@ func (h *Handler) RejectWithdrawal(c *gin.Context) {
 	}
 	c.ShouldBindJSON(&body) //nolint:errcheck
 
-	var accountID string
+	var userID, source string
+	var accountID *string
 	var amount float64
 	err := h.db.QueryRow(ctx,
-		`SELECT account_id, amount FROM withdrawals WHERE id=$1 AND status='pending'`, wid,
-	).Scan(&accountID, &amount)
+		`SELECT user_id, account_id, COALESCE(source,'account'), amount
+		 FROM withdrawals WHERE id=$1 AND status='pending'`, wid,
+	).Scan(&userID, &accountID, &source, &amount)
 	if err != nil {
 		c.JSON(404, gin.H{"error": "pending withdrawal not found"})
 		return
@@ -362,21 +381,35 @@ func (h *Handler) RejectWithdrawal(c *gin.Context) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// Refund the reserved balance.
-	tx.Exec(ctx, `UPDATE accounts SET balance = balance + $1 WHERE id = $2`, amount, accountID)
+	// Refund — target depends on source.
+	if source == "savings" {
+		// Lazy-create the savings row (defensive — should always exist by now).
+		tx.Exec(ctx, //nolint:errcheck
+			`INSERT INTO savings_wallets (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+			userID)
+		tx.Exec(ctx, //nolint:errcheck
+			`UPDATE savings_wallets SET balance = balance + $1, updated_at = NOW()
+			 WHERE user_id = $2`, amount, userID)
+	} else if accountID != nil {
+		tx.Exec(ctx, //nolint:errcheck
+			`UPDATE accounts SET balance = balance + $1 WHERE id = $2`,
+			amount, *accountID)
+	}
 
 	// Mark rejected (use note column for reason; txid stays NULL).
 	reason := body.Reason
 	if reason == "" {
 		reason = "No reason given"
 	}
-	tx.Exec(ctx,
+	tx.Exec(ctx, //nolint:errcheck
 		`UPDATE withdrawals SET status='rejected' WHERE id=$1 AND status='pending'`, wid)
-	tx.Exec(ctx,
-		`INSERT INTO ledger (account_id, type, amount, status, ref, note)
-		 VALUES ($1,'withdrawal_refund',$2,'confirmed',$3,$4)`,
-		accountID, amount, wid, "Withdrawal rejected: "+reason,
-	)
+	if source == "account" && accountID != nil {
+		tx.Exec(ctx, //nolint:errcheck
+			`INSERT INTO ledger (account_id, type, amount, status, ref, note)
+			 VALUES ($1,'withdrawal_refund',$2,'confirmed',$3,$4)`,
+			*accountID, amount, wid, "Withdrawal rejected: "+reason,
+		)
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		c.JSON(500, gin.H{"error": "commit failed"})
@@ -386,18 +419,18 @@ func (h *Handler) RejectWithdrawal(c *gin.Context) {
 	slog.Info("withdrawal rejected + refunded", "id", wid, "amount", amount, "reason", reason)
 
 	// Notify the user — best-effort, fire-and-forget.
-	h.notifyWithdrawalRejected(ctx, accountID, amount, reason)
+	h.notifyWithdrawalRejected(ctx, userID, amount, reason)
 
 	c.JSON(200, gin.H{"status": "rejected", "refunded": amount})
 }
 
 // notifyWithdrawalSent emails the user that their withdrawal has been
 // broadcast on-chain, with the txid so they can verify on TRONSCAN.
-func (h *Handler) notifyWithdrawalSent(ctx context.Context, accountID string, amount float64, addr, txid string) {
+func (h *Handler) notifyWithdrawalSent(ctx context.Context, userID string, amount float64, addr, txid string) {
 	if h.mailer == nil {
 		return
 	}
-	to, name := h.recipientFromAccount(ctx, accountID)
+	to, name := h.recipientFromUser(ctx, userID)
 	if to == "" {
 		return
 	}
@@ -408,11 +441,11 @@ func (h *Handler) notifyWithdrawalSent(ctx context.Context, accountID string, am
 
 // notifyWithdrawalRejected emails the user that their withdrawal was not
 // approved and the reserved balance has been credited back.
-func (h *Handler) notifyWithdrawalRejected(ctx context.Context, accountID string, amount float64, reason string) {
+func (h *Handler) notifyWithdrawalRejected(ctx context.Context, userID string, amount float64, reason string) {
 	if h.mailer == nil {
 		return
 	}
-	to, name := h.recipientFromAccount(ctx, accountID)
+	to, name := h.recipientFromUser(ctx, userID)
 	if to == "" {
 		return
 	}
@@ -421,18 +454,16 @@ func (h *Handler) notifyWithdrawalRejected(ctx context.Context, accountID string
 	h.mailer.Send(to, subject, body)
 }
 
-// recipientFromAccount resolves an account_id to the owning user's email
-// and display name. Returns ("", "") when not found or on db error;
-// callers should bail in that case.
-func (h *Handler) recipientFromAccount(ctx context.Context, accountID string) (string, string) {
+// recipientFromUser resolves a user_id directly to the owning user's email
+// and display name. Phase-4 withdrawals carry user_id always (account_id
+// may be NULL for savings-sourced rows), so we look up by user_id instead
+// of joining through accounts. Returns ("", "") on miss; callers bail then.
+func (h *Handler) recipientFromUser(ctx context.Context, userID string) (string, string) {
 	var em, name string
 	if err := h.db.QueryRow(ctx,
-		`SELECT u.email, COALESCE(u.name, '') FROM users u
-		 JOIN accounts a ON a.user_id = u.id
-		 WHERE a.id = $1`,
-		accountID,
+		`SELECT email, COALESCE(name, '') FROM users WHERE id = $1`, userID,
 	).Scan(&em, &name); err != nil {
-		slog.Warn("admin: recipient lookup failed", "account_id", accountID, "err", err)
+		slog.Warn("admin: recipient lookup failed", "user_id", userID, "err", err)
 		return "", ""
 	}
 	if name == "" {

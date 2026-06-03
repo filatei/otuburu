@@ -18,6 +18,7 @@ import AuthModal           from '@/components/AuthModal'
 import ProfileModal        from '@/components/ProfileModal'
 import AppDrawer           from '@/components/AppDrawer'
 import DepositModal        from '@/components/DepositModal'
+import TransferModal       from '@/components/TransferModal'
 import GetAppModal         from '@/components/GetAppModal'
 import ContactModal        from '@/components/ContactModal'
 import SymbolActionsSheet     from '@/components/SymbolActionsSheet'
@@ -82,6 +83,7 @@ export default function TradingPage() {
   const [drawerOpen,    setDrawerOpen]    = useState(false)
   const [depositOpen,   setDepositOpen]   = useState(false)
   const [withdrawOpen,  setWithdrawOpen]  = useState(false)
+  const [transferOpen,  setTransferOpen]  = useState(false)
   const [getAppOpen,    setGetAppOpen]    = useState(false)
   const [contactOpen,   setContactOpen]   = useState(false)
   const [mobileTab,     setMobileTab]     = useState<MobileTab>('chart')
@@ -290,6 +292,17 @@ export default function TradingPage() {
       {/* DepositModal stays mounted while `user` is present so BottomSheet
           can play its exit animation when `open` flips back to false. */}
       {user && <DepositModal open={depositOpen} user={user} onClose={() => setDepositOpen(false)} />}
+      {/* Transfer between Savings + trading accounts. onTransferred fires
+          refreshBalances() so the drawer Savings card + Header balance
+          update immediately without a page reload. */}
+      {user && (
+        <TransferModal
+          open={transferOpen}
+          user={user}
+          onClose={() => setTransferOpen(false)}
+          onTransferred={() => { refreshBalances(); refresh() }}
+        />
+      )}
 
       {/* MT5-style symbol actions sheet — tap a row on Quotes to open. */}
       <SymbolActionsSheet
@@ -333,6 +346,7 @@ export default function TradingPage() {
             ? () => setAccountSheetOpen(true)
             : undefined
         }
+        onTransfer={user ? () => setTransferOpen(true) : undefined}
         onGetApp={() => setGetAppOpen(true)}
         onContact={user ? () => setContactOpen(true) : undefined}
       />

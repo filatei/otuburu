@@ -150,7 +150,9 @@ func (h *Handler) InitiateTransfer(ctx context.Context, recipientCode string, ng
 	req.Header.Set("Authorization", "Bearer "+h.secretKey)
 	req.Header.Set("Content-Type", "application/json")
 	// 10s — Paystack transfer init usually returns in 1-3s but can spike.
-	req = req.WithContext(ctxWithTimeout(ctx, 10*time.Second))
+	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req = req.WithContext(reqCtx)
 
 	resp, err := h.client.Do(req)
 	if err != nil {
@@ -185,10 +187,3 @@ func (h *Handler) CurrentNGNCustomerRate() float64 {
 	return CustomerWithdrawRate(h.rates.GetUSDToNGN())
 }
 
-// ctxWithTimeout — small adapter around context.WithTimeout that doesn't
-// leak the cancel func when we don't care about it (best-effort fallback
-// to deadline; the parent context cancellation still works).
-func ctxWithTimeout(parent context.Context, d time.Duration) context.Context {
-	c, _ := context.WithTimeout(parent, d) //nolint:govet
-	return c
-}

@@ -128,6 +128,24 @@ DO $$ BEGIN
         ALTER TABLE withdrawals ALTER COLUMN address DROP NOT NULL;
     EXCEPTION WHEN OTHERS THEN NULL;
     END;
+    -- Phase-4: withdrawals now originate from the user's savings wallet
+    -- (account_id IS NULL for those). Keep the old account_id column for
+    -- back-compat with legacy rows, but it's no longer required for new
+    -- ones. The `source` column makes the origin explicit.
+    BEGIN
+        ALTER TABLE withdrawals ALTER COLUMN account_id DROP NOT NULL;
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='withdrawals' AND column_name='source'
+    ) THEN
+        ALTER TABLE withdrawals ADD COLUMN source TEXT NOT NULL DEFAULT 'savings'
+            CHECK (source IN ('savings','account'));
+        -- Legacy rows that pre-date this column have account_id != NULL, so
+        -- back-fill them with source='account' to preserve historical truth.
+        UPDATE withdrawals SET source='account' WHERE account_id IS NOT NULL;
+    END IF;
 END $$;
 
 -- ── Seen deposits (prevent double-crediting) ─────────────────────────────────
@@ -184,6 +202,79 @@ CREATE TABLE IF NOT EXISTS fx_quotes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_fx_quotes_created ON fx_quotes(created_at DESC);
+
+-- ── Savings wallet (one per user, USD-denominated, no positions) ─────────────
+-- The SOLE origin for withdrawals. Users transfer profits + idle balance
+-- from trading accounts into Savings, then withdraw from there. This forces
+-- a deliberate "park first" step that:
+--   1. protects active positions from accidental cash-out
+--   2. surfaces a clean reconcile target for payout obligations
+--   3. removes the "which of N accounts gets the withdrawal" ambiguity
+-- Created lazily on first /wallet/savings hit.
+CREATE TABLE IF NOT EXISTS savings_wallets (
+    user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    balance    NUMERIC(20,6) NOT NULL DEFAULT 0 CHECK (balance >= 0),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ── Account kind (standard / cent / micro) ───────────────────────────────────
+-- Scaling factor applied to deposits + stake on this account. Live price feed
+-- is unchanged; only the user's balance is multiplied.
+--   real_standard → $1 credits $1     (current behaviour, default)
+--   real_cent     → $1 credits ¢100   (×100 nominal)
+--   real_micro    → $1 credits μ1000  (×1000 nominal)
+-- Demo accounts always behave as standard. Cent/micro logic ships in a later
+-- phase; this column lands now so the migration is one-shot.
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='accounts' AND column_name='kind'
+    ) THEN
+        ALTER TABLE accounts ADD COLUMN kind TEXT NOT NULL DEFAULT 'real_standard'
+            CHECK (kind IN ('real_standard','real_cent','real_micro','demo'));
+        UPDATE accounts SET kind='demo' WHERE type='demo';
+    END IF;
+END $$;
+
+-- ── Internal transfers (savings ↔ account, account ↔ account) ────────────────
+-- One row per transfer captures both legs. Savings legs have NULL from_id /
+-- to_id because there's no accounts row for the savings wallet — the user_id
+-- on this table is enough to locate the matching savings_wallets row.
+-- idempotency_key lets retried POST /wallet/transfers requests no-op safely.
+CREATE TABLE IF NOT EXISTS transfers (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    from_kind       TEXT NOT NULL CHECK (from_kind IN ('savings','account')),
+    from_id         UUID,  -- NULL when from_kind='savings'
+    to_kind         TEXT NOT NULL CHECK (to_kind IN ('savings','account')),
+    to_id           UUID,  -- NULL when to_kind='savings'
+    amount          NUMERIC(20,6) NOT NULL CHECK (amount > 0),
+    idempotency_key TEXT UNIQUE,
+    status          TEXT NOT NULL DEFAULT 'completed'
+                    CHECK (status IN ('pending','completed','failed','reversed')),
+    note            TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    CHECK ((from_kind='account' AND from_id IS NOT NULL) OR (from_kind='savings' AND from_id IS NULL)),
+    CHECK ((to_kind='account'   AND to_id   IS NOT NULL) OR (to_kind='savings'   AND to_id   IS NULL)),
+    CHECK (NOT (from_kind=to_kind AND from_id IS NOT DISTINCT FROM to_id))  -- can't transfer to self
+);
+
+CREATE INDEX IF NOT EXISTS idx_transfers_user_created ON transfers(user_id, created_at DESC);
+
+-- ── Ledger transfer types ────────────────────────────────────────────────────
+-- Expand the CHECK so account-side transfer legs can be recorded alongside
+-- deposits/withdrawals/trades. Savings-side legs are NOT written to ledger
+-- (savings has no accounts.id to reference) — the `transfers` table above
+-- is the audit trail for those.
+DO $$ BEGIN
+    ALTER TABLE ledger DROP CONSTRAINT IF EXISTS ledger_type_check;
+    ALTER TABLE ledger ADD CONSTRAINT ledger_type_check CHECK (
+        type IN ('deposit','withdrawal','withdrawal_refund',
+                 'trade_win','trade_loss','bonus',
+                 'transfer_in','transfer_out')
+    );
+END $$;
 
 -- ── Indices ───────────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_ledger_account      ON ledger(account_id);
