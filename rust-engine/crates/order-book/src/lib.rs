@@ -818,14 +818,28 @@ impl Book {
                 b.ticks_left = b.ticks_left.saturating_sub(1);
                 if b.ticks_left == 0 {
                     let b = self.binaries.remove(&id).unwrap();
-                    let won = matches!(
-                        (&b.direction, tick.mid > b.entry_mid, tick.mid < b.entry_mid),
-                        (Direction::Up, true, _) | (Direction::Down, _, true)
-                    );
-                    let payout = if won {
-                        b.stake * PAYOUT_MULTIPLIER
+                    // Three outcomes:
+                    //   - Direction matched price movement → won, payout = stake * MULT
+                    //   - Direction mismatched → lost, payout = 0 (stake forfeited)
+                    //   - Price unchanged (tie) → refund: payout = stake, no P&L
+                    //     either way. Standard Deriv-style behaviour. The 15%
+                    //     house edge already lives in PAYOUT_MULTIPLIER so we
+                    //     don't need a tie-loss surcharge on top — particularly
+                    //     not on illiquid periods when ticks freeze and every
+                    //     direction would otherwise auto-lose.
+                    let (won, payout) = if tick.mid > b.entry_mid {
+                        match b.direction {
+                            Direction::Up   => (true,  b.stake * PAYOUT_MULTIPLIER),
+                            Direction::Down => (false, 0.0),
+                        }
+                    } else if tick.mid < b.entry_mid {
+                        match b.direction {
+                            Direction::Up   => (false, 0.0),
+                            Direction::Down => (true,  b.stake * PAYOUT_MULTIPLIER),
+                        }
                     } else {
-                        0.0
+                        // tick.mid == b.entry_mid — tie. Refund.
+                        (false, b.stake)
                     };
                     self.account.balance += payout;
                     self.house.total_client_pnl += payout - b.stake;

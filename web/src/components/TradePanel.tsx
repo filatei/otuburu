@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import type { Tick, SymbolInfo, AccountState } from '@/types'
 import { placeCFD, placeBinary, placeSpot } from '@/hooks/useAccount'
 import { displayNameOf, divisorOf, formatPrice, priceDecimals, MIN_SPOT_STAKE_USD } from '@/lib/symbols'
+import { isMarketOpen } from '@/lib/marketHours'
 
 interface Props {
   symbol:    string
@@ -32,6 +33,13 @@ export default function TradePanel({ symbol, info, lastTick, account, accountId,
   const [tp,        setTp]        = useState('')
   const [sl,        setSl]        = useState('')
   const [busy,      setBusy]      = useState(false)
+
+  // Wall-clock market-hours gate. Engine already rejects out-of-hours
+  // place_binary / place_order / place_spot, but if the tile is enabled
+  // the user can tap it and only learn 'market closed' after the network
+  // round-trip. Disabling here gives instant feedback and matches what
+  // MobileTradeForm already does.
+  const marketOpen = isMarketOpen(info, lastTick)
   const [msg,       setMsg]       = useState<{ text: string; ok: boolean } | null>(null)
   const [showTpSl,  setShowTpSl]  = useState(false)
 
@@ -127,9 +135,15 @@ export default function TradePanel({ symbol, info, lastTick, account, accountId,
               <Row label="House edge" val="15%" color="text-dim" />
             </div>
 
+            {!marketOpen && (
+              <div className="bg-down/10 border border-down/30 rounded-lg px-3 py-2 text-[11px] text-down">
+                Market closed. Wait for the session to reopen before trading.
+              </div>
+            )}
+
             <div className="flex gap-2 pt-2">
-              <TradeBtn label="▲ Rise" color="up"   onClick={() => doTrade('UP')}   busy={busy} />
-              <TradeBtn label="▼ Fall" color="down" onClick={() => doTrade('DOWN')} busy={busy} />
+              <TradeBtn label="▲ Rise" color="up"   onClick={() => doTrade('UP')}   busy={busy || !marketOpen} />
+              <TradeBtn label="▼ Fall" color="down" onClick={() => doTrade('DOWN')} busy={busy || !marketOpen} />
             </div>
           </>
 
@@ -175,8 +189,8 @@ export default function TradePanel({ symbol, info, lastTick, account, accountId,
             )}
 
             <div className="flex gap-2 pt-2">
-              <TradeBtn label="▲ Buy"  color="up"   onClick={() => doTrade('BUY')}  busy={busy} />
-              <TradeBtn label="▼ Sell" color="down" onClick={() => doTrade('SELL')} busy={busy} />
+              <TradeBtn label="▲ Buy"  color="up"   onClick={() => doTrade('BUY')}  busy={busy || !marketOpen} />
+              <TradeBtn label="▼ Sell" color="down" onClick={() => doTrade('SELL')} busy={busy || !marketOpen} />
             </div>
           </>
 
@@ -261,7 +275,7 @@ export default function TradePanel({ symbol, info, lastTick, account, accountId,
 
             {/* Single Buy CTA — Sell is done by closing from Positions */}
             <div className="pt-2">
-              <TradeBtn label={`Buy ${displaySym}`} color="up" onClick={() => doTrade('BUY')} busy={busy} />
+              <TradeBtn label={`Buy ${displaySym}`} color="up" onClick={() => doTrade('BUY')} busy={busy || !marketOpen} />
             </div>
             <div className="text-[10px] text-dim text-center -mt-2 leading-tight">
               To sell, close your position from the Positions tab.
