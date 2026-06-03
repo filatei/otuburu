@@ -23,7 +23,10 @@ export default function UserMenu({ user, mode, onModeToggle, onLogout, onEditPro
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const balance = mode === 'demo' ? user.demo_balance : user.real_balance
+  // ?? 0 keeps the avatar+chip rendering even when /auth/me returned a
+  // partial payload (e.g. server 500 — fields drop out). Better to flash
+  // "$0.00" briefly than crash the whole app shell.
+  const balance = (mode === 'demo' ? user.demo_balance : user.real_balance) ?? 0
 
   return (
     <div ref={ref} className="relative">

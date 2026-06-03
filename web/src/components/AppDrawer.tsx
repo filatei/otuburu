@@ -65,10 +65,13 @@ export default function AppDrawer({
   // Prefer the live engine balance — same source the Header uses, so the
   // two stay in sync after trades settle. Fall back to the static auth
   // figures only when engineBalance hasn't been provided (e.g. before the
-  // first state push from the engine).
-  const balance = engineBalance !== undefined && engineBalance !== null
+  // first state push from the engine). Defensive ?? 0 at the end: if
+  // /auth/me ever returns without {demo,real}_balance (e.g. server 500
+  // mid-Paystack-return), `balance` would otherwise become undefined and
+  // crash .toLocaleString below.
+  const balance = (engineBalance !== undefined && engineBalance !== null
     ? engineBalance
-    : user ? (mode === 'demo' ? user.demo_balance : user.real_balance) : 0
+    : user ? (mode === 'demo' ? user.demo_balance : user.real_balance) : 0) ?? 0
 
   if (!open) return null
 

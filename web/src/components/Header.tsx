@@ -11,10 +11,16 @@ interface Props {
 }
 
 export default function Header({ user, connected, mode, engineBalance, onModeToggle, onMenuOpen }: Props) {
-  // Prefer the live engine balance (updates as trades settle) over the static wallet balance
-  const balance = engineBalance !== null
+  // Prefer the live engine balance (updates as trades settle) over the static
+  // wallet balance. The double-null fallback handles two distinct
+  // "missing" states: (a) engineBalance not yet pushed (null) — fall through
+  // to user; (b) user.{demo,real}_balance missing from a partial /auth/me
+  // response — keep balance null so the desktop pill is hidden rather than
+  // showing "$undefined" or crashing on .toLocaleString.
+  const rawWallet = user ? (mode === 'demo' ? user.demo_balance : user.real_balance) : null
+  const balance: number | null = engineBalance !== null
     ? engineBalance
-    : user ? (mode === 'demo' ? user.demo_balance : user.real_balance) : null
+    : (rawWallet != null ? rawWallet : null)
 
   return (
     // Outer wrapper carries safe-top padding so the header content clears
