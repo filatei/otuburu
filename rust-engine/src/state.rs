@@ -77,39 +77,21 @@ pub fn symbol_display_name(symbol: &str) -> &str {
 /// stores true prices; frontends divide for presentation. PnL is in real USD
 /// and never divided. Returns 1.0 when no scaling is wanted.
 ///
-/// Tuned aggressively (÷1000 for most heavy assets) so small-capital users
-/// can hold meaningful unit counts. A $50 user buys ~69 units of SPX at ~$0.72,
-/// instead of 0.007 units of the index at ~$7,400.
+/// All divisors are now 1.0 — symbols display their REAL market prices
+/// (gold at $4,500, BTC at $110,000, SPX at $7,400, etc.).
 ///
-/// Typical mid-2026 prices and resulting display values:
-///   - cryBTCUSD ÷ 1000 → BTC ~$77k    shows as ~$77.00
-///   - cryETHUSD ÷ 10   → ETH ~$2.1k   shows as ~$210
-///   - cryXAUUSD ÷ 1000 → XAU ~$4.5k   shows as ~$4.5300
-///   - SPX       ÷ 1000 → SPY ~$720    shows as ~$0.7200
-///   - DJI       ÷ 1000 → DIA ~$505    shows as ~$0.5050
-///   - NDX       ÷ 1000 → QQQ ~$530    shows as ~$0.5300
+/// The "make small accounts feel bigger" job that this function used to do
+/// has moved to the account.kind system (real_cent ×100, real_micro ×1000),
+/// which is the MT5/Exness convention. A $10 deposit into a cent account
+/// becomes 1000 cent-units the user can spend against the SAME real prices,
+/// instead of fictional prices that don't match what they see on TradingView.
 ///
-/// Note: SPX/DJI/NDX are fed via SPY/DIA/QQQ ETFs (Alpaca real-time), so the
-/// underlying engine price is the ETF price, not the index value. ETF prices
-/// move proportionally with their tracked index (~0.1× for SPY/SPX).
-pub fn symbol_display_divisor(symbol: &str) -> f64 {
-    match symbol {
-        "cryBTCUSD" => 1000.0,
-        "cryETHUSD" => 10.0,
-        // SOL ~$160 → display as ~$1.60 (÷100). DOGE/XRP/ADA prices already
-        // sit in retail-friendly territory ($0.20 – $2.50), no divisor.
-        "crySOLUSD" => 100.0,
-        "cryDOGEUSD" => 1.0,
-        "cryXRPUSD" => 1.0,
-        "cryADAUSD" => 1.0,
-        "cryXAUUSD" => 1000.0,
-        // PAXG tracks gold price (~$2.5k-4.5k), so same divisor as XAU.
-        // Display ~$2.50–$4.50 for retail-friendly unit counts.
-        "cryPAXGUSD" => 1000.0,
-        "XAGUSD" => 100.0, // silver ~$40 → ~$0.40 display
-        "SPX" | "DJI" | "NDX" => 1000.0,
-        _ => 1.0,
-    }
+/// The frontend still reads `display_divisor` and divides — leaving the
+/// helper here as a constant return keeps the wire contract stable and
+/// lets us reintroduce per-symbol display tweaks later if needed without
+/// another proto change.
+pub fn symbol_display_divisor(_symbol: &str) -> f64 {
+    1.0
 }
 
 /// Symbols that represent US equity indices fed from Yahoo (no `^` prefix
