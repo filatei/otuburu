@@ -321,6 +321,7 @@ export default function TradingPage() {
         user={user}
         mode={mode}
         activeAccountLabel={activeAccountLabel}
+        engineBalance={account?.balance ?? null}
         onModeToggle={() => setMode(m => m === 'demo' ? 'real' : 'demo')}
         onLogout={logout}
         onEditProfile={() => setProfileOpen(true)}

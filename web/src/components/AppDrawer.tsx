@@ -11,6 +11,11 @@ interface Props {
   /** Label of the currently active real account — shown in the user card
    *  when mode === 'real'. Phase 2: replaces the implicit "Real" label. */
   activeAccountLabel?: string
+  /** Live engine-side balance for the currently selected account+mode.
+   *  Overrides the static deposit-total in user.real_balance so the
+   *  drawer's balance matches what the header shows after trades settle.
+   *  Pass null to fall back to user.{demo,real}_balance. */
+  engineBalance?: number | null
   onModeToggle:  () => void
   onLogout:      () => void
   onEditProfile: () => void
@@ -28,7 +33,7 @@ interface Props {
 }
 
 export default function AppDrawer({
-  open, onClose, user, mode, activeAccountLabel, onModeToggle,
+  open, onClose, user, mode, activeAccountLabel, engineBalance, onModeToggle,
   onLogout, onEditProfile, onDeposit, onWithdraw, onHistory, onSwitchAccount,
   onGetApp, onContact,
 }: Props) {
@@ -47,7 +52,13 @@ export default function AppDrawer({
     return () => { document.body.style.overflow = '' }
   }, [open])
 
-  const balance = user ? (mode === 'demo' ? user.demo_balance : user.real_balance) : 0
+  // Prefer the live engine balance — same source the Header uses, so the
+  // two stay in sync after trades settle. Fall back to the static auth
+  // figures only when engineBalance hasn't been provided (e.g. before the
+  // first state push from the engine).
+  const balance = engineBalance !== undefined && engineBalance !== null
+    ? engineBalance
+    : user ? (mode === 'demo' ? user.demo_balance : user.real_balance) : 0
 
   if (!open) return null
 
