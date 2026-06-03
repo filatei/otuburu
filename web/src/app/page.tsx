@@ -19,6 +19,7 @@ import ProfileModal        from '@/components/ProfileModal'
 import AppDrawer           from '@/components/AppDrawer'
 import DepositModal        from '@/components/DepositModal'
 import TransferModal       from '@/components/TransferModal'
+import MT5TradeTicket      from '@/components/MT5TradeTicket'
 import GetAppModal         from '@/components/GetAppModal'
 import ContactModal        from '@/components/ContactModal'
 import SymbolActionsSheet     from '@/components/SymbolActionsSheet'
@@ -93,6 +94,9 @@ export default function TradingPage() {
    *  Tracked separately from `actionsFor` so the modal mounts fresh each time
    *  and unmounts on close — no leaked open-state across symbol selections. */
   const [propertiesFor, setPropertiesFor] = useState<string | null>(null)
+  /** Symbol whose MT5-style trade ticket is currently open. null = closed.
+   *  Opens via SymbolActionsSheet → New Order. */
+  const [ticketFor,     setTicketFor]     = useState<string | null>(null)
   /** Phase 2 multi-account: when in real mode, which real account is active.
    *  Persisted per-user in localStorage so a session restore picks up where
    *  the user left off. Falls back to the first real account on first session. */
@@ -316,7 +320,7 @@ export default function TradingPage() {
         accountId={accountId}
         onTraded={handleTraded}
         onOpenChart={() => { if (actionsFor) { setSelected(actionsFor); setMobileTab('chart') } }}
-        onNewOrder ={() => { if (actionsFor) { setSelected(actionsFor); setMobileTab('trade') } }}
+        onNewOrder ={() => { if (actionsFor) setTicketFor(actionsFor) }}
         onOpenProperties={() => { if (actionsFor) setPropertiesFor(actionsFor) }}
       />
 
@@ -327,6 +331,21 @@ export default function TradingPage() {
           open={true}
           info={symbols.find(s => s.symbol === propertiesFor) ?? null}
           onClose={() => setPropertiesFor(null)}
+        />
+      )}
+
+      {/* MT5-style full-screen trade ticket — mounted on demand from
+          SymbolActionsSheet → New Order. The ticket subscribes to the
+          symbol's live tick via the allTicks map so BID/ASK refresh
+          without a separate WS. */}
+      {ticketFor && accountId && (
+        <MT5TradeTicket
+          open={true}
+          info={symbols.find(s => s.symbol === ticketFor)!}
+          tick={allTicks[ticketFor] ?? null}
+          accountId={accountId}
+          onPlaced={() => { refresh(); refreshBalances() }}
+          onClose={() => setTicketFor(null)}
         />
       )}
       <AppDrawer
