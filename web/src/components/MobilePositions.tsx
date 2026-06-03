@@ -154,13 +154,10 @@ export default function MobilePositions(props: Props) {
             return (
               <BinaryRow
                 key={b.id}
+                binary={b}
                 info={info}
-                symbolId={b.symbol}
-                direction={b.direction}
-                stake={b.stake}
-                entry={b.entry_mid}
-                ticksLeft={b.ticks_left}
-                ticksTotal={b.ticks_total}
+                expanded={expandedId === b.id}
+                onToggle={() => toggleExpand(b.id)}
               />
             )
           })}
@@ -293,37 +290,57 @@ function SpotRow({ spot: s, info, expanded, onToggle, onClose }: {
   )
 }
 
-function BinaryRow({ info, symbolId, direction, stake, entry, ticksLeft, ticksTotal }: {
-  info: SymbolInfo | null; symbolId: string; direction: 'UP' | 'DOWN';
-  stake: number; entry: number; ticksLeft: number; ticksTotal: number
+function BinaryRow({ binary: b, info, expanded, onToggle }: {
+  binary:   BinaryOption
+  info:     SymbolInfo | null
+  expanded: boolean
+  onToggle: () => void
 }) {
   const dp = priceDecimals(info)
-  const isUp = direction === 'UP'
+  const isUp = b.direction === 'UP'
   return (
-    <RowFrame>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-bold text-text flex items-baseline gap-1.5 truncate">
-          <span>{displayNameOf(info, symbolId)},</span>
-          <span className={clsx('font-semibold', isUp ? 'text-up' : 'text-down')}>
-            {isUp ? 'rise' : 'fall'} ${stake.toFixed(0)}
-          </span>
-        </div>
-        <div className="text-[12px] text-dim num mt-0.5 flex items-center gap-2">
-          <span>{formatPrice(info, entry, dp)}</span>
-          <span className="text-dim/60">·</span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-12 h-1 bg-muted rounded-full">
-              <span
-                className={clsx('block h-1 rounded-full', isUp ? 'bg-up' : 'bg-down')}
-                style={{ width: `${(ticksLeft / ticksTotal) * 100}%` }}
-              />
+    <>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 px-4 py-2.5 border-b border-border/60 active:bg-surface/40 text-left cursor-pointer"
+      >
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-bold text-text flex items-baseline gap-1.5 truncate">
+            <span>{displayNameOf(info, b.symbol)},</span>
+            <span className={clsx('font-semibold', isUp ? 'text-up' : 'text-down')}>
+              {isUp ? 'rise' : 'fall'} ${b.stake.toFixed(0)}
             </span>
-            {ticksLeft}/{ticksTotal}
-          </span>
+          </div>
+          <div className="text-[12px] text-dim num mt-0.5 flex items-center gap-2">
+            <span>{formatPrice(info, b.entry_mid, dp)}</span>
+            <span className="text-dim/60">·</span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-12 h-1 bg-muted rounded-full">
+                <span
+                  className={clsx('block h-1 rounded-full', isUp ? 'bg-up' : 'bg-down')}
+                  style={{ width: `${(b.ticks_left / b.ticks_total) * 100}%` }}
+                />
+              </span>
+              {b.ticks_left}/{b.ticks_total}
+            </span>
+          </div>
         </div>
-      </div>
-      <span className="text-[11px] text-dim italic shrink-0 ml-2">settling…</span>
-    </RowFrame>
+        <span className="text-[11px] text-dim italic shrink-0 ml-2">settling…</span>
+      </button>
+      {expanded && (
+        <ExpandedDetails
+          rows={[
+            ['Order',     `#${b.id.slice(0, 8)}`],
+            ['Opened',    fmtOpenTime(b.opened_at_ms)],
+            ['Direction', isUp ? 'RISE / UP' : 'FALL / DOWN'],
+            ['Stake',     `$${b.stake.toFixed(2)}`],
+            ['Entry',     formatPrice(info, b.entry_mid, dp)],
+            ['Ticks',     `${b.ticks_left} of ${b.ticks_total} left`],
+          ]}
+        />
+      )}
+    </>
   )
 }
 
@@ -363,14 +380,16 @@ function SettledRow({ trade: t, info, expanded, onToggle }: {
       {expanded && (
         <ExpandedDetails
           rows={[
-            ['Order',    `#${t.id.slice(0, 8)}`],
-            ['Settled',  fmtOpenTime(t.settled_at)],
+            ['Order',     `#${t.id.slice(0, 8)}`],
+            // opened_at is optional on legacy localStorage entries.
+            ['Opened',    t.opened_at ? fmtOpenTime(t.opened_at) : '—'],
+            ['Settled',   fmtOpenTime(t.settled_at)],
             ['Direction', isUp ? 'RISE / UP' : 'FALL / DOWN'],
-            ['Stake',    `$${t.stake.toFixed(2)}`],
-            ['Entry',    formatPrice(info, t.entry_mid, dp)],
-            ['Outcome',  t.outcome === 'win' ? 'WON' : 'LOST'],
-            ['Payout',   t.outcome === 'win' ? `$${t.pnl.toFixed(2)}` : '$0.00'],
-            ['Net P&L',  `${net >= 0 ? '+' : ''}$${net.toFixed(2)}`],
+            ['Stake',     `$${t.stake.toFixed(2)}`],
+            ['Entry',     formatPrice(info, t.entry_mid, dp)],
+            ['Outcome',   t.outcome === 'win' ? 'WON' : 'LOST'],
+            ['Payout',    t.outcome === 'win' ? `$${t.pnl.toFixed(2)}` : '$0.00'],
+            ['Net P&L',   `${net >= 0 ? '+' : ''}$${net.toFixed(2)}`],
           ]}
         />
       )}

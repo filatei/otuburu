@@ -124,6 +124,9 @@ export function useAccount(accountId: string): GameState {
           stake:       b.stake,
           ticks_total: b.ticks_total,
           entry_mid:   b.entry_mid,
+          // Carry the original order time forward so the expanded
+          // history row can show both Order and Settled timestamps.
+          opened_at:   b.opened_at_ms,
           settled_at:  Date.now(),
           outcome:     pnlEach > 0 ? 'win' : 'loss',
           pnl:         parseFloat(pnlEach.toFixed(2)),

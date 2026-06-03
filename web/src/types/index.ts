@@ -110,6 +110,10 @@ export interface SettledTrade {
   stake:       number
   ticks_total: number
   entry_mid:   number
+  /** When the user placed the order (ms). Optional because settled trades
+   *  persisted to localStorage before this field was added won't have it —
+   *  the expanded row shows "—" in that case. */
+  opened_at?:  number
   settled_at:  number        // ms timestamp
   outcome:     'win' | 'loss'
   pnl:         number        // net gain/loss (positive = profit, negative = -stake)
