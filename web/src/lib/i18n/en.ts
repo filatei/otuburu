@@ -113,4 +113,19 @@ export const en = {
     overMax:        'Exceeds available {max}.',
     insufficient:   'Insufficient savings — transfer funds into Savings first',
   },
+  kyc: {
+    title:           'Verify your identity',
+    pitch:           'Verify your identity to unlock deposits up to $5,000 and enable withdrawals. Your data is encrypted in transit and only used to match Nigerian government records.',
+    instantHint:     'Verification is usually instant. We do not share your data with third parties beyond the verification provider below.',
+    // Required vendor disclosure — Smile Identity ToS asks every
+    // integrator to surface this in the verification flow.
+    providedBy:      'Identity verification is provided by Smile Identity',
+    smileSite:       'smileidentity.com',
+    verified:        '✓ Verified · Tier 1',
+    verifiedSub:     'Your account is fully unlocked. Deposit limit ${cap}.',
+    submitCta:       'Submit for verification',
+    submitting:      'Verifying…',
+    rejected:        'Last attempt rejected',
+    correctAndRetry: 'Correct the details below and try again.',
+  },
 } as const

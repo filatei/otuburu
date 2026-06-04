@@ -101,4 +101,13 @@ export const ha: DeepPartial<typeof en> = {
     to:    'Zuwa',
     max:   'Mafi yawa',
   },
+  kyc: {
+    title:      'Tabbatar da kanka',
+    providedBy: 'Tabbatar da shaida ana yi ne ta Smile Identity',
+    smileSite:  'smileidentity.com',
+    verified:   '✓ An tabbatar · Tier 1',
+    submitCta:  'Aika don tabbatarwa',
+    submitting: 'Ana tabbatarwa…',
+    rejected:   'An ƙi yunƙurin ƙarshe',
+  },
 }
