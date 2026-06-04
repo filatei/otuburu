@@ -104,6 +104,13 @@ services:
       PAYSTACK_PUBLIC_KEY: ${PAYSTACK_PUBLIC_KEY:-}
       # Frontend redirect target for Paystack's success callback URL.
       APP_URL:           ${APP_URL:-https://otuburu.torama.money}
+      # Smile Identity — KYC tier 1 (NIN/BVN/passport verification).
+      # While unset, wallet uses the stub provider that auto-approves
+      # every submission (logs a loud warning at boot). Switch to live
+      # by setting all three in GitHub Secrets.
+      SMILE_PARTNER_ID:  ${SMILE_PARTNER_ID:-}
+      SMILE_API_KEY:     ${SMILE_API_KEY:-}
+      SMILE_ENV:         ${SMILE_ENV:-sandbox}
     ports:
       - "127.0.0.1:8083:8083"
     networks:

@@ -290,6 +290,14 @@ jobs:
             SMTP_FROM=${{ secrets.SMTP_FROM || 'Otuburu <noreply@torama.money>' }}
             ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL || 'filatei@gtsng.com' }}
             ADMIN_EMAILS=${{ secrets.ADMIN_EMAILS || 'filatei@gtsng.com' }}
+            # ── Smile Identity (KYC tier 1) ────────────────────────────
+            # Set SMILE_PARTNER_ID + SMILE_API_KEY once your Smile Identity
+            # account is approved. While unset, the wallet uses the stub
+            # provider (every submission auto-approves — fine for product
+            # testing, but switch to live before paid acquisition starts).
+            SMILE_PARTNER_ID=${{ secrets.SMILE_PARTNER_ID }}
+            SMILE_API_KEY=${{ secrets.SMILE_API_KEY }}
+            SMILE_ENV=${{ secrets.SMILE_ENV || 'sandbox' }}
             ENVEOF
 
             # Login to GHCR and deploy
