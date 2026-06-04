@@ -103,9 +103,6 @@ func (h *Handler) KycStatus(c *gin.Context) {
 func (h *Handler) KycSubmit(c *gin.Context) {
 	claims := c.MustGet("claims").(*auth.Claims)
 	ctx := c.Request.Context()
-	if h.kyc == nil {
-		h.initKYC()
-	}
 
 	var req struct {
 		IDType    string `json:"id_type"    binding:"required,oneof=NIN BVN PASSPORT DRIVERS_LICENSE VOTERS_CARD"`
