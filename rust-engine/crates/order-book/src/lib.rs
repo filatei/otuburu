@@ -44,6 +44,51 @@ pub fn default_contract_specs() -> HashMap<String, ContractSpec> {
                 leverage: 100,
             },
         ),
+        // ── Otuburu African synthetic family ───────────────────────────
+        // Same leverage tier as BOOM/CRASH so the existing risk caps
+        // apply uniformly to all synthetic indices.
+        (
+            "PULSE75",
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 100,
+            },
+        ),
+        (
+            "PULSE100",
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 100,
+            },
+        ),
+        (
+            "SURGE300",
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 100,
+            },
+        ),
+        (
+            "PLUNGE500",
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 100,
+            },
+        ),
+        (
+            "DRIFT50",
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 100,
+            },
+        ),
+        (
+            "DRIFT200",
+            ContractSpec {
+                contract_size: 1.0,
+                leverage: 100,
+            },
+        ),
         (
             "frxEURUSD",
             ContractSpec {

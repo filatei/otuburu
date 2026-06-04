@@ -47,7 +47,18 @@ pub fn classify(internal_symbol: &str) -> SymbolClass {
         "cryXAUUSD" | "XAGUSD" => SymbolClass::Metal,
         "SPX" | "DJI" | "NDX" => SymbolClass::Index,
         "frxEURUSD" | "frxGBPUSD" => SymbolClass::Forex,
-        s if s.starts_with("BOOM") || s.starts_with("CRASH") => SymbolClass::Synthetic,
+        // Synthetics — Otuburu African family (PULSE/SURGE/PLUNGE/DRIFT)
+        // and the legacy BOOM/CRASH that we kept as internal IDs. All
+        // 24/7 because we control the generator.
+        s if s.starts_with("BOOM")
+            || s.starts_with("CRASH")
+            || s.starts_with("PULSE")
+            || s.starts_with("SURGE")
+            || s.starts_with("PLUNGE")
+            || s.starts_with("DRIFT") =>
+        {
+            SymbolClass::Synthetic
+        }
         _ => SymbolClass::Crypto,
     }
 }

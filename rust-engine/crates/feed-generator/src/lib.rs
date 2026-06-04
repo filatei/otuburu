@@ -327,6 +327,94 @@ pub fn default_generators() -> Vec<Box<dyn Generator>> {
             lambda_per_tick: 1.0 / 500.0,
             half_spread: 0.25,
         })),
+        // ── Otuburu African synthetic family ───────────────────────────
+        //
+        // PULSE-75 / PULSE-100 — pure volatility indices, no spikes.
+        // BoomCrashGenerator with lambda_per_tick=0 disables the Poisson
+        // spike branch, leaving only the Gaussian random walk.
+        // sigma_small controls per-tick volatility. PULSE-75 ≈ 75% annual,
+        // PULSE-100 ≈ 100% annual — the heavier of the two for traders
+        // who want bigger ticks. Anchored around 1000 to keep displayed
+        // prices in a familiar 3–4 digit range.
+        Box::new(BoomCrashGenerator::new(BoomCrashConfig {
+            symbol: "PULSE75".into(),
+            seed: 41,
+            start_price: 1000.0,
+            sigma_small: 0.75,
+            spike_mean: 0.0,
+            spike_std: 0.0,
+            spike_direction: 0.0,
+            lambda_per_tick: 0.0,
+            half_spread: 0.20,
+        })),
+        Box::new(BoomCrashGenerator::new(BoomCrashConfig {
+            symbol: "PULSE100".into(),
+            seed: 43,
+            start_price: 1000.0,
+            sigma_small: 1.00,
+            spike_mean: 0.0,
+            spike_std: 0.0,
+            spike_direction: 0.0,
+            lambda_per_tick: 0.0,
+            half_spread: 0.25,
+        })),
+        // SURGE-300 — faster up-spike cadence (every ~300 ticks). Sized
+        // smaller than BOOM500 so the more frequent spikes don't compound
+        // into outsized P&L swings.
+        Box::new(BoomCrashGenerator::new(BoomCrashConfig {
+            symbol: "SURGE300".into(),
+            seed: 47,
+            start_price: 1000.0,
+            sigma_small: 0.18,
+            spike_mean: 12.0,
+            spike_std: 5.0,
+            spike_direction: 1.0,
+            lambda_per_tick: 1.0 / 300.0,
+            half_spread: 0.20,
+        })),
+        // PLUNGE-500 — mirror of SURGE-500 with down spikes (every ~500
+        // ticks). Gives traders symmetric long-vs-short choices.
+        Box::new(BoomCrashGenerator::new(BoomCrashConfig {
+            symbol: "PLUNGE500".into(),
+            seed: 53,
+            start_price: 1000.0,
+            sigma_small: 0.18,
+            spike_mean: 20.0,
+            spike_std: 8.0,
+            spike_direction: -1.0,
+            lambda_per_tick: 1.0 / 500.0,
+            half_spread: 0.25,
+        })),
+        // DRIFT-50 / DRIFT-200 — slowly trending random walks. FxGenerator
+        // gives us the Heston-lite stochastic vol + mu drift parameter
+        // that lets prices wander away from anchor for extended periods
+        // before mean-reverting. mu > 0 biases the walk upward; the
+        // anchor pull (s += 0.00002 * (anchor - s) per tick) makes the
+        // trend mean-revert on the order of ~50/~200 thousand ticks.
+        Box::new(FxGenerator::new(FxConfig {
+            symbol: "DRIFT50".into(),
+            seed: 59,
+            anchor: 1000.0,
+            mu: 0.20,
+            theta: 0.04 * 0.04,
+            kappa: 1.5,
+            xi: 0.18,
+            rho: -0.3,
+            dt: 1.0 / (365.0 * 24.0 * 3600.0),
+            half_spread: 0.05,
+        })),
+        Box::new(FxGenerator::new(FxConfig {
+            symbol: "DRIFT200".into(),
+            seed: 61,
+            anchor: 1000.0,
+            mu: 0.05,
+            theta: 0.02 * 0.02,
+            kappa: 1.0,
+            xi: 0.10,
+            rho: -0.2,
+            dt: 1.0 / (365.0 * 24.0 * 3600.0),
+            half_spread: 0.05,
+        })),
         Box::new(FxGenerator::new(FxConfig {
             symbol: "frxEURUSD".into(),
             seed: 23,

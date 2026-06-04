@@ -41,6 +41,16 @@ pub fn symbol_cadence_ms(symbol: &str) -> u64 {
         // US indices polled from Yahoo at 2s — the upstream doesn't update
         // any faster anyway and we don't want to hammer them.
         "SPX" | "DJI" | "NDX" => 2000,
+        // ── Otuburu African synthetic family ───────────────────────────
+        // PULSE-N = pure volatility (no spikes), N tied to annualised vol %.
+        // SURGE-N = up-spike (was BOOM), N = expected ticks between spikes.
+        // PLUNGE-N = down-spike (was CRASH), N = expected ticks between spikes.
+        // DRIFT-N = slow trending random walk, N = lookback periodicity.
+        // 500ms cadence keeps the price feel comparable to BOOM/CRASH.
+        "PULSE75" | "PULSE100" => 500,
+        "SURGE300" | "PLUNGE500" => 500,
+        "DRIFT50" => 500,
+        "DRIFT200" => 1000,
         _ => 1000, // BOOM1000, CRASH1000
     }
 }
@@ -63,10 +73,30 @@ pub struct SymbolMeta {
 }
 
 /// Strip the historical `cry`/`frx` namespace prefix to produce the
-/// user-facing symbol name. Returns the input unchanged when no prefix
-/// applies (e.g. BOOM500, CRASH1000). XAU keeps its three-letter code (no
-/// longer mislabelled as "crypto").
+/// user-facing symbol name. Also rebrands the synthetic instrument family
+/// from the legacy BOOM/CRASH names (Deriv-derived) to the Otuburu
+/// SURGE/PLUNGE/PULSE/DRIFT brand. Internal IDs stay the same so
+/// snapshots, ledger refs, position records, and the order book don't
+/// need migration — only the visible label changes.
+///
+/// XAU keeps its three-letter code (no longer mislabelled as "crypto").
 pub fn symbol_display_name(symbol: &str) -> &str {
+    match symbol {
+        // Rebrand legacy synthetics so users see the African-built family.
+        "BOOM500" => return "SURGE-500",
+        "BOOM1000" => return "SURGE-1000",
+        "CRASH1000" => return "PLUNGE-1000",
+        // New synthetic family — internal IDs are flat (no dash) so grep
+        // and proto wire format are clean; user-facing names get the dash
+        // for readability.
+        "PULSE75" => return "PULSE-75",
+        "PULSE100" => return "PULSE-100",
+        "SURGE300" => return "SURGE-300",
+        "PLUNGE500" => return "PLUNGE-500",
+        "DRIFT50" => return "DRIFT-50",
+        "DRIFT200" => return "DRIFT-200",
+        _ => {}
+    }
     symbol
         .strip_prefix("cry")
         .or_else(|| symbol.strip_prefix("frx"))

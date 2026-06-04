@@ -18,10 +18,14 @@
 
 const STORAGE_KEY = 'otuburu.watchlist'
 
-/** First-run default: the 8 instruments most active African retail traders
- *  expect to see on day one. Engine IDs match rust-engine's symbol
- *  registry (cry* prefix for crypto, three-letter codes for metals,
- *  ticker for indices, suffix-number for synthetics). */
+/** First-run default: 9 instruments balanced across asset classes so the
+ *  user lands on something tradeable regardless of session — crypto +
+ *  synthetics are always open, metals/indices follow market hours.
+ *  Engine IDs match rust-engine's symbol registry (cry* prefix for
+ *  crypto, three-letter codes for metals, ticker for indices, name+
+ *  number for synthetics). The synthetic IDs are the legacy internal
+ *  names (BOOM500); their user-facing labels are remapped to the
+ *  Otuburu SURGE/PLUNGE/PULSE brand via the engine's display_symbol. */
 export const DEFAULT_WATCHLIST: readonly string[] = [
   'cryXAUUSD',  // Gold
   'XAGUSD',     // Silver
@@ -30,7 +34,8 @@ export const DEFAULT_WATCHLIST: readonly string[] = [
   'SPX',        // S&P 500
   'DJI',        // Dow Jones
   'NDX',        // Nasdaq 100
-  'BOOM500',    // Synthetic boom index
+  'BOOM500',    // SURGE-500 (synthetic up-spike)
+  'PULSE75',    // PULSE-75 (Volatility 75 — most-traded synthetic class)
 ]
 
 /** Read the watchlist from localStorage, falling back to DEFAULT_WATCHLIST
