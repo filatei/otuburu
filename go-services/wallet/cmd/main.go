@@ -130,6 +130,8 @@ func main() {
 	protected.GET("/wallet/savings", walletH.Savings)
 	// Phase-4 transfers — move funds between {savings, account} legs.
 	protected.POST("/wallet/transfers", walletH.Transfer)
+	// Phase-5 affiliate / IB program — code + intro count.
+	protected.GET("/wallet/affiliate", walletH.Affiliate)
 	// Phase-3 NGN withdrawal: account verification + bank payout.
 	protected.GET("/wallet/ngn/resolve", walletH.ResolveNGNAccount)
 	protected.POST("/wallet/withdraw/ngn", walletH.WithdrawNGN)

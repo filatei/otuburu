@@ -276,6 +276,33 @@ DO $$ BEGIN
     );
 END $$;
 
+-- ── Affiliate / IB program (Phase-5) ─────────────────────────────────────────
+-- One auto-generated 6-char code per user, lazy-created on first
+-- /wallet/affiliate hit. The `rate` column lets us override per-affiliate
+-- when we cut deals with large IBs without touching the schema. Default
+-- 30% matches industry-standard forex/synthetic broker IB tiers.
+CREATE TABLE IF NOT EXISTS affiliate_codes (
+    user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    code       TEXT UNIQUE NOT NULL,
+    rate       NUMERIC(5,4) NOT NULL DEFAULT 0.30 CHECK (rate >= 0 AND rate <= 1),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- One row per introduced user. introducer_user_id is RESTRICT-FK (not
+-- CASCADE) so we never accidentally lose attribution history if an
+-- introducer account is deleted — we'd want to handle that case
+-- explicitly (transfer their book, etc.) rather than silently dropping
+-- referrals. code_at_signup is denormalised from affiliate_codes so a
+-- later code regeneration doesn't rewrite history.
+CREATE TABLE IF NOT EXISTS referrals (
+    introduced_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    introducer_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    code_at_signup     TEXT NOT NULL,
+    created_at         TIMESTAMPTZ DEFAULT NOW(),
+    CHECK (introduced_user_id != introducer_user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_referrals_introducer ON referrals(introducer_user_id);
+
 -- ── Indices ───────────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_ledger_account      ON ledger(account_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_created      ON ledger(created_at DESC);

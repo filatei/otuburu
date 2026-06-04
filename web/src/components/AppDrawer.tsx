@@ -38,6 +38,8 @@ interface Props {
    *  Optional so older callers compile; when undefined, the Savings card
    *  hides its Transfer buttons. Phase 4. */
   onTransfer?:    () => void
+  /** Open the Affiliate / Refer-a-Friend sheet (Phase 5). */
+  onAffiliate?:   () => void
   /** Open the "Get the App" sheet — Android APK + iOS PWA instructions. */
   onGetApp?:      () => void
   /** Open the "Contact support" sheet — message form that emails admin. */
@@ -47,7 +49,7 @@ interface Props {
 export default function AppDrawer({
   open, onClose, user, mode, activeAccountLabel, activeAccountKind,
   engineBalance, onModeToggle, onLogout, onEditProfile, onDeposit,
-  onWithdraw, onHistory, onSwitchAccount, onTransfer, onGetApp, onContact,
+  onWithdraw, onHistory, onSwitchAccount, onTransfer, onAffiliate, onGetApp, onContact,
 }: Props) {
   const drawerRef = useRef<HTMLDivElement>(null)
   const { t } = useT()
@@ -239,7 +241,11 @@ export default function AppDrawer({
               <Item icon="🔁" label="Switch account" sub="Manage real accounts" badge="live" onClick={() => { onSwitchAccount(); onClose() }} />
             )}
             <Item icon="👤" label="Edit Profile"       sub="Name & preferences"          badge="live" onClick={() => { onEditProfile(); onClose() }} />
-            <Item icon="🎁" label="Refer a Friend"     sub="Earn on their trades"        badge="soon" />
+            {onAffiliate ? (
+              <Item icon="🎁" label="Refer a friend" sub="Earn 30% of their spread" badge="new" onClick={() => { onAffiliate(); onClose() }} />
+            ) : (
+              <Item icon="🎁" label="Refer a friend" sub="Earn on their trades" badge="soon" />
+            )}
             <Item icon="🔔" label="Notifications"      sub="Trade alerts & news"         badge="soon" />
           </Section>
 

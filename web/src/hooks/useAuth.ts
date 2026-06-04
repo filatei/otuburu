@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import type { UserAccount } from '@/types'
+import { clearPendingRef, getPendingRef } from '@/lib/affiliate'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 // Persisted in localStorage (not sessionStorage) so the user stays signed in
@@ -47,10 +48,15 @@ export function useAuth() {
   }, [])
 
   const loginWithGoogle = useCallback(async (credential: string) => {
+    // Affiliate attribution: include any pending ref from the landing
+    // URL. Backend ignores ref for returning users — attribution is
+    // one-shot at first signup, so retried sign-ins (different device,
+    // forgotten password reset flow, etc.) can't switch IBs.
+    const ref = getPendingRef()
     const res  = await fetch(`${API_BASE}/auth/google`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ credential }),
+      body:    JSON.stringify(ref ? { credential, ref } : { credential }),
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error ?? 'Login failed')
@@ -63,6 +69,9 @@ export function useAuth() {
     const authUser: AuthUser = { ...data, ...me }
     localStorage.setItem(TOKEN_KEY, data.token)
     setUser(authUser)
+    // Clear the ref once we've successfully signed in so a logout +
+    // sign-in cycle can't re-attribute.
+    clearPendingRef()
     return authUser
   }, [])
 

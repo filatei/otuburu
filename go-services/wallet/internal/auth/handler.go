@@ -60,10 +60,17 @@ func verifyGoogleToken(ctx context.Context, idToken string) (*googleTokenInfo, e
 	return &info, nil
 }
 
-// POST /auth/google — verify Google ID token, create/find user, return JWT
+// POST /auth/google — verify Google ID token, create/find user, return JWT.
+//
+// Optional `ref` field in the body carries an affiliate code captured
+// from `?ref=CODE` on the landing page. If present AND this is a new
+// user, we write a referrals row attributing the introduction. Returning
+// users with `ref` set in the body are ignored — attribution is one-shot
+// at first signup so a user can't switch IBs by changing the URL.
 func (h *Handler) GoogleAuth(c *gin.Context) {
 	var req struct {
-		Credential string `json:"credential" binding:"required"`
+		Credential string `json:"credential"   binding:"required"`
+		Ref        string `json:"ref,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "credential required"})
@@ -127,7 +134,8 @@ func (h *Handler) GoogleAuth(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "real lookup: " + err.Error()})
 		return
 	}
-	if len(realIDs) == 0 {
+	isNewUser := len(realIDs) == 0
+	if isNewUser {
 		var firstReal string
 		if err = tx.QueryRow(ctx,
 			`INSERT INTO accounts (user_id, type, label, balance)
@@ -138,6 +146,30 @@ func (h *Handler) GoogleAuth(c *gin.Context) {
 			return
 		}
 		realIDs = []string{firstReal}
+	}
+
+	// Affiliate attribution — only at FIRST signup. A user who shows up
+	// with a different ?ref= weeks later can't switch IBs that way;
+	// attribution is one-shot at the user's birth. The check on
+	// isNewUser handles the second-time-Google-flow case (this same
+	// upsert runs on every sign-in, not just first one).
+	if isNewUser && req.Ref != "" {
+		var introducerID string
+		err := tx.QueryRow(ctx,
+			`SELECT user_id FROM affiliate_codes WHERE code = $1`,
+			req.Ref,
+		).Scan(&introducerID)
+		if err == nil && introducerID != userID {
+			// Best-effort insert. ON CONFLICT covers the (vanishingly
+			// rare) race where two windows both finish onboarding the
+			// same Google identity simultaneously.
+			tx.Exec(ctx, //nolint:errcheck
+				`INSERT INTO referrals (introduced_user_id, introducer_user_id, code_at_signup)
+				 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+				userID, introducerID, req.Ref)
+		}
+		// Unknown code → silently ignore. Better UX than a sign-up error
+		// for what's effectively a marketing data point.
 	}
 
 	if err := tx.Commit(ctx); err != nil {

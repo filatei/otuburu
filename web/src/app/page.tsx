@@ -21,6 +21,7 @@ import DepositModal        from '@/components/DepositModal'
 import TransferModal       from '@/components/TransferModal'
 import MT5TradeTicket      from '@/components/MT5TradeTicket'
 import ManageSymbolsSheet  from '@/components/ManageSymbolsSheet'
+import AffiliateSheet      from '@/components/AffiliateSheet'
 import GetAppModal         from '@/components/GetAppModal'
 import ContactModal        from '@/components/ContactModal'
 import SymbolActionsSheet     from '@/components/SymbolActionsSheet'
@@ -32,6 +33,7 @@ import { useAutoFullscreen } from '@/hooks/useAutoFullscreen'
 import { useDailyPnLBySymbol } from '@/hooks/useDailyPnL'
 import { useWatchlist } from '@/hooks/useWatchlist'
 import { getWatchlist } from '@/lib/watchlist'
+import { captureRefFromUrl } from '@/lib/affiliate'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 
@@ -103,6 +105,8 @@ export default function TradingPage() {
   /** Watchlist manager sheet open state. Lets the user toggle hidden
    *  symbols into Quotes. */
   const [manageOpen,    setManageOpen]    = useState(false)
+  /** Affiliate / Refer-a-friend sheet open state. */
+  const [affiliateOpen, setAffiliateOpen] = useState(false)
   /** Phase 2 multi-account: when in real mode, which real account is active.
    *  Persisted per-user in localStorage so a session restore picks up where
    *  the user left off. Falls back to the first real account on first session. */
@@ -116,6 +120,13 @@ export default function TradingPage() {
   // document — the initial arm misses it. The user.user_id-keyed re-arm
   // catches the first post-login tap on our own DOM.
   useAutoFullscreen(user?.user_id ?? 'pre-auth')
+
+  // Capture ?ref=CODE from the landing URL on first paint. Runs before
+  // the Paystack ?reference= verifier below, but they don't conflict
+  // (different param names). Persisted to localStorage; the Google
+  // sign-in handler picks it up and attributes the referral one-shot
+  // at first user creation.
+  useEffect(() => { captureRefFromUrl() }, [])
 
   useEffect(() => {
     if (!authLoading && !user) setAuthOpen(true)
@@ -364,6 +375,14 @@ export default function TradingPage() {
         symbols={symbols}
       />
 
+      {/* Affiliate / Refer-a-friend sheet — shows the user's auto-minted
+          6-char code + share URL + intro count. Always-mounted so the
+          BottomSheet exit animation runs cleanly. */}
+      <AffiliateSheet
+        open={affiliateOpen}
+        onClose={() => setAffiliateOpen(false)}
+      />
+
       {/* MT5-style full-screen trade ticket — mounted on demand from
           SymbolActionsSheet → New Order. The ticket subscribes to the
           symbol's live tick via the allTicks map so BID/ASK refresh
@@ -398,6 +417,7 @@ export default function TradingPage() {
             : undefined
         }
         onTransfer={user ? () => setTransferOpen(true) : undefined}
+        onAffiliate={user ? () => setAffiliateOpen(true) : undefined}
         onGetApp={() => setGetAppOpen(true)}
         onContact={user ? () => setContactOpen(true) : undefined}
       />
