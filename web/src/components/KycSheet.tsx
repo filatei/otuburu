@@ -42,12 +42,27 @@ type IDType = 'NIN' | 'BVN' | 'PASSPORT' | 'DRIVERS_LICENSE' | 'VOTERS_CARD'
 interface KycStatus {
   tier:             number
   deposit_cap_usd:  number
+  /** "stub" | "sandbox" | "production" — drives the dev-only "Fill
+   *  sandbox test data" affordance. Production never shows it. */
+  provider_env?:    string
   submission?: {
     id_type:          IDType
     status:           'pending' | 'approved' | 'rejected' | 'expired'
     rejection_reason: string | null
   } | null
 }
+
+/** Smile Identity sandbox test fixtures. These IDs return a positive
+ *  match against deterministic test records on the sandbox; the real
+ *  upstream rejects anything else. Drawn from Smile's published
+ *  sandbox-test-data list — refresh when they rotate them. */
+const SANDBOX_FIXTURES = {
+  NIN:             { number: '00000000000', firstName: 'John',    lastName: 'Doe',     dob: '1990-01-01' },
+  BVN:             { number: '00000000000', firstName: 'John',    lastName: 'Doe',     dob: '1990-01-01' },
+  PASSPORT:        { number: 'A00000000',   firstName: 'John',    lastName: 'Doe',     dob: '1990-01-01' },
+  DRIVERS_LICENSE: { number: 'AAA00000AA00', firstName: 'John',   lastName: 'Doe',     dob: '1990-01-01' },
+  VOTERS_CARD:     { number: '00AA0000000000000000', firstName: 'John', lastName: 'Doe', dob: '1990-01-01' },
+} as const
 
 const ID_TYPE_LABEL: Record<IDType, string> = {
   NIN:             'NIN (National ID)',
@@ -169,6 +184,26 @@ export default function KycSheet({ open, onClose, onVerified }: Props) {
               </div>
             )}
 
+            {/* Sandbox autofill — only when wallet boot reports stub/sandbox
+                provider. One tap loads a Smile Identity test fixture that's
+                known to return a positive verdict. Hidden in production
+                (where the data wouldn't match any real record anyway). */}
+            {status.provider_env && status.provider_env !== 'production' && (
+              <button
+                type="button"
+                onClick={() => {
+                  const fix = SANDBOX_FIXTURES[idType]
+                  setIdNumber(fix.number)
+                  setFirstName(fix.firstName)
+                  setLastName(fix.lastName)
+                  setDob(fix.dob)
+                }}
+                className="w-full text-[11px] text-brand/80 hover:text-brand underline text-left py-1"
+              >
+                ⚡ Fill sandbox test data for {idType}
+              </button>
+            )}
+
             <div>
               <label className="block text-[10px] text-dim uppercase tracking-wider mb-1.5">
                 Document type
@@ -194,7 +229,11 @@ export default function KycSheet({ open, onClose, onVerified }: Props) {
                 autoComplete="off"
                 value={idNumber}
                 onChange={e => setIdNumber(e.target.value)}
-                placeholder={idType === 'NIN' ? '11 digits' : 'Document number'}
+                placeholder={
+                  idType === 'NIN' ? '11 digits — exactly' :
+                  idType === 'BVN' ? '11 digits — exactly' :
+                  'Document number'
+                }
                 className="w-full px-3 py-2.5 bg-surface border border-border rounded-lg text-text text-sm num focus:outline-none focus:border-brand/60"
               />
             </div>

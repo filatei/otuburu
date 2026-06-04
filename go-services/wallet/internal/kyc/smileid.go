@@ -42,6 +42,11 @@ type Provider interface {
 	// by the handler to decide whether to default sanctions screening
 	// to 'clear' (stub) vs 'pending' (live — pending manual review).
 	IsStub() bool
+	// Env returns the upstream environment label — "stub", "sandbox",
+	// or "production". Used by the frontend to gate the "Fill sandbox
+	// test data" autofill affordance (only meaningful in sandbox /
+	// stub modes where deterministic test IDs work).
+	Env() string
 }
 
 // VerifyRequest mirrors the input shape we ask of every provider.
@@ -93,6 +98,7 @@ func NewProvider() Provider {
 		partnerID: partner,
 		apiKey:    apiKey,
 		baseURL:   base,
+		env:       env,
 		client:    &http.Client{Timeout: 15 * time.Second},
 	}
 }
@@ -103,10 +109,12 @@ type smileProvider struct {
 	partnerID string
 	apiKey    string
 	baseURL   string
+	env       string
 	client    *http.Client
 }
 
-func (*smileProvider) IsStub() bool { return false }
+func (*smileProvider) IsStub() bool   { return false }
+func (p *smileProvider) Env() string  { return p.env }
 
 // idTypeToSlug maps our internal id types to Smile Identity's request slugs.
 // They use NIN_V2 for the V2 lookup (which covers BVN + NIN cross-check)
@@ -188,7 +196,8 @@ func (p *smileProvider) Verify(ctx context.Context, req VerifyRequest) (*VerifyR
 
 type stubProvider struct{}
 
-func (*stubProvider) IsStub() bool { return true }
+func (*stubProvider) IsStub() bool  { return true }
+func (*stubProvider) Env() string   { return "stub" }
 
 // Verify returns approved=true for any non-empty input, simulating the
 // happy path. The raw response includes a clear "stub" marker so admin

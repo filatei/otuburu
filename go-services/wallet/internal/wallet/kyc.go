@@ -82,6 +82,9 @@ func (h *Handler) KycStatus(c *gin.Context) {
 	resp := gin.H{
 		"tier":            tier,
 		"deposit_cap_usd": kycDepositCapUSD(tier),
+		// provider_env tells the UI whether to surface the "Fill sandbox
+		// test data" affordance. Only meaningful when stub/sandbox.
+		"provider_env":    h.kyc.Env(),
 	}
 	if submissionExists {
 		resp["submission"] = gin.H{
