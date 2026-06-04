@@ -30,7 +30,10 @@ import SymbolPropertiesModal  from '@/components/SymbolPropertiesModal'
 import AccountSwitcherSheet   from '@/components/AccountSwitcherSheet'
 import WithdrawSheet          from '@/components/WithdrawSheet'
 import { provisionAccount } from '@/hooks/useAccount'
-import { useAutoFullscreen } from '@/hooks/useAutoFullscreen'
+// useAutoFullscreen — removed from auto-trigger. The fullscreen toggle in
+// the drawer's Display section still works for manual opt-in. See the
+// FullscreenItem in AppDrawer for the user-facing entry point.
+//   import { useAutoFullscreen } from '@/hooks/useAutoFullscreen'
 import { useDailyPnLBySymbol } from '@/hooks/useDailyPnL'
 import { useWatchlist } from '@/hooks/useWatchlist'
 import { getWatchlist } from '@/lib/watchlist'
@@ -118,11 +121,10 @@ export default function TradingPage() {
 
   const { user, loading: authLoading, loginWithGoogle, logout, refreshBalances, applyToken } = useAuth()
 
-  // Auto-fullscreen: re-arm on initial mount AND whenever user logs in.
-  // Google Sign-In renders inside an iframe so its click doesn't bubble to
-  // document — the initial arm misses it. The user.user_id-keyed re-arm
-  // catches the first post-login tap on our own DOM.
-  useAutoFullscreen(user?.user_id ?? 'pre-auth')
+  // Auto-fullscreen removed — was triggering unexpectedly post-sign-in,
+  // making the URL bar disappear right as users were trying to read the
+  // first-time onboarding. The manual "Hide browser URL" toggle in the
+  // drawer's Display section is still wired up via FullscreenItem.
 
   // Capture ?ref=CODE from the landing URL on first paint. Runs before
   // the Paystack ?reference= verifier below, but they don't conflict
