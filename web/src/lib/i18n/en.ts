@@ -40,13 +40,21 @@ export const en = {
     retry:    'Retry',
     amount:   'Amount',
     balance:  'Balance',
+    // Short forms — what the Header chip and modes show. Kept distinct
+    // from drawer.{real,demo}Balance which include the word "Balance".
+    real:     'REAL',
+    demo:     'DEMO',
   },
   auth: {
     signIn:           'Sign in',
     signOut:          'Sign out',
     signInWithGoogle: 'Sign in with Google',
+    signInDifferent:  'Sign in with a different account',
+    signInPrompt:     'Sign in to access your trading account',
     welcome:          'Welcome to Otuburu',
+    welcomeShort:     'Welcome',
     tagline:          'Synthetic & real markets, zero-commission spreads',
+    zeroCommission:   'Zero commission',
   },
   drawer: {
     deposit:        'Deposit',

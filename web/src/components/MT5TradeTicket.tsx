@@ -39,6 +39,7 @@ import type { SymbolInfo, Tick } from '@/types'
 import { placeCFD } from '@/hooks/useAccount'
 import { isMarketOpen } from '@/lib/marketHours'
 import { displayNameOf } from '@/lib/symbols'
+import { useT } from '@/lib/i18n/provider'
 
 interface Props {
   open:      boolean
@@ -87,6 +88,7 @@ function volumeProfile(info: SymbolInfo | null): { default: number; steps: numbe
 export default function MT5TradeTicket({
   open, onClose, info, tick, accountId, onPlaced,
 }: Props) {
+  const { t } = useT()
   // Asset-class-aware defaults — see volumeProfile above. Computed once
   // per open so changing symbols requires a fresh ticket (matches MT5
   // mobile, where each ticket binds to one instrument).
@@ -178,7 +180,7 @@ export default function MT5TradeTicket({
             className="w-full text-center text-text text-sm font-medium py-2.5 rounded-lg bg-surface border border-border hover:border-brand/30 transition-colors"
             disabled
           >
-            Market Execution
+            {t('trade.marketExecution')}
           </button>
         </div>
 
@@ -214,11 +216,11 @@ export default function MT5TradeTicket({
             the action buttons below: SELL pairs with the BID, BUY with ASK. */}
         <div className="px-4 py-5 border-b border-border grid grid-cols-2 gap-4">
           <div className="text-center">
-            <p className="text-[10px] text-dim uppercase tracking-wider mb-1">Bid</p>
+            <p className="text-[10px] text-dim uppercase tracking-wider mb-1">{t('trade.bid')}</p>
             <PriceBig value={bid} stale={!marketOpen} polarity="down" />
           </div>
           <div className="text-center">
-            <p className="text-[10px] text-dim uppercase tracking-wider mb-1">Ask</p>
+            <p className="text-[10px] text-dim uppercase tracking-wider mb-1">{t('trade.ask')}</p>
             <PriceBig value={ask} stale={!marketOpen} polarity="up" />
           </div>
         </div>
@@ -292,7 +294,7 @@ export default function MT5TradeTicket({
           className="py-4 bg-down/15 hover:bg-down/25 active:bg-down/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           <p className="text-down text-base font-bold tracking-wide">
-            {busy === 'SELL' ? 'Selling…' : 'SELL'}
+            {busy === 'SELL' ? `${t('trade.sell')}…` : t('trade.sell').toUpperCase()}
           </p>
           <p className="text-down/70 text-[10px] tracking-wider">BY MARKET</p>
         </button>
@@ -303,7 +305,7 @@ export default function MT5TradeTicket({
           className="py-4 bg-up/15 hover:bg-up/25 active:bg-up/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           <p className="text-up text-base font-bold tracking-wide">
-            {busy === 'BUY' ? 'Buying…' : 'BUY'}
+            {busy === 'BUY' ? `${t('trade.buy')}…` : t('trade.buy').toUpperCase()}
           </p>
           <p className="text-up/70 text-[10px] tracking-wider">BY MARKET</p>
         </button>

@@ -1,5 +1,6 @@
 'use client'
 import type { AuthUser } from '@/hooks/useAuth'
+import { useT } from '@/lib/i18n/provider'
 
 interface Props {
   user:           AuthUser | null
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function Header({ user, connected, mode, engineBalance, onModeToggle, onMenuOpen }: Props) {
+  const { t } = useT()
   // Prefer the live engine balance (updates as trades settle) over the static
   // wallet balance. The double-null fallback handles two distinct
   // "missing" states: (a) engineBalance not yet pushed (null) — fall through
@@ -65,14 +67,14 @@ export default function Header({ user, connected, mode, engineBalance, onModeTog
                 : 'bg-up/10 border-up/30 text-up hover:bg-up/20'
             }`}
           >
-            {mode === 'demo' ? 'DEMO' : 'REAL'}
+            {mode === 'demo' ? t('common.demo') : t('common.real')}
           </button>
 
           {/* Balance — desktop only. Mobile sees balance in the drawer's
               user card so the header stays MT5-lean. */}
           {balance !== null && (
             <div className="hidden sm:flex flex-col items-end">
-              <span className="text-dim text-[10px] uppercase tracking-wider leading-none">Balance</span>
+              <span className="text-dim text-[10px] uppercase tracking-wider leading-none">{t('common.balance')}</span>
               <span className="num text-sm font-semibold text-text leading-tight">
                 ${balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>

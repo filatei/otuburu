@@ -155,7 +155,7 @@ export default function AppDrawer({
                     : 'bg-up/10 border-up/30 text-up hover:bg-up/20'
                 }`}
               >
-                {mode === 'demo' ? '→ Go Real' : '→ Go Demo'}
+                {mode === 'demo' ? t('drawer.goReal') : t('drawer.goDemo')}
               </button>
             </div>
           </div>
@@ -173,7 +173,7 @@ export default function AppDrawer({
             <div className="flex items-center justify-between mb-3">
               <div className="min-w-0">
                 <p className="text-[10px] text-dim uppercase tracking-wider mb-0.5 flex items-center gap-1.5">
-                  <span>🏛️</span> Savings
+                  <span>🏛️</span> {t('drawer.savings')}
                 </p>
                 <p className="num text-lg font-bold text-text">
                   ${(user.savings_balance ?? 0).toLocaleString('en-US', {
@@ -204,7 +204,7 @@ export default function AppDrawer({
             </div>
             {(user.savings_balance ?? 0) <= 0 && (
               <p className="text-[10px] text-dim mt-2 leading-relaxed">
-                Move funds from a trading account into Savings before withdrawing.
+                {t('drawer.savingsHint')}
               </p>
             )}
           </div>
@@ -277,7 +277,7 @@ export default function AppDrawer({
               className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-down hover:bg-down/10 border border-transparent hover:border-down/20 transition-colors text-sm font-medium"
             >
               <span className="text-base">🚪</span>
-              Sign out
+              {t('auth.signOut')}
             </button>
             <p className="text-center text-[10px] text-dim/70 mt-3 leading-relaxed">
               Zero commission · Spreads from 5 bps · Real markets, fractional access

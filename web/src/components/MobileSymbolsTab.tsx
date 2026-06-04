@@ -5,6 +5,7 @@ import type { SymbolInfo, Tick } from '@/types'
 import { displayNameOf, formatPrice, priceDecimals } from '@/lib/symbols'
 import { useSessionHL, type SessionRange } from '@/hooks/useSessionHL'
 import { isMarketOpen } from '@/lib/marketHours'
+import { useT } from '@/lib/i18n/provider'
 
 /**
  * MobileSymbolsTab — vertical scrollable list of all tradeable symbols.
@@ -40,6 +41,7 @@ const TYPE_BADGE: Record<string, string> = {
 }
 
 export default function MobileSymbolsTab({ symbols, ticks, selected, dailyPnl, onSelect, onManage }: Props) {
+  const { t } = useT()
   // Session High/Low per symbol, observed off the live tick stream. Resets
   // at UTC midnight. MT5 shows the same pair under each Quotes row.
   const sessionHL = useSessionHL(ticks)
@@ -47,14 +49,14 @@ export default function MobileSymbolsTab({ symbols, ticks, selected, dailyPnl, o
   return (
     <div className="h-full overflow-y-auto bg-panel">
       <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-dim border-b border-border bg-surface/40 sticky top-0 z-10 flex items-center justify-between">
-        <span>Quotes · {symbols.length} symbols</span>
+        <span>{t('symbols.quotes')} · {symbols.length}</span>
         {onManage ? (
           <button
             type="button"
             onClick={onManage}
             className="text-brand font-semibold hover:text-brand/80 transition-colors"
           >
-            + Add
+            {t('symbols.add')}
           </button>
         ) : (
           <span className="text-dim/70">Tap for actions</span>

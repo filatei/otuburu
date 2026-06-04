@@ -36,13 +36,20 @@ export const ha: DeepPartial<typeof en> = {
     retry:   'Sake gwadawa',
     amount:  'Adadi',
     balance: 'Ma’auni',
+    // Kept short to fit the Header chip — same word width as English.
+    real:    'KUDIN',
+    demo:    'KOYO',
   },
   auth: {
     signIn:           'Shiga',
     signOut:          'Fita',
     signInWithGoogle: 'Shiga da Google',
     welcome:          'Barka da zuwa Otuburu',
+    welcomeShort:     'Barka',
     tagline:          'Kasuwannin gaskiya da na koyo, ba kuɗin kwamishan',
+    signInPrompt:     'Shiga don samun damar asusunka',
+    signInDifferent:  'Shiga da wani asusu',
+    zeroCommission:   'Babu kwamishan',
   },
   drawer: {
     deposit:       'Ajiye kuɗi',
