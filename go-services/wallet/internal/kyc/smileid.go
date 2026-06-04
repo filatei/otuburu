@@ -12,14 +12,24 @@
 // testapi.smileidentity.com; production uses api.smileidentity.com —
 // switched via SMILE_ENV (defaults to sandbox).
 //
+// Auth: HMAC-SHA256 signature, NOT plain api_key. Recipe is
+//   signature = base64(HMAC-SHA256(api_key, timestamp + partner_id + "sid_request"))
+// Send {partner_id, signature, timestamp} in the request body. The
+// older `api_key` shape returns `{"code":"2413","error":"authorization
+// is required"}` — sandbox accepts the request shape but the actual
+// lookup auths against the signature.
+//
 // References
 //   - Enhanced KYC docs: https://docs.smileidentity.com/products/enhanced-kyc
-//   - Auth via partner_id + api_key (no OAuth handshake).
+//   - Synchronous endpoint: /v1/identity_verification
 package kyc
 
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -133,13 +143,27 @@ func (p *smileProvider) Verify(ctx context.Context, req VerifyRequest) (*VerifyR
 		return nil, fmt.Errorf("unsupported id_type %q", req.IDType)
 	}
 
-	// Smile Identity Enhanced KYC POST body. job_type 5 = Enhanced KYC.
-	// Job ID embeds our user_id + timestamp so async webhooks (if we
-	// add them later) can route back without a lookup table.
+	// Smile Identity uses HMAC-SHA256 signature auth, not plain api_key.
+	// Recipe:
+	//   1. timestamp in ISO8601 (their server allows ±5 min skew)
+	//   2. signature = base64(HMAC-SHA256(api_key, timestamp + partner_id + "sid_request"))
+	//   3. send {partner_id, signature, timestamp} in body instead of api_key
+	//
+	// Without this we got `{"code":"2413","error":"authorization is required"}`
+	// which my parser then defaulted to a `rejected` verdict. The empty
+	// rejection_reason in our v1 submissions was the giveaway.
+	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	mac := hmac.New(sha256.New, []byte(p.apiKey))
+	mac.Write([]byte(timestamp))
+	mac.Write([]byte(p.partnerID))
+	mac.Write([]byte("sid_request"))
+	signature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+
 	jobID := fmt.Sprintf("otuburu-%s-%d", req.UserID, time.Now().Unix())
 	body := map[string]any{
 		"partner_id": p.partnerID,
-		"api_key":    p.apiKey,
+		"signature":  signature,
+		"timestamp":  timestamp,
 		"partner_params": map[string]any{
 			"user_id":  req.UserID,
 			"job_id":   jobID,
@@ -154,8 +178,11 @@ func (p *smileProvider) Verify(ctx context.Context, req VerifyRequest) (*VerifyR
 	}
 	payload, _ := json.Marshal(body)
 
+	// Synchronous Enhanced KYC endpoint — returns the verdict in the
+	// HTTP response body, no callback needed. The /verify_async sibling
+	// is for fully async flows with webhooks; we don't need that.
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		p.baseURL+"/verify_async", bytes.NewReader(payload))
+		p.baseURL+"/identity_verification", bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -171,23 +198,33 @@ func (p *smileProvider) Verify(ctx context.Context, req VerifyRequest) (*VerifyR
 		return nil, fmt.Errorf("smileid %d: %s", resp.StatusCode, string(raw))
 	}
 
-	// Smile Identity returns: { ResultCode, ResultText, Actions: {...}, ... }
-	// ResultCode "1012" / "1013" = success / no-data; we treat 1012 as
-	// approved and anything else as rejected with ResultText as the
-	// reason. The full doc enumerates 50+ codes; this mapping is the
-	// pragmatic minimum.
+	// Successful Smile Identity response:
+	//   {"ResultCode":"1012","ResultText":"Verified","FullName":"…", ...}
+	// Auth/validation failure:
+	//   {"code":"2413","error":"authorization is required","success":false}
+	// We extract a verdict + best-effort reason from either shape so admin
+	// reviews always have a message to look at.
 	var parsed struct {
 		ResultCode string `json:"ResultCode"`
 		ResultText string `json:"ResultText"`
+		Code       string `json:"code"`  // error path
+		Error      string `json:"error"` // error path
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, fmt.Errorf("smileid bad json: %w", err)
 	}
 	approved := parsed.ResultCode == "1012"
+	reason := parsed.ResultText
+	if !approved && reason == "" && parsed.Error != "" {
+		// Surface the upstream auth/format error as the rejection reason
+		// so it lands in kyc_submissions.rejection_reason instead of
+		// being silently empty.
+		reason = fmt.Sprintf("smileid %s: %s", parsed.Code, parsed.Error)
+	}
 	return &VerifyResult{
 		Approved:        approved,
 		JobID:           jobID,
-		RejectionReason: parsed.ResultText,
+		RejectionReason: reason,
 		RawResponse:     raw,
 	}, nil
 }
