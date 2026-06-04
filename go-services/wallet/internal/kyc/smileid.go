@@ -179,10 +179,13 @@ func (p *smileProvider) Verify(ctx context.Context, req VerifyRequest) (*VerifyR
 	payload, _ := json.Marshal(body)
 
 	// Synchronous Enhanced KYC endpoint — returns the verdict in the
-	// HTTP response body, no callback needed. The /verify_async sibling
-	// is for fully async flows with webhooks; we don't need that.
+	// HTTP response body, no callback needed. The /async_id_verification
+	// sibling is for fully async flows with webhooks; we don't need that.
+	// Note the path is `/id_verification` (NOT `/identity_verification` —
+	// the latter hits AWS API Gateway's 404 which returns the misleading
+	// 'Missing Authentication Token' message).
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		p.baseURL+"/identity_verification", bytes.NewReader(payload))
+		p.baseURL+"/id_verification", bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
