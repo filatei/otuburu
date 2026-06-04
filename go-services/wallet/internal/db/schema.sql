@@ -276,6 +276,67 @@ DO $$ BEGIN
     );
 END $$;
 
+-- ── KYC tier 1 (Phase-6) ─────────────────────────────────────────────────────
+-- Identity verification + sanctions screening backing the deposit/withdraw
+-- caps. Tier 0 (default) = no KYC, low deposit cap, no withdrawals. Tier 1
+-- = NIN/BVN verified + sanctions clear, deposits + withdrawals unlocked.
+-- Tier 2 (future) = passport + proof of address for high-value accounts.
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='users' AND column_name='kyc_tier'
+    ) THEN
+        ALTER TABLE users ADD COLUMN kyc_tier INTEGER NOT NULL DEFAULT 0
+            CHECK (kyc_tier >= 0 AND kyc_tier <= 3);
+    END IF;
+END $$;
+
+-- One submission per verification attempt. Multiple rows per user are
+-- expected (retry after rejection, periodic re-verification). The most
+-- recent row with status='approved' drives the user's effective tier.
+CREATE TABLE IF NOT EXISTS kyc_submissions (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- Government ID submitted. Limited to the providers Smile Identity
+    -- Enhanced KYC supports in Nigeria.
+    id_type          TEXT NOT NULL
+                     CHECK (id_type IN ('NIN','BVN','PASSPORT','DRIVERS_LICENSE','VOTERS_CARD')),
+    id_number        TEXT NOT NULL,
+    -- Personal details claimed by the user — cross-checked vs upstream
+    -- by Smile Identity. Stored so admin sees the user's claim even when
+    -- upstream rejects (lets us spot pattern abuse).
+    first_name       TEXT NOT NULL,
+    last_name        TEXT NOT NULL,
+    dob              DATE NOT NULL,
+    -- Smile Identity job tracking. sid_job_id is their server-side
+    -- identifier; sid_response captures the full JSON for audit.
+    sid_job_id       TEXT,
+    sid_response     JSONB,
+    -- Outcome lifecycle.
+    status           TEXT NOT NULL DEFAULT 'pending'
+                     CHECK (status IN ('pending','approved','rejected','expired')),
+    rejection_reason TEXT,
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    completed_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_kyc_user_created
+    ON kyc_submissions(user_id, created_at DESC);
+
+-- Sanctions / PEP screening. Re-run periodically against latest OFAC /
+-- EU / UN lists. Hit doesn't automatically reject — flags for manual
+-- review. Tier 1 advancement requires status='clear'.
+CREATE TABLE IF NOT EXISTS sanctions_checks (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    full_name   TEXT NOT NULL,
+    dob         DATE,
+    status      TEXT NOT NULL CHECK (status IN ('clear','hit','pending')),
+    hit_details JSONB,
+    checked_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_sanctions_user_checked
+    ON sanctions_checks(user_id, checked_at DESC);
+
 -- ── Affiliate / IB program (Phase-5) ─────────────────────────────────────────
 -- One auto-generated 6-char code per user, lazy-created on first
 -- /wallet/affiliate hit. The `rate` column lets us override per-affiliate

@@ -40,6 +40,8 @@ interface Props {
   onTransfer?:    () => void
   /** Open the Affiliate / Refer-a-Friend sheet (Phase 5). */
   onAffiliate?:   () => void
+  /** Open the KYC / Verify-identity sheet (Phase 6). */
+  onKyc?:         () => void
   /** Open the "Get the App" sheet — Android APK + iOS PWA instructions. */
   onGetApp?:      () => void
   /** Open the "Contact support" sheet — message form that emails admin. */
@@ -49,7 +51,7 @@ interface Props {
 export default function AppDrawer({
   open, onClose, user, mode, activeAccountLabel, activeAccountKind,
   engineBalance, onModeToggle, onLogout, onEditProfile, onDeposit,
-  onWithdraw, onHistory, onSwitchAccount, onTransfer, onAffiliate, onGetApp, onContact,
+  onWithdraw, onHistory, onSwitchAccount, onTransfer, onAffiliate, onKyc, onGetApp, onContact,
 }: Props) {
   const drawerRef = useRef<HTMLDivElement>(null)
   const { t } = useT()
@@ -239,6 +241,9 @@ export default function AppDrawer({
           <Section title="Account">
             {onSwitchAccount && (
               <Item icon="🔁" label="Switch account" sub="Manage real accounts" badge="live" onClick={() => { onSwitchAccount(); onClose() }} />
+            )}
+            {onKyc && (
+              <Item icon="🪪" label="Verify identity" sub="Unlock higher deposit limits" badge="new" onClick={() => { onKyc(); onClose() }} />
             )}
             <Item icon="👤" label="Edit Profile"       sub="Name & preferences"          badge="live" onClick={() => { onEditProfile(); onClose() }} />
             {onAffiliate ? (

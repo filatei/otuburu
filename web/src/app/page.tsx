@@ -22,6 +22,7 @@ import TransferModal       from '@/components/TransferModal'
 import MT5TradeTicket      from '@/components/MT5TradeTicket'
 import ManageSymbolsSheet  from '@/components/ManageSymbolsSheet'
 import AffiliateSheet      from '@/components/AffiliateSheet'
+import KycSheet            from '@/components/KycSheet'
 import GetAppModal         from '@/components/GetAppModal'
 import ContactModal        from '@/components/ContactModal'
 import SymbolActionsSheet     from '@/components/SymbolActionsSheet'
@@ -107,6 +108,8 @@ export default function TradingPage() {
   const [manageOpen,    setManageOpen]    = useState(false)
   /** Affiliate / Refer-a-friend sheet open state. */
   const [affiliateOpen, setAffiliateOpen] = useState(false)
+  /** KYC / Verify-identity sheet open state. */
+  const [kycOpen,       setKycOpen]       = useState(false)
   /** Phase 2 multi-account: when in real mode, which real account is active.
    *  Persisted per-user in localStorage so a session restore picks up where
    *  the user left off. Falls back to the first real account on first session. */
@@ -383,6 +386,17 @@ export default function TradingPage() {
         onClose={() => setAffiliateOpen(false)}
       />
 
+      {/* KYC / Verify-identity sheet — Smile Identity backed. Mounted
+          while user is present so the form state survives drawer close
+          and the BottomSheet exit animation runs cleanly. */}
+      {user && (
+        <KycSheet
+          open={kycOpen}
+          onClose={() => setKycOpen(false)}
+          onVerified={() => { refreshBalances() }}
+        />
+      )}
+
       {/* MT5-style full-screen trade ticket — mounted on demand from
           SymbolActionsSheet → New Order. The ticket subscribes to the
           symbol's live tick via the allTicks map so BID/ASK refresh
@@ -418,6 +432,7 @@ export default function TradingPage() {
         }
         onTransfer={user ? () => setTransferOpen(true) : undefined}
         onAffiliate={user ? () => setAffiliateOpen(true) : undefined}
+        onKyc={user ? () => setKycOpen(true) : undefined}
         onGetApp={() => setGetAppOpen(true)}
         onContact={user ? () => setContactOpen(true) : undefined}
       />

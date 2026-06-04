@@ -132,6 +132,9 @@ func main() {
 	protected.POST("/wallet/transfers", walletH.Transfer)
 	// Phase-5 affiliate / IB program — code + intro count.
 	protected.GET("/wallet/affiliate", walletH.Affiliate)
+	// Phase-6 KYC tier 1 — Smile Identity verification + deposit caps.
+	protected.GET("/wallet/kyc", walletH.KycStatus)
+	protected.POST("/wallet/kyc/submit", walletH.KycSubmit)
 	// Phase-3 NGN withdrawal: account verification + bank payout.
 	protected.GET("/wallet/ngn/resolve", walletH.ResolveNGNAccount)
 	protected.POST("/wallet/withdraw/ngn", walletH.WithdrawNGN)

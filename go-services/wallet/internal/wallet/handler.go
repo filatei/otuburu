@@ -10,6 +10,7 @@ import (
 
 	"otuburu.money/wallet/internal/auth"
 	"otuburu.money/wallet/internal/email"
+	"otuburu.money/wallet/internal/kyc"
 	"otuburu.money/wallet/internal/payments"
 )
 
@@ -18,6 +19,7 @@ type Handler struct {
 	hd             *HDWallet
 	mailer         *email.Mailer
 	paystack       *payments.Handler // optional, may be nil if Paystack disabled
+	kyc            kyc.Provider      // Smile Identity client (stub when env unset)
 	gatewayURL     string            // wallet→gateway URL for /internal/*
 	internalSecret string            // shared with gateway for X-Internal-Secret
 	httpClient     *http.Client      // reused across transfer + balance-sync calls
@@ -41,6 +43,7 @@ func NewHandler(
 		hd:             hd,
 		mailer:         mailer,
 		paystack:       paystack,
+		kyc:            kyc.NewProvider(),
 		gatewayURL:     gatewayURL,
 		internalSecret: internalSecret,
 		httpClient:     &http.Client{Timeout: 10 * time.Second},
