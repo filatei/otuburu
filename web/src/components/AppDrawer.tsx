@@ -4,6 +4,8 @@ import type { AuthUser } from '@/hooks/useAuth'
 import type { AccountKind } from '@/types'
 import { kindLabel } from '@/types'
 import { setFullscreenPref } from '@/hooks/useAutoFullscreen'
+import { useT } from '@/lib/i18n/provider'
+import { LOCALES } from '@/lib/i18n/types'
 
 interface Props {
   open:          boolean
@@ -48,6 +50,7 @@ export default function AppDrawer({
   onWithdraw, onHistory, onSwitchAccount, onTransfer, onGetApp, onContact,
 }: Props) {
   const drawerRef = useRef<HTMLDivElement>(null)
+  const { t } = useT()
 
   // Close on ESC
   useEffect(() => {
@@ -242,6 +245,7 @@ export default function AppDrawer({
 
           <Section title="Display">
             <FullscreenItem onClose={onClose} />
+            <LanguageItem />
           </Section>
 
           {onGetApp && (
@@ -357,6 +361,52 @@ function FullscreenItem({ onClose }: { onClose: () => void }) {
       badge="live"
       onClick={toggle}
     />
+  )
+}
+
+/** LanguageItem — row that expands inline into the locale picker. Keeps
+ *  the drawer scrollable + native-feeling instead of pushing the user
+ *  into a separate sheet for a single tap-to-pick action. The current
+ *  language's native name renders on the right; the picker shows all
+ *  available packs, including incomplete ones (fallback-to-English
+ *  rendering keeps them safe to ship). */
+function LanguageItem() {
+  const { locale, setLocale, t } = useT()
+  const [open, setOpen] = useState(false)
+  const current = LOCALES.find(l => l.code === locale) ?? LOCALES[0]
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-surface transition-colors text-left"
+      >
+        <span className="text-xl w-8 text-center shrink-0">🌍</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-text text-sm font-medium leading-none mb-0.5">{t('drawer.language')}</p>
+          <p className="text-dim text-xs leading-tight truncate">{current.native}</p>
+        </div>
+        <span className="text-dim text-xs shrink-0">{open ? '▴' : '▾'}</span>
+      </button>
+      {open && (
+        <div className="ml-12 mb-1 border-l border-border/40 pl-3 space-y-0.5">
+          {LOCALES.map(l => (
+            <button
+              key={l.code}
+              type="button"
+              onClick={() => { setLocale(l.code); setOpen(false) }}
+              className={[
+                'w-full flex items-center justify-between px-2 py-1.5 rounded text-left text-xs transition-colors',
+                l.code === locale ? 'text-brand font-semibold' : 'text-dim hover:text-text',
+              ].join(' ')}
+            >
+              <span>{l.native}</span>
+              <span className="text-[10px] text-dim/60">{l.english}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 

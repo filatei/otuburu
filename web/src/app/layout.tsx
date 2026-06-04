@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import InstallPwa from '@/components/InstallPwa'
+import { TranslationProvider } from '@/lib/i18n/provider'
 
 export const metadata: Metadata = {
   title:       'Otuburu · Fractional Trading',
@@ -64,8 +65,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        {children}
-        <InstallPwa />
+        {/* TranslationProvider wraps the whole app — hooks called from
+            any component below have access to t() + setLocale. SSR-safe;
+            first paint uses English, hydration swaps in the stored
+            locale before any user input. */}
+        <TranslationProvider>
+          {children}
+          <InstallPwa />
+        </TranslationProvider>
       </body>
     </html>
   )
