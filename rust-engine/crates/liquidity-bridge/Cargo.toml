@@ -1,0 +1,65 @@
+[package]
+name        = "liquidity-bridge"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+
+# Outbound order routing to external liquidity providers. The engine
+# stays vendor-agnostic — it asks the trait, the trait knows which LP.
+#
+# Adapter inventory
+# -----------------
+#   ctrader   — cTrader Open API (IC Markets, Pepperstone, others).
+#               Protobuf-over-WebSocket. PRIMARY production target for
+#               Nigerian users. Auth: OAuth 2.0 + per-session protobuf
+#               handshake.
+#   metaapi   — MetaApi.cloud REST wrapper around MT4/MT5. Reference impl;
+#               not in active production use (paid SaaS, ~$9/mo per
+#               account). Kept for the LpAdapter pattern docs and as a
+#               fallback if cTrader Open API becomes unavailable.
+#   oanda     — OANDA v20 REST. Reference impl for EU/US/AU jurisdictions;
+#               OANDA blocks Nigerian residents at signup.
+#   stub      — dev-only fallback, fills at 1.0.
+#
+# Adding a new LP = implement LpAdapter; no engine changes required.
+
+[dependencies]
+tokio        = { workspace = true }
+reqwest      = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+anyhow.workspace            = true
+tracing.workspace           = true
+tracing-subscriber.workspace = true
+async-trait  = "0.1"
+
+# ── cTrader adapter deps (used from Sprint 5.4b onward) ─────────────
+#
+# The scaffolded ctrader module compiles without invoking any of
+# these — they're pulled in now so the protocol work in 5.4b can land
+# without a Cargo.toml churn round-trip.
+#
+# tokio-tungstenite: WebSocket client for the cTrader Open API
+#   endpoint (wss://demo.ctraderapi.com:5036 or live.ctraderapi.com:5036).
+#   rustls-tls-webpki-roots: TLS without OpenSSL system dep — matches
+#   our reqwest config.
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+# futures-util: SplitSink/SplitStream for the WS read+write halves,
+#   plus combinators for the message correlator.
+futures-util     = "0.3"
+# prost: protobuf runtime. Generated types from cTrader's .proto files
+#   land here in 5.4b.
+prost            = { workspace = true }
+# bytes: zero-copy buffer slices for protobuf framing.
+bytes            = "1"
+
+[build-dependencies]
+# prost-build: codegen for cTrader Open API .proto files. Wired up in
+#   Sprint 5.4b — see build.rs (added in that sprint). No-op until protos
+#   are vendored under ./proto/.
+prost-build      = "0.13"
+
+[[bin]]
+name = "oanda-smoke"
+path = "src/bin/smoke.rs"
