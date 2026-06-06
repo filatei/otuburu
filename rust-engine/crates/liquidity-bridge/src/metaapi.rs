@@ -45,14 +45,14 @@ use serde::Deserialize;
 use std::time::Duration;
 
 pub struct MetaApi {
-    token:      String,
+    token: String,
     account_id: String,
     /// MetaApi splits the API across regional clusters. `new-york` is
     /// their primary US-East cluster; users in EU/APAC pick `london`
     /// or `singapore` for lower latency. Affects only the host name.
-    region:     String,
-    base_url:   String,
-    http:       reqwest::Client,
+    region: String,
+    base_url: String,
+    http: reqwest::Client,
 }
 
 impl MetaApi {
@@ -67,7 +67,13 @@ impl MetaApi {
             .timeout(Duration::from_secs(15))
             .build()
             .expect("reqwest client builder");
-        Self { token, account_id, region, base_url, http }
+        Self {
+            token,
+            account_id,
+            region,
+            base_url,
+            http,
+        }
     }
 
     fn auth_header(&self) -> (reqwest::header::HeaderName, reqwest::header::HeaderValue) {
@@ -78,8 +84,7 @@ impl MetaApi {
         //   https://metaapi.cloud/docs/client/restApi/api/
         (
             reqwest::header::HeaderName::from_static("auth-token"),
-            reqwest::header::HeaderValue::from_str(&self.token)
-                .expect("token must be ascii"),
+            reqwest::header::HeaderValue::from_str(&self.token).expect("token must be ascii"),
         )
     }
 }
@@ -92,26 +97,26 @@ struct TradeResponse {
     /// Numeric MQL5 return code. 10009 = TRADE_RETCODE_DONE (success).
     /// Everything else is a rejection; `message` carries the reason.
     numeric_code: i64,
-    string_code:  Option<String>,
-    message:      Option<String>,
-    order_id:     Option<String>,
-    position_id:  Option<String>,
+    string_code: Option<String>,
+    message: Option<String>,
+    order_id: Option<String>,
+    position_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)] // margin/free_margin/leverage land in admin UI in Sprint 5.6
 struct AccountInfo {
-    broker:       String,
-    currency:     String,
-    balance:      f64,
-    equity:       f64,
-    margin:       f64,
-    free_margin:  f64,
-    leverage:     i32,
+    broker: String,
+    currency: String,
+    balance: f64,
+    equity: f64,
+    margin: f64,
+    free_margin: f64,
+    leverage: i32,
     /// MT5 login number. Stable across re-deployments; useful for
     /// matching MetaApi accounts to MT5 statements during reconcile.
-    login:        i64,
+    login: i64,
 }
 
 // ── Adapter impl ────────────────────────────────────────────────────
@@ -125,9 +130,9 @@ impl LpAdapter for MetaApi {
         // return means we'd need OnceCell. Acceptable cost; this is
         // only called for log lines, not in the hot path.
         match self.region.as_str() {
-            "london"    => "metaapi-london",
+            "london" => "metaapi-london",
             "singapore" => "metaapi-singapore",
-            _           => "metaapi-new-york",
+            _ => "metaapi-new-york",
         }
     }
 
@@ -137,7 +142,7 @@ impl LpAdapter for MetaApi {
         // responsible for translating internal ids (cryXAUUSD →
         // XAUUSDm if that's what Exness uses, etc.).
         let action_type = match req.side {
-            Side::Buy  => "ORDER_TYPE_BUY",
+            Side::Buy => "ORDER_TYPE_BUY",
             Side::Sell => "ORDER_TYPE_SELL",
         };
         let body = serde_json::json!({
@@ -146,10 +151,14 @@ impl LpAdapter for MetaApi {
             "volume":     req.lots,
             "comment":    format!("otuburu-{}", req.engine_position_id),
         });
-        let url = format!("{}/users/current/accounts/{}/trade",
-                          self.base_url, self.account_id);
+        let url = format!(
+            "{}/users/current/accounts/{}/trade",
+            self.base_url, self.account_id
+        );
         let (auth_name, auth_val) = self.auth_header();
-        let resp = self.http.post(&url)
+        let resp = self
+            .http
+            .post(&url)
             .header(auth_name, auth_val)
             .json(&body)
             .send()
@@ -160,8 +169,8 @@ impl LpAdapter for MetaApi {
         if !status.is_success() {
             return Err(anyhow!("metaapi {}: {}", status, raw));
         }
-        let parsed: TradeResponse = serde_json::from_str(&raw)
-            .with_context(|| format!("metaapi decode: {}", raw))?;
+        let parsed: TradeResponse =
+            serde_json::from_str(&raw).with_context(|| format!("metaapi decode: {}", raw))?;
         if parsed.numeric_code != 10009 {
             // The string code + message together give a clean audit
             // line for kyc_submissions-style auditing of rejected fills.
@@ -180,29 +189,34 @@ impl LpAdapter for MetaApi {
         // reconcile job fill in the actual prices nightly. Sprint 5.3
         // will add the same-tick price lookup via /symbol-price.
         let units_signed = match req.side {
-            Side::Buy  =>  req.lots * 100_000.0,
+            Side::Buy => req.lots * 100_000.0,
             Side::Sell => -req.lots * 100_000.0,
         };
         Ok(MarketFill {
-            lp_order_id: parsed.order_id
+            lp_order_id: parsed
+                .order_id
                 .or(parsed.position_id)
                 .unwrap_or_else(|| "unknown".to_string()),
-            instrument:  req.instrument,
-            units:       units_signed,
+            instrument: req.instrument,
+            units: units_signed,
             // Placeholder — reconcile job overwrites with the real
             // average fill price from /history-orders. -1.0 makes
             // un-reconciled fills obvious in admin reports.
-            price:       -1.0,
-            commission:  0.0,
-            financing:   0.0,
+            price: -1.0,
+            commission: 0.0,
+            financing: 0.0,
         })
     }
 
     async fn account_summary(&self) -> anyhow::Result<AccountSummary> {
-        let url = format!("{}/users/current/accounts/{}/account-information",
-                          self.base_url, self.account_id);
+        let url = format!(
+            "{}/users/current/accounts/{}/account-information",
+            self.base_url, self.account_id
+        );
         let (auth_name, auth_val) = self.auth_header();
-        let resp = self.http.get(&url)
+        let resp = self
+            .http
+            .get(&url)
             .header(auth_name, auth_val)
             .send()
             .await
@@ -212,12 +226,12 @@ impl LpAdapter for MetaApi {
         if !status.is_success() {
             return Err(anyhow!("metaapi {}: {}", status, raw));
         }
-        let info: AccountInfo = serde_json::from_str(&raw)
-            .with_context(|| format!("metaapi decode: {}", raw))?;
+        let info: AccountInfo =
+            serde_json::from_str(&raw).with_context(|| format!("metaapi decode: {}", raw))?;
         Ok(AccountSummary {
-            account_id:    format!("mt5-{}-{}", info.broker, info.login),
-            currency:      info.currency,
-            balance:       info.balance,
+            account_id: format!("mt5-{}-{}", info.broker, info.login),
+            currency: info.currency,
+            balance: info.balance,
             unrealised_pl: info.equity - info.balance,
             // MetaApi doesn't return open position count on /account-info.
             // Sprint 5.3 adds a /positions probe to fill this in; for

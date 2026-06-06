@@ -33,9 +33,7 @@ use futures_util::{
     SinkExt,
 };
 use tokio::net::TcpStream;
-use tokio_tungstenite::{
-    connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream,
-};
+use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 /// Demo hostport — pre-prod / sandbox cluster. All Sprint 5.4 smoke
 /// testing routes here; live only flips on once 5.5 + 5.6 are green
@@ -71,7 +69,7 @@ pub async fn connect(env_label: &str) -> anyhow::Result<(WsSink, WsSource)> {
     let url = match env_label {
         "live" => LIVE_URL,
         "demo" => DEMO_URL,
-        other  => {
+        other => {
             tracing::warn!(
                 env = %other,
                 "ctrader: unknown CTRADER_ENV — defaulting to demo cluster"
@@ -106,7 +104,9 @@ pub async fn connect(env_label: &str) -> anyhow::Result<(WsSink, WsSource)> {
 /// Errors here usually mean the connection died mid-flight; the
 /// reconnect loop in `ctrader.rs` rebuilds and re-auths.
 pub async fn send_frame(sink: &mut WsSink, payload: Vec<u8>) -> anyhow::Result<()> {
-    sink.send(Message::Binary(payload.into()))
+    // tokio-tungstenite 0.24 accepts Vec<u8> directly via the Bytes
+    // From impl chain; no explicit .into() needed (clippy::useless_conversion).
+    sink.send(Message::Binary(payload))
         .await
         .context("ctrader ws send")
 }

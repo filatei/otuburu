@@ -59,27 +59,33 @@ use crate::LpAdapter;
 use anyhow::bail;
 
 pub struct CTrader {
-    client_id:     String,
+    client_id: String,
     #[allow(dead_code)] // wired in 5.4c when we implement OAuth refresh
     client_secret: String,
     #[allow(dead_code)] // wired in 5.4c when we open the WS
-    access_token:  String,
+    access_token: String,
     #[allow(dead_code)] // wired in 5.4c when we send ProtoOAAccountAuthReq
-    account_id:    String,
+    account_id: String,
     /// "demo" or "live" — picks the WS host (demo.ctraderapi.com vs
     /// live.ctraderapi.com). Default demo to keep early integration safe.
-    env:           String,
+    env: String,
 }
 
 impl CTrader {
     pub fn new(
-        client_id:     String,
+        client_id: String,
         client_secret: String,
-        access_token:  String,
-        account_id:    String,
-        env:           String,
+        access_token: String,
+        account_id: String,
+        env: String,
     ) -> Self {
-        Self { client_id, client_secret, access_token, account_id, env }
+        Self {
+            client_id,
+            client_secret,
+            access_token,
+            account_id,
+            env,
+        }
     }
 
     /// Host for the WebSocket. Lives here so 5.4b can pick it up
@@ -88,7 +94,7 @@ impl CTrader {
     pub(crate) fn ws_host(&self) -> &'static str {
         match self.env.as_str() {
             "live" => "live.ctraderapi.com:5036",
-            _      => "demo.ctraderapi.com:5036",
+            _ => "demo.ctraderapi.com:5036",
         }
     }
 
@@ -107,7 +113,7 @@ impl LpAdapter for CTrader {
     fn name(&self) -> &str {
         match self.env.as_str() {
             "live" => "ctrader-live",
-            _      => "ctrader-demo",
+            _ => "ctrader-demo",
         }
     }
 

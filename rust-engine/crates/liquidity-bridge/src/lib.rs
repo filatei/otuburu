@@ -94,8 +94,7 @@ pub trait LpAdapter: Send + Sync {
     /// these reasons in `kyc_submissions`-style audit trails — never
     /// expose them raw to end users, they often contain LP-specific
     /// IDs and rate-limit hints).
-    async fn place_market(&self, order: PlaceMarketRequest)
-        -> anyhow::Result<MarketFill>;
+    async fn place_market(&self, order: PlaceMarketRequest) -> anyhow::Result<MarketFill>;
 
     /// Fetch the LP-side account summary. Used by the reconciliation
     /// job at end-of-day to compare engine books vs LP books.
@@ -115,8 +114,8 @@ pub trait LpAdapter: Send + Sync {
 /// Selection order (first matching wins):
 ///   1. cTrader Open API — `CTRADER_CLIENT_ID` + `CTRADER_CLIENT_SECRET`
 ///      + `CTRADER_ACCESS_TOKEN` + `CTRADER_ACCOUNT_ID` all set.
-///      `CTRADER_ENV` picks `demo` (default) vs `live`. Production
-///      target for Nigerian users via IC Markets.
+///        `CTRADER_ENV` picks `demo` (default) vs `live`. Production
+///        target for Nigerian users via IC Markets.
 ///   2. MetaApi.cloud (Exness/MT5 bridge) — both `METAAPI_TOKEN` and
 ///      `METAAPI_ACCOUNT_ID` set. `METAAPI_REGION` picks the cluster
 ///      (`new-york` default, `london`, `singapore`). Kept as fallback.
@@ -134,9 +133,15 @@ pub fn from_env() -> Arc<dyn LpAdapter> {
     //    Markets cTrader account.
     if let (Some(client_id), Some(client_secret), Some(access_token), Some(account_id)) = (
         env::var("CTRADER_CLIENT_ID").ok().filter(|s| !s.is_empty()),
-        env::var("CTRADER_CLIENT_SECRET").ok().filter(|s| !s.is_empty()),
-        env::var("CTRADER_ACCESS_TOKEN").ok().filter(|s| !s.is_empty()),
-        env::var("CTRADER_ACCOUNT_ID").ok().filter(|s| !s.is_empty()),
+        env::var("CTRADER_CLIENT_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty()),
+        env::var("CTRADER_ACCESS_TOKEN")
+            .ok()
+            .filter(|s| !s.is_empty()),
+        env::var("CTRADER_ACCOUNT_ID")
+            .ok()
+            .filter(|s| !s.is_empty()),
     ) {
         let env_label = env::var("CTRADER_ENV").unwrap_or_else(|_| "demo".to_string());
         tracing::info!(
@@ -156,7 +161,9 @@ pub fn from_env() -> Arc<dyn LpAdapter> {
     // 2. MetaApi — fallback for users on Exness/MT5 (paid SaaS).
     if let (Some(token), Some(account_id)) = (
         env::var("METAAPI_TOKEN").ok().filter(|s| !s.is_empty()),
-        env::var("METAAPI_ACCOUNT_ID").ok().filter(|s| !s.is_empty()),
+        env::var("METAAPI_ACCOUNT_ID")
+            .ok()
+            .filter(|s| !s.is_empty()),
     ) {
         let region = env::var("METAAPI_REGION").unwrap_or_else(|_| "new-york".to_string());
         tracing::info!(
