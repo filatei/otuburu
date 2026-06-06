@@ -229,11 +229,18 @@ mod tests {
     /// Snapshots below MIN_LOADABLE_VERSION must be rejected. If we
     /// ever need to load v1 or v2 again, MIN_LOADABLE_VERSION gets
     /// lowered and a real migration is added.
+    ///
+    /// Compile-time check via `const { assert!(...) }` — clippy 1.96+
+    /// flags runtime asserts on const expressions
+    /// (clippy::assertions_on_constants). Const block achieves the
+    /// same guard at zero runtime cost and silences the lint.
     #[test]
     fn ancient_version_is_below_min_supported() {
-        assert!(
-            MIN_LOADABLE_VERSION >= 3,
-            "min loadable cannot drop below v3 without explicit migration code"
-        );
+        const {
+            assert!(
+                MIN_LOADABLE_VERSION >= 3,
+                "min loadable cannot drop below v3 without explicit migration code"
+            )
+        };
     }
 }
