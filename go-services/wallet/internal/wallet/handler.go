@@ -141,15 +141,33 @@ func (h *Handler) Balance(c *gin.Context) {
 	h.db.QueryRow(ctx, `SELECT balance FROM accounts WHERE id=$1`, claims.AccountID).Scan(&realBal) //nolint:errcheck
 	h.db.QueryRow(ctx, `SELECT balance FROM accounts WHERE id=$1`, claims.DemoID).Scan(&demoBal)   //nolint:errcheck
 
+	// KYC tier + deposit-cap headroom so the frontend can render a
+	// "$X of $Y used" hint in the deposit modal. Best-effort: any DB
+	// error falls back to tier=0 and full cap remaining so the user
+	// isn't blocked by a transient outage.
+	var tier int
+	h.db.QueryRow(ctx, `SELECT kyc_tier FROM users WHERE id=$1`, claims.UserID).Scan(&tier) //nolint:errcheck
+	var cumulativeDeposit float64
+	h.db.QueryRow(ctx,
+		`SELECT COALESCE(SUM(l.amount), 0) FROM ledger l
+		 JOIN accounts a ON l.account_id = a.id
+		 WHERE a.user_id = $1 AND l.type = 'deposit' AND l.amount > 0`,
+		claims.UserID,
+	).Scan(&cumulativeDeposit) //nolint:errcheck
+	depositCap := kycDepositCapUSD(tier)
+
 	// ensureSavingsBalance lazy-creates the row. Errors don't fail the whole
 	// response — we report 0 and let the dedicated /wallet/savings endpoint
 	// surface any persistent DB issue.
 	savingsBal, _ := ensureSavingsBalance(ctx, h.db, claims.UserID)
 
 	c.JSON(http.StatusOK, gin.H{
-		"real":    realBal,
-		"demo":    demoBal,
-		"savings": savingsBal,
+		"real":                    realBal,
+		"demo":                    demoBal,
+		"savings":                 savingsBal,
+		"kyc_tier":                tier,
+		"deposit_cap_usd":         depositCap,
+		"cumulative_deposit_usd":  cumulativeDeposit,
 	})
 }
 

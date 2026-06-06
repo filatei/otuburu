@@ -106,7 +106,16 @@ export default function DepositModal({ user: _user, onClose, open = true }: Prop
         )
       }
       const data = raw ? JSON.parse(raw) : {}
-      if (!res.ok) throw new Error(data.error ?? `Payment initiation failed (HTTP ${res.status})`)
+      if (!res.ok) {
+        // 422 with verify_required:true → user hit the KYC tier cap.
+        // The error message already includes the available headroom +
+        // tier number; surface it raw so the user knows exactly what
+        // to do (verify identity).
+        if (res.status === 422 && data.verify_required) {
+          throw new Error(`${data.error} Tap 'Verify identity' in the menu to raise your cap.`)
+        }
+        throw new Error(data.error ?? `Payment initiation failed (HTTP ${res.status})`)
+      }
       window.location.href = data.authorization_url
     } catch (err: any) {
       setPsErr(err.message ?? 'Payment failed. Please try again.')

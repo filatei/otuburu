@@ -125,6 +125,21 @@ func (h *Handler) Initiate(c *gin.Context) {
 		return
 	}
 
+	// KYC tier cap. Tier 0 (no verification) is bounded at $500 cumulative
+	// across all deposits; Tier 1 raises it to $5000. Enforced at the
+	// Initiate step (not after Paystack already took the user's money) so
+	// the user never reaches the hosted checkout for an amount we'd have
+	// to refund. checkDepositCap returns the remaining headroom on the
+	// caller's tier so the error message tells the user exactly how much
+	// they can deposit right now.
+	if err := h.checkDepositCap(c.Request.Context(), claims.UserID, req.AmountUSD); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":           err.Error(),
+			"verify_required": true,
+		})
+		return
+	}
+
 	// Charge customer at customer_rate (interbank + 2% spread). The user
 	// gets credited their requested USD; we pocket the spread to cover the
 	// real bank FX cost when we settle out plus a small protective buffer.
@@ -534,4 +549,69 @@ func (h *Handler) syncEngineBalance(ctx context.Context, accountID string) {
 		return
 	}
 	resp.Body.Close()
+}
+
+// checkDepositCap enforces the KYC-tier cumulative deposit limit. Reads
+// the user's lifetime confirmed deposits from the ledger and rejects
+// when (cumulative + requested) > tier_cap. The Tier 2 cap is 0 (no
+// cap) — kycDepositCapUSD already encodes that.
+//
+// Why ledger.amount > 0 not = 'confirmed' status: the wallet's existing
+// ledger writes 'deposit' rows only after the Paystack/TRC20 credit has
+// settled, so every row in the deposit type is by construction
+// confirmed. Status='pending' deposit rows don't exist in this schema.
+func (h *Handler) checkDepositCap(ctx context.Context, userID string, requestedUSD float64) error {
+	// Tier first — fast path: Tier 2 has no cap.
+	var tier int
+	if err := h.db.QueryRow(ctx,
+		`SELECT kyc_tier FROM users WHERE id = $1`, userID,
+	).Scan(&tier); err != nil {
+		return fmt.Errorf("kyc tier lookup: %w", err)
+	}
+	cap := kycDepositCap(tier)
+	if cap <= 0 {
+		return nil // no cap (Tier 2)
+	}
+
+	// Sum all confirmed deposits for this user across all their accounts.
+	// We sum positive amounts to avoid pulling in refund rows (which are
+	// negative on the deposit account but positive in 'withdrawal_refund').
+	var cumulative float64
+	if err := h.db.QueryRow(ctx,
+		`SELECT COALESCE(SUM(l.amount), 0) FROM ledger l
+		 JOIN accounts a ON l.account_id = a.id
+		 WHERE a.user_id = $1 AND l.type = 'deposit' AND l.amount > 0`,
+		userID,
+	).Scan(&cumulative); err != nil {
+		return fmt.Errorf("ledger sum: %w", err)
+	}
+
+	if cumulative+requestedUSD > cap {
+		remaining := cap - cumulative
+		if remaining < 0 {
+			remaining = 0
+		}
+		return fmt.Errorf(
+			"deposit would exceed your tier %d cap of $%.0f. You have $%.2f available; "+
+				"verify your identity to raise the cap.",
+			tier, cap, remaining,
+		)
+	}
+	return nil
+}
+
+// kycDepositCap mirrors the wallet package's kycDepositCapUSD so the
+// payments package doesn't need a cross-package import. Kept in sync
+// with the kyc.go constants — change one, update the other.
+func kycDepositCap(tier int) float64 {
+	switch tier {
+	case 0:
+		return 500
+	case 1:
+		return 5000
+	case 2:
+		return 0 // no cap
+	default:
+		return 500
+	}
 }
