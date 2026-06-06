@@ -81,7 +81,11 @@ export default function KycSheet({ open, onClose, onVerified }: Props) {
   // Form state — populated on mount so the user doesn't lose progress
   // if they tap away and back. We keep it in component state, not
   // localStorage, since ID numbers are sensitive.
-  const [idType,    setIdType]    = useState<IDType>('NIN')
+  // Default to BVN — almost universally activated by default in Smile
+  // Identity sandbox + production. NIN_V2 requires a per-account
+  // activation request (Settings → ID API Status → request NIN_V2).
+  // Users with NIN preference flip the dropdown one option down.
+  const [idType,    setIdType]    = useState<IDType>('BVN')
   const [idNumber,  setIdNumber]  = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName,  setLastName]  = useState('')
