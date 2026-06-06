@@ -6,7 +6,7 @@ use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use order_book::{Direction, Side};
+use order_book::{Direction, RoutingMode, Side};
 
 use crate::pb::{
     engine_service_server::EngineService, AccountState, AdjustBalanceRequest,
@@ -325,7 +325,67 @@ impl EngineService for EngineServiceImpl {
         }
 
         let book = inner.get_or_create_book(account_id, "Demo", true, 0.0);
+        let routing_mode = book.account.routing_mode;
         let result = book.open_cfd(account_id, &r.symbol, side, r.lots, tp, sl);
+
+        // ── Sprint 5.5c — LP passthrough shadow ─────────────────────────
+        // For accounts flagged Passthrough, fire-and-forget an LP order
+        // alongside the engine booking. The engine response is NOT gated
+        // on LP latency — the user sees their synthetic position
+        // immediately. Sprint 5.5d will tighten this to a synchronous
+        // gate that replaces the engine's synthetic fill with the LP's
+        // reported fill price.
+        //
+        // If the symbol has no LP equivalent (synthetic indices, US cash
+        // indices), we log + fall back to synthetic-only. Same for
+        // unknown LP names (defensive — `lp_symbols::translate_for_lp`
+        // returns `None`).
+        if matches!(routing_mode, RoutingMode::Passthrough) {
+            if let Ok(ref pos) = result {
+                let lp_adapter = self.state.lp_adapter.clone();
+                let lp_symbol_opt =
+                    crate::lp_symbols::translate_for_lp(&r.symbol, lp_adapter.name());
+                let engine_position_id = pos.id.to_string();
+                let lots = r.lots;
+                let lp_side = match side {
+                    Side::Buy => liquidity_bridge::Side::Buy,
+                    Side::Sell => liquidity_bridge::Side::Sell,
+                };
+                let otuburu_symbol = r.symbol.clone();
+                tokio::spawn(async move {
+                    let lp_name = lp_adapter.name().to_string();
+                    let Some(lp_symbol) = lp_symbol_opt else {
+                        tracing::warn!(
+                            otuburu = %otuburu_symbol,
+                            lp = %lp_name,
+                            "passthrough flagged but symbol has no LP equivalent — engine booked synthetic only"
+                        );
+                        return;
+                    };
+                    let lp_req = liquidity_bridge::PlaceMarketRequest {
+                        instrument: lp_symbol,
+                        side: lp_side,
+                        lots,
+                        engine_position_id,
+                    };
+                    match lp_adapter.place_market(lp_req).await {
+                        Ok(fill) => tracing::info!(
+                            lp = %lp_name,
+                            instrument = %fill.instrument,
+                            units = fill.units,
+                            price = fill.price,
+                            "lp shadow fill — 5.5d will reconcile with engine position"
+                        ),
+                        Err(e) => tracing::warn!(
+                            lp = %lp_name,
+                            error = %e,
+                            otuburu = %otuburu_symbol,
+                            "lp shadow rejected — engine position remains synthetic-only"
+                        ),
+                    }
+                });
+            }
+        }
 
         let resp = match result {
             Ok(pos) => PlaceOrderResponse {

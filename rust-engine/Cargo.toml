@@ -6,6 +6,7 @@ members = [
     "crates/order-book",
     "crates/risk-engine",
     "crates/binary-options",
+    "crates/liquidity-bridge",  # outbound order routing (OANDA v20, FIX 4.4 TBD)
 ]
 
 [workspace.package]
@@ -62,6 +63,9 @@ feed-generator = { path = "crates/feed-generator" }
 order-book     = { path = "crates/order-book" }
 risk-engine    = { path = "crates/risk-engine" }
 binary-options = { path = "crates/binary-options" }
+# LP routing — Sprint 5.5c. Wired into engine_service.rs place_order
+# RPC; selects adapter from env at boot via liquidity_bridge::from_env().
+liquidity-bridge = { path = "crates/liquidity-bridge" }
 tokio.workspace             = true
 tokio-stream.workspace      = true
 tonic.workspace             = true

@@ -10,6 +10,7 @@ use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
 
 use feed_generator::Tick;
+use liquidity_bridge::LpAdapter;
 use order_book::{Account, Book, ContractSpec, RoutingMode};
 use risk_engine::{RiskConfig, RiskEngine};
 
@@ -212,6 +213,16 @@ pub struct SharedState {
     pub tick_tx: broadcast::Sender<Tick>,
     /// SQLite connection pool — cloneable, internally arc'd.
     pub db: sqlx::SqlitePool,
+    /// LP routing target. Selected from env at boot via
+    /// `liquidity_bridge::from_env()`. Defaults to `StubAdapter` when
+    /// no LP env is configured — that path returns a fake fill at
+    /// price 1.0, which makes "misconfigured deploy" obvious in logs
+    /// without crashing the engine.
+    ///
+    /// Reads only — adapters are `Send + Sync` and internally manage
+    /// their own connection/token state. Sprint 5.5c uses this from
+    /// the `place_order` RPC's passthrough branch.
+    pub lp_adapter: Arc<dyn LpAdapter>,
 }
 
 impl SharedState {
@@ -257,6 +268,12 @@ impl SharedState {
         let (tick_tx, _) = broadcast::channel(TICK_CHANNEL_CAP);
         let ohlc = OhlcStore::default();
 
+        // LP adapter — auto-selected from env (cTrader → MetaApi →
+        // OANDA → Stub). Logs the selected adapter at boot; missing
+        // env triggers a loud warn-level log so prod misconfig is
+        // visible in monitor.sh.
+        let lp_adapter = liquidity_bridge::from_env();
+
         SharedState {
             inner: Arc::new(RwLock::new(Inner {
                 books,
@@ -267,6 +284,7 @@ impl SharedState {
             })),
             tick_tx,
             db,
+            lp_adapter,
         }
     }
 }

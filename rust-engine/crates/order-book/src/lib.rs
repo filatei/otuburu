@@ -208,7 +208,7 @@ pub fn default_contract_specs() -> HashMap<String, ContractSpec> {
 // CFD Position
 // ──────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Side {
     Buy,
     Sell,
