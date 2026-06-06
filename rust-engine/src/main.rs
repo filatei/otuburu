@@ -12,6 +12,8 @@
 mod db;
 mod engine_service;
 mod live_feed;
+#[allow(dead_code)] // Sprint 5.5b — wired into place_order branch in 5.5c
+mod lp_symbols;
 mod market_hours;
 mod ohlc;
 mod persistence;
