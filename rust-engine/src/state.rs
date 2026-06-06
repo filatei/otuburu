@@ -10,7 +10,7 @@ use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
 
 use feed_generator::Tick;
-use order_book::{Account, Book, ContractSpec};
+use order_book::{Account, Book, ContractSpec, RoutingMode};
 use risk_engine::{RiskConfig, RiskEngine};
 
 use crate::ohlc::OhlcStore;
@@ -192,6 +192,11 @@ impl Inner {
                 realised_pnl: 0.0,
                 label: label.to_owned(),
                 is_demo,
+                // Sprint 5.5a — every auto-provisioned account starts
+                // routing synthetically. Admins flip individual accounts
+                // to Passthrough via the 5.5e endpoint when an LP is
+                // wired in.
+                routing_mode: RoutingMode::Synthetic,
             };
             let book = Book::new(account, self.specs.clone());
             self.books.insert(account_id, book);

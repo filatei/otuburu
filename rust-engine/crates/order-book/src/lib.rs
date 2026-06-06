@@ -331,6 +331,34 @@ pub struct BinarySettlement {
 // Account
 // ──────────────────────────────────────────────────────────────
 
+/// RoutingMode — per-account decision on where new orders execute.
+///
+/// Sprint 5.5a — foundational data model for LP passthrough. The
+/// engine's `place_order` RPC branches on this in Sprint 5.5c:
+///   - `Synthetic`: orders fill against the engine's in-process book
+///     using prices from `feed-generator` / `live-feed`. This is the
+///     default and matches Otuburu's pre-LP behavior.
+///   - `Passthrough`: orders are forwarded to a configured LP via the
+///     `liquidity-bridge` crate (cTrader, MetaApi, OANDA). The engine
+///     still owns position state but mirrors the LP-side execution.
+///
+/// **Admin-flagged only** today — there is no public opt-in path in
+/// the v1 UI. Flipping a user to Passthrough requires the admin
+/// HTTP endpoint (Sprint 5.5e). This is a deliberate guard until
+/// Otuburu has the regulatory framework (IB agreement or broker
+/// license) to route client orders to a real LP at scale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutingMode {
+    /// Default. Engine handles execution end-to-end.
+    #[default]
+    Synthetic,
+    /// Orders forwarded to an external LP. Requires the engine to be
+    /// booted with a real LP adapter (not the Stub) — set CTRADER_*,
+    /// METAAPI_*, or OANDA_* env vars.
+    Passthrough,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
     pub id: Uuid,
@@ -341,6 +369,14 @@ pub struct Account {
     pub label: String,
     #[serde(default)]
     pub is_demo: bool,
+    /// Order routing target. Added in Sprint 5.5a; defaults to
+    /// `Synthetic` via `#[serde(default)]` so snapshots written by
+    /// older engine versions (v3 and earlier) load cleanly — the
+    /// field is simply absent in the JSON and serde fills it from
+    /// `RoutingMode::default()`. Flip per-account via the admin
+    /// endpoint added in 5.5e.
+    #[serde(default)]
+    pub routing_mode: RoutingMode,
 }
 
 impl Account {
@@ -354,6 +390,9 @@ impl Account {
             realised_pnl: 0.0,
             label: "Demo".into(),
             is_demo: true,
+            // Demo accounts never route to real LPs — synthetic stays
+            // synthetic regardless of admin flags.
+            routing_mode: RoutingMode::Synthetic,
         }
     }
 }
