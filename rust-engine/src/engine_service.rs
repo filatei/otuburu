@@ -325,68 +325,124 @@ impl EngineService for EngineServiceImpl {
             }));
         }
 
-        let book = inner.get_or_create_book(account_id, "Demo", true, 0.0);
-        let routing_mode = book.account.routing_mode;
-        let result = book.open_cfd(account_id, &r.symbol, side, r.lots, tp, sl);
-
-        // ── Sprint 5.5c — LP passthrough shadow ─────────────────────────
-        // For accounts flagged Passthrough, fire-and-forget an LP order
-        // alongside the engine booking. The engine response is NOT gated
-        // on LP latency — the user sees their synthetic position
-        // immediately. Sprint 5.5d will tighten this to a synchronous
-        // gate that replaces the engine's synthetic fill with the LP's
-        // reported fill price.
+        // ── Sprint 5.5d — synchronous LP gate ───────────────────────────
+        // Replaces 5.5c's fire-and-forget shadow with a sync await on
+        // the LP. For accounts flagged Passthrough with a translatable
+        // symbol, the engine now WAITS for the LP fill before booking
+        // the engine position, uses the LP's reported price as entry,
+        // and stores the LP order id for reconcile (Sprint 5.6).
         //
-        // If the symbol has no LP equivalent (synthetic indices, US cash
-        // indices), we log + fall back to synthetic-only. Same for
-        // unknown LP names (defensive — `lp_symbols::translate_for_lp`
-        // returns `None`).
-        if matches!(routing_mode, RoutingMode::Passthrough) {
-            if let Ok(ref pos) = result {
-                let lp_adapter = self.state.lp_adapter.clone();
-                let lp_symbol_opt =
-                    crate::lp_symbols::translate_for_lp(&r.symbol, lp_adapter.name());
-                let engine_position_id = pos.id.to_string();
-                let lots = r.lots;
-                let lp_side = match side {
-                    Side::Buy => liquidity_bridge::Side::Buy,
-                    Side::Sell => liquidity_bridge::Side::Sell,
-                };
-                let otuburu_symbol = r.symbol.clone();
-                tokio::spawn(async move {
-                    let lp_name = lp_adapter.name().to_string();
-                    let Some(lp_symbol) = lp_symbol_opt else {
-                        tracing::warn!(
-                            otuburu = %otuburu_symbol,
-                            lp = %lp_name,
-                            "passthrough flagged but symbol has no LP equivalent — engine booked synthetic only"
-                        );
-                        return;
+        // Behavioral changes from 5.5c:
+        //   - LP failure rejects the place_order (was: log + book
+        //     synthetically anyway)
+        //   - User-visible latency for passthrough accounts: +LP RTT
+        //     (typically 100-400ms via MetaApi)
+        //   - Synthetic accounts: zero behavior change
+        //
+        // Symbols without an LP equivalent (BOOM/CRASH/PULSE synthetics,
+        // US cash indices) log a warn and fall through to synthetic
+        // booking — this is the load-bearing safety property from 5.5b
+        // and is unchanged here.
+        let routing_mode = inner
+            .books
+            .get(&account_id)
+            .map(|b| b.account.routing_mode)
+            .unwrap_or(RoutingMode::Synthetic);
+
+        let lp_symbol_opt = if matches!(routing_mode, RoutingMode::Passthrough) {
+            crate::lp_symbols::translate_for_lp(&r.symbol, self.state.lp_adapter.name())
+        } else {
+            None
+        };
+
+        let result = if let Some(lp_symbol) = lp_symbol_opt {
+            // Passthrough path with a real LP-side symbol — sync await.
+            let lp_side = match side {
+                Side::Buy => liquidity_bridge::Side::Buy,
+                Side::Sell => liquidity_bridge::Side::Sell,
+            };
+            // engine_position_id is empty here — the engine assigns
+            // CfdPosition.id only after a successful book. Reconcile
+            // matches on lp_order_id (LP-side) → CfdPosition.lp_order_id
+            // (engine-side) instead. The field stays in PlaceMarketRequest
+            // for adapters (like OANDA) that can carry it as a client
+            // extension; MetaApi doesn't use it.
+            let lp_req = liquidity_bridge::PlaceMarketRequest {
+                instrument: lp_symbol.clone(),
+                side: lp_side,
+                lots: r.lots,
+                engine_position_id: String::new(),
+            };
+            // We hold the inner write lock across this .await. tokio's
+            // RwLock is async-friendly — other tasks yield freely — but
+            // place_order RPCs for OTHER users will block until this
+            // resolves. Acceptable at Otuburu's scale; revisit if we
+            // ever see queue depth issues in monitor.sh.
+            match self.state.lp_adapter.place_market(lp_req).await {
+                Ok(fill) => {
+                    tracing::info!(
+                        lp = self.state.lp_adapter.name(),
+                        instrument = %fill.instrument,
+                        lp_price = fill.price,
+                        lp_order_id = %fill.lp_order_id,
+                        "lp fill received — booking engine position with LP entry"
+                    );
+                    // MetaApi returns price=-1.0 as a placeholder when
+                    // /trade doesn't echo the executed price. The Book
+                    // impl falls back to synthetic mid in that case;
+                    // reconcile (5.6) replaces with the real avg from
+                    // /history-orders.
+                    let lp_entry = if fill.price.is_finite() && fill.price > 0.0 {
+                        Some(fill.price)
+                    } else {
+                        None
                     };
-                    let lp_req = liquidity_bridge::PlaceMarketRequest {
-                        instrument: lp_symbol,
-                        side: lp_side,
-                        lots,
-                        engine_position_id,
-                    };
-                    match lp_adapter.place_market(lp_req).await {
-                        Ok(fill) => tracing::info!(
-                            lp = %lp_name,
-                            instrument = %fill.instrument,
-                            units = fill.units,
-                            price = fill.price,
-                            "lp shadow fill — 5.5d will reconcile with engine position"
-                        ),
-                        Err(e) => tracing::warn!(
-                            lp = %lp_name,
-                            error = %e,
-                            otuburu = %otuburu_symbol,
-                            "lp shadow rejected — engine position remains synthetic-only"
-                        ),
-                    }
-                });
+                    let book = inner.get_or_create_book(account_id, "Demo", true, 0.0);
+                    book.open_cfd_with_lp_fill(
+                        account_id,
+                        &r.symbol,
+                        side,
+                        r.lots,
+                        tp,
+                        sl,
+                        lp_entry,
+                        fill.lp_order_id,
+                    )
+                }
+                Err(e) => {
+                    // LP rejected — propagate to the user. Don't book
+                    // a synthetic position behind their back; the user
+                    // explicitly opted in to LP routing.
+                    tracing::warn!(
+                        lp = self.state.lp_adapter.name(),
+                        error = %e,
+                        otuburu_symbol = %r.symbol,
+                        lp_symbol = %lp_symbol,
+                        "lp rejected — rejecting place_order"
+                    );
+                    return Ok(Response::new(PlaceOrderResponse {
+                        result: Some(crate::pb::place_order_response::Result::Error(format!(
+                            "lp routing rejected: {e}"
+                        ))),
+                    }));
+                }
             }
-        }
+        } else {
+            // Synthetic accounts OR Passthrough-flagged accounts on
+            // synthetic-only symbols (BOOM/CRASH/PULSE/SURGE/PLUNGE/
+            // DRIFT, US cash indices). Book the engine position
+            // synthetically. Warn-log the passthrough-without-LP-symbol
+            // case so an admin investigating "why didn't this route?"
+            // has a breadcrumb.
+            if matches!(routing_mode, RoutingMode::Passthrough) {
+                tracing::warn!(
+                    symbol = %r.symbol,
+                    "passthrough flagged but symbol has no LP equivalent — booking synthetic"
+                );
+            }
+            let book = inner.get_or_create_book(account_id, "Demo", true, 0.0);
+            book.open_cfd(account_id, &r.symbol, side, r.lots, tp, sl)
+        };
 
         let resp = match result {
             Ok(pos) => PlaceOrderResponse {

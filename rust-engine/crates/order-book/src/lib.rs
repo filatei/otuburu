@@ -244,6 +244,14 @@ pub struct CfdPosition {
     pub tp_profit: Option<f64>,
     /// Optional stop-loss: auto-close when loss ≥ this value (positive, USD).
     pub sl_loss: Option<f64>,
+    /// LP-side order/deal id when this position was routed via the
+    /// liquidity-bridge (Sprint 5.5d). `None` for purely synthetic
+    /// positions. The nightly reconcile job in Sprint 5.6 matches
+    /// engine positions to LP positions on this field. Persists in
+    /// the snapshot via `#[serde(default)]` so v4 snapshots from
+    /// before 5.5d load with a None value.
+    #[serde(default)]
+    pub lp_order_id: Option<String>,
 }
 
 /// Result of an auto-close triggered by TP / SL / stop-out.
@@ -537,6 +545,10 @@ impl Book {
     ///
     /// `tp_profit` — optional take-profit in USD (positive = profit target).
     /// `sl_loss`   — optional stop-loss in USD (positive magnitude; max you're willing to lose).
+    /// Open a CFD position at the current synthetic bid/ask price.
+    /// Used for accounts in Synthetic routing mode — the engine acts
+    /// as the counterparty, with the price coming from the configured
+    /// feed (synthetic generator, Binance, Alpaca, etc.).
     pub fn open_cfd(
         &mut self,
         account_id: Uuid,
@@ -545,6 +557,79 @@ impl Book {
         lots: f64,
         tp_profit: Option<f64>,
         sl_loss: Option<f64>,
+    ) -> Result<CfdPosition, BookError> {
+        self.open_cfd_inner(
+            account_id, symbol, side, lots, tp_profit, sl_loss, None, None,
+        )
+    }
+
+    /// Open a CFD position using a price + order id supplied by an
+    /// external liquidity provider (Sprint 5.5d). Used when the
+    /// account's routing_mode is Passthrough and the engine forwards
+    /// the order to the LP via liquidity-bridge.
+    ///
+    /// `lp_entry` is the fill price reported by the LP. If the LP
+    /// doesn't carry a fill price on the response (e.g. MetaApi's
+    /// /trade endpoint returns -1.0 as a placeholder until the
+    /// /history-orders sync), pass `None` — the engine falls back to
+    /// the local bid/ask and the reconcile job in Sprint 5.6 corrects
+    /// it nightly.
+    ///
+    /// `lp_order_id` is stored on the position so the reconcile job
+    /// can match engine positions to LP positions.
+    ///
+    /// Note on arg count: clippy::too_many_arguments fires here (9/7)
+    /// because the CFD opening surface has genuinely many inputs.
+    /// Bundling into a `OpenCfdParams` struct would add boilerplate
+    /// for a single-caller method; we accept the lint instead.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_cfd_with_lp_fill(
+        &mut self,
+        account_id: Uuid,
+        symbol: &str,
+        side: Side,
+        lots: f64,
+        tp_profit: Option<f64>,
+        sl_loss: Option<f64>,
+        lp_entry: Option<f64>,
+        lp_order_id: String,
+    ) -> Result<CfdPosition, BookError> {
+        self.open_cfd_inner(
+            account_id,
+            symbol,
+            side,
+            lots,
+            tp_profit,
+            sl_loss,
+            lp_entry,
+            Some(lp_order_id),
+        )
+    }
+
+    /// Shared implementation of CFD position opening.
+    ///
+    /// `override_entry`: when `Some(price)` AND `price.is_finite()`
+    /// AND `price > 0`, used as the position's entry. Otherwise the
+    /// synthetic bid/ask is used. The check guards against MetaApi's
+    /// placeholder `-1.0` fill price (returned when the broker's
+    /// /trade endpoint doesn't echo the executed price).
+    ///
+    /// `lp_order_id`: stored on the position for reconcile matching.
+    /// `None` for synthetic positions.
+    ///
+    /// Same too-many-arguments allowance as the public wrapper above —
+    /// this is the shared body so it inherits all the arg surface.
+    #[allow(clippy::too_many_arguments)]
+    fn open_cfd_inner(
+        &mut self,
+        account_id: Uuid,
+        symbol: &str,
+        side: Side,
+        lots: f64,
+        tp_profit: Option<f64>,
+        sl_loss: Option<f64>,
+        override_entry: Option<f64>,
+        lp_order_id: Option<String>,
     ) -> Result<CfdPosition, BookError> {
         if lots <= 0.0 || !lots.is_finite() {
             return Err(BookError::InvalidLots(lots));
@@ -559,7 +644,14 @@ impl Book {
             .get(symbol)
             .ok_or_else(|| BookError::UnknownSymbol(symbol.into()))?;
 
-        let entry = if side == Side::Buy { q.ask } else { q.bid };
+        // LP fill price takes precedence ONLY when it's a real number.
+        // MetaApi's /trade response uses -1.0 as a "fill price unknown,
+        // reconcile later" sentinel; we treat that as no override.
+        let synthetic_entry = if side == Side::Buy { q.ask } else { q.bid };
+        let entry = match override_entry {
+            Some(p) if p.is_finite() && p > 0.0 => p,
+            _ => synthetic_entry,
+        };
         let notional = lots * spec.contract_size * entry;
         let margin = notional / spec.leverage as f64;
         let free = self.free_margin();
@@ -587,6 +679,7 @@ impl Book {
             opened_at_ms: chrono::Utc::now().timestamp_millis(),
             tp_profit,
             sl_loss,
+            lp_order_id,
         };
         self.positions.insert(pos.id, pos.clone());
         Ok(pos)
