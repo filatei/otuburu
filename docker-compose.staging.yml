@@ -56,12 +56,21 @@ services:
       # If unset, adminMiddleware returns 503 to fail closed rather
       # than allow unrestricted admin.
       ADMIN_SECRET:    ${ADMIN_SECRET:-}
+      # Postgres connection for admin_audit_log (Sprint 5.5f). Same DB
+      # instance as wallet — gateway gets its own pool. If postgres
+      # is unreachable on boot, gateway logs a warn and continues
+      # without audit (admin actions still work, just no DB trail).
+      POSTGRES_HOST:     "postgres"
+      POSTGRES_USER:     ${POSTGRES_USER:-otuburu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-otuburu}
+      POSTGRES_DB:       ${POSTGRES_DB:-otuburu}
     ports:
       - "127.0.0.1:8082:8082"
     networks:
       - internal
     depends_on:
       - engine
+      - postgres
     healthcheck:
       # Go binary has /healthz; use nc to avoid needing wget/curl in slim image
       test: ["CMD", "nc", "-z", "localhost", "8082"]

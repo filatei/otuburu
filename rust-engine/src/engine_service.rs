@@ -813,11 +813,12 @@ impl EngineService for EngineServiceImpl {
             "passthrough" => RoutingMode::Passthrough,
             other => {
                 return Ok(Response::new(SetAccountRoutingModeResponse {
-                    result: Some(crate::pb::set_account_routing_mode_response::Result::Error(
-                        format!(
-                            "invalid routing_mode: {other:?}; expected 'synthetic' or 'passthrough'"
-                        ),
-                    )),
+                    accepted: false,
+                    error: format!(
+                        "invalid routing_mode: {other:?}; expected 'synthetic' or 'passthrough'"
+                    ),
+                    previous: String::new(),
+                    current: String::new(),
                 }));
             }
         };
@@ -827,9 +828,10 @@ impl EngineService for EngineServiceImpl {
             Some(b) => b,
             None => {
                 return Ok(Response::new(SetAccountRoutingModeResponse {
-                    result: Some(crate::pb::set_account_routing_mode_response::Result::Error(
-                        format!("account {account_id} not found in engine"),
-                    )),
+                    accepted: false,
+                    error: format!("account {account_id} not found in engine"),
+                    previous: String::new(),
+                    current: String::new(),
                 }));
             }
         };
@@ -839,7 +841,9 @@ impl EngineService for EngineServiceImpl {
 
         // Warn-level so the change shows up in monitor.sh's `errors` and
         // `status` tails — this is a security-sensitive admin action and
-        // we want it loud in logs.
+        // we want it loud in logs. Gateway also writes a row to
+        // admin_audit_log on every call (Sprint 5.5f) for the
+        // longer-term forensic trail.
         tracing::warn!(
             %account_id,
             previous = ?prev,
@@ -848,14 +852,15 @@ impl EngineService for EngineServiceImpl {
             "admin: account routing_mode changed"
         );
 
-        let current = match new_mode {
+        let mode_str = |m: RoutingMode| match m {
             RoutingMode::Synthetic => "synthetic",
             RoutingMode::Passthrough => "passthrough",
         };
         Ok(Response::new(SetAccountRoutingModeResponse {
-            result: Some(
-                crate::pb::set_account_routing_mode_response::Result::Current(current.to_string()),
-            ),
+            accepted: true,
+            error: String::new(),
+            previous: mode_str(prev).to_string(),
+            current: mode_str(new_mode).to_string(),
         }))
     }
 

@@ -12,6 +12,12 @@ package rest
 // `cmd/main.go` after `RegisterRoutes`. Kept in a separate file from
 // the user-facing proxy routes so it's obvious which surface area is
 // security-sensitive.
+//
+// Audit: every call writes a row to `admin_audit_log` via the
+// audit.Logger injected at boot (Sprint 5.5f). Audit writes are
+// best-effort — if the DB is unreachable, slog.Error fires but the
+// admin action still succeeds. See internal/audit/audit.go for the
+// rationale.
 
 import (
 	"net/http"
@@ -19,8 +25,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"otuburu.money/gateway/internal/audit"
 	"otuburu.money/gateway/internal/enginepb"
 )
+
+// auditLogger is set at boot from cmd/main.go via InitAudit. Nil-safe:
+// audit.Logger handles a nil pool internally and degrades to slog.Error.
+var auditLogger *audit.Logger
+
+// InitAudit wires the audit.Logger into this package. Call once at
+// boot, before RegisterAdminRoutes.
+func InitAudit(l *audit.Logger) {
+	auditLogger = l
+}
 
 // adminMiddleware validates the Bearer ADMIN_SECRET header on admin
 // endpoints. Returns 503 when ADMIN_SECRET is unset (so a misconfigured
@@ -46,7 +63,8 @@ func adminMiddleware() gin.HandlerFunc {
 }
 
 // RegisterAdminRoutes attaches admin endpoints to the given router
-// group. Call this from cmd/main.go after RegisterRoutes.
+// group. Call this from cmd/main.go after RegisterRoutes and after
+// InitAudit.
 //
 // Routes (all require Authorization: Bearer <ADMIN_SECRET>):
 //
@@ -67,9 +85,11 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 // Body: {"routing_mode": "synthetic" | "passthrough"}
 // Path: /admin/accounts/:id/routing-mode  (account UUID)
 //
-// Returns 200 with {"routing_mode": "synthetic"|"passthrough"} on
-// success. Returns 400 on validation error (invalid mode, account
-// not found, etc.) with {"error": "..."}.
+// Returns 200 with {"previous": "...", "current": "..."} on success.
+// Returns 400 on validation error (invalid mode, account not found,
+// etc.) with {"error": "..."}.
+//
+// Writes one row to admin_audit_log either way (Sprint 5.5f).
 func handleAdminSetRoutingMode(c *gin.Context) {
 	accountID := c.Param("id")
 	var req struct {
@@ -77,6 +97,13 @@ func handleAdminSetRoutingMode(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		auditLogger.LogFromGin(c, audit.Event{
+			Action:   "set_account_routing_mode",
+			Target:   accountID,
+			After:    map[string]string{"requested": req.RoutingMode},
+			Status:   http.StatusBadRequest,
+			ErrorMsg: err.Error(),
+		})
 		return
 	}
 
@@ -87,19 +114,44 @@ func handleAdminSetRoutingMode(c *gin.Context) {
 		RoutingMode: req.RoutingMode,
 	})
 	if err != nil {
+		// Transport-level failure (engine unreachable, timeout, etc.).
+		// engineErr writes the response; capture status from gin and
+		// audit the failure so transient outages have a trail.
 		engineErr(c, err)
+		auditLogger.LogFromGin(c, audit.Event{
+			Action:   "set_account_routing_mode",
+			Target:   accountID,
+			After:    map[string]string{"requested": req.RoutingMode},
+			Status:   c.Writer.Status(),
+			ErrorMsg: err.Error(),
+		})
 		return
 	}
 
-	switch r := resp.Result.(type) {
-	case *enginepb.SetAccountRoutingModeResponse_Current:
-		c.JSON(http.StatusOK, gin.H{"routing_mode": r.Current})
-	case *enginepb.SetAccountRoutingModeResponse_Error:
-		c.JSON(http.StatusBadRequest, gin.H{"error": r.Error})
-	default:
-		// Defensive — proto oneof should always populate exactly one
-		// arm. If we ever see neither, something's wrong with the
-		// engine response shape.
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "engine returned empty response"})
+	if !resp.Accepted {
+		// Engine-level rejection (invalid mode string, account not
+		// found in engine, etc.). 400 to the caller, audited.
+		c.JSON(http.StatusBadRequest, gin.H{"error": resp.Error})
+		auditLogger.LogFromGin(c, audit.Event{
+			Action:   "set_account_routing_mode",
+			Target:   accountID,
+			After:    map[string]string{"requested": req.RoutingMode},
+			Status:   http.StatusBadRequest,
+			ErrorMsg: resp.Error,
+		})
+		return
 	}
+
+	// Success — echo previous + current to the caller, audit the diff.
+	c.JSON(http.StatusOK, gin.H{
+		"previous": resp.Previous,
+		"current":  resp.Current,
+	})
+	auditLogger.LogFromGin(c, audit.Event{
+		Action: "set_account_routing_mode",
+		Target: accountID,
+		Before: map[string]string{"routing_mode": resp.Previous},
+		After:  map[string]string{"routing_mode": resp.Current},
+		Status: http.StatusOK,
+	})
 }

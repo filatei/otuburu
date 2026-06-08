@@ -23,6 +23,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"otuburu.money/gateway/internal/audit"
+	"otuburu.money/gateway/internal/db"
 	"otuburu.money/gateway/internal/engine"
 	"otuburu.money/gateway/internal/rest"
 	"otuburu.money/gateway/internal/ws"
@@ -56,8 +58,30 @@ func main() {
 	}
 	defer engineClient.Close()
 
-	// Wire the engine client into the REST handlers.
+	// ── Postgres pool (audit log) ─────────────────────────────────────────────
+	// Sprint 5.5f. Gateway gains a Postgres connection for the
+	// admin_audit_log table — same DB instance as wallet, different
+	// pool. Best-effort: if Postgres is unreachable on boot we log
+	// loudly and continue without audit. The alternative (refusing to
+	// start) would take the entire user-facing gateway offline for an
+	// audit-table outage, which is a worse failure mode than missing
+	// audit entries. Missing entries are visible via slog "audit:
+	// pool not configured" on every admin call.
+	dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	auditPool, err := db.Connect(dbCtx)
+	dbCancel()
+	if err != nil {
+		slog.Warn("audit pool unavailable — admin actions will be logged to stderr only",
+			"err", err)
+	} else {
+		slog.Info("audit pool connected")
+		defer auditPool.Close()
+	}
+	auditLogger := audit.NewLogger(auditPool)
+
+	// Wire the engine client + audit logger into the REST handlers.
 	rest.Init(engineClient)
+	rest.InitAudit(auditLogger)
 
 	// ── WebSocket hub ─────────────────────────────────────────────────────────
 	hub := ws.NewHub()

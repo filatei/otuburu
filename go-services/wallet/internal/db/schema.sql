@@ -364,6 +364,59 @@ CREATE TABLE IF NOT EXISTS referrals (
 );
 CREATE INDEX IF NOT EXISTS idx_referrals_introducer ON referrals(introducer_user_id);
 
+-- ── Admin audit log ───────────────────────────────────────────────────────────
+-- Sprint 5.5f. Records every call to /api/admin/* on the gateway so we
+-- have a forensic trail of who flipped what when. Append-only — never
+-- updated, never deleted. Retention is "forever" until we hit a real
+-- storage problem (this table grows slowly even at scale: only admin
+-- actions, not user trades).
+--
+-- before_value/after_value are JSONB so future admin endpoints can dump
+-- arbitrary state diffs without schema changes (e.g. bulk balance
+-- adjustments, KYC overrides, withdrawal approvals).
+--
+-- Per the system architecture, this lives in the wallet's Postgres but
+-- is WRITTEN by the gateway service (gateway gets its own pool against
+-- the same DB instance). Wallet's admin handler is welcome to write
+-- here too as we extend audit coverage to its endpoints in a follow-up.
+CREATE TABLE IF NOT EXISTS admin_audit_log (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    occurred_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Service that wrote the entry — "gateway" or "wallet". Lets us
+    -- filter by service in dashboards without parsing the action name.
+    service      TEXT NOT NULL CHECK (service IN ('gateway','wallet')),
+    -- Verb describing the admin action, e.g. 'set_account_routing_mode',
+    -- 'approve_withdrawal', 'reject_kyc'. Lowercase snake_case by
+    -- convention; not enforced by check constraint so we don't have to
+    -- migrate every time we add an action.
+    action       TEXT NOT NULL,
+    -- Subject of the action — usually an account UUID, user UUID, or
+    -- withdrawal id. NULL for actions that don't target a specific
+    -- entity (e.g. bulk operations, sweep triggers).
+    target       TEXT,
+    -- State before the action, if applicable. Free-form JSON per action.
+    before_value JSONB,
+    -- State after the action.
+    after_value  JSONB,
+    -- HTTP status code returned to the admin caller. 200/204 = success;
+    -- anything else means the admin action was rejected (validation,
+    -- engine reject, etc.) — still recorded for forensic completeness.
+    status       INT NOT NULL,
+    -- Error message returned to the caller when status != 2xx. Empty
+    -- on success.
+    error        TEXT NOT NULL DEFAULT '',
+    -- Edge-network IP that originated the admin call (gin Context's
+    -- ClientIP() — respects X-Forwarded-For from Apache). Useful when
+    -- admin secret leaks and we need to identify the abusing source.
+    request_ip   TEXT,
+    -- User-agent string from the admin caller. Helps distinguish curl
+    -- (humans) from a misbehaving script.
+    user_agent   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_occurred ON admin_audit_log(occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_action   ON admin_audit_log(action);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_target   ON admin_audit_log(target);
+
 -- ── Indices ───────────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_ledger_account      ON ledger(account_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_created      ON ledger(created_at DESC);

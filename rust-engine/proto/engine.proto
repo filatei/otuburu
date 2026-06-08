@@ -334,10 +334,15 @@ message SetAccountRoutingModeRequest {
 }
 
 message SetAccountRoutingModeResponse {
-  oneof result {
-    string current = 1;  // echoes the value now set on the book
-    string error   = 2;
-  }
+  bool   accepted = 1;
+  string error    = 2;  // empty when accepted=true
+  // Routing mode BEFORE the change. Always populated on accepted=true
+  // so the gateway's admin_audit_log can record the diff. Empty on
+  // accepted=false.
+  string previous = 3;
+  // Routing mode AFTER the change. Echoes the requested value when
+  // accepted=true. Empty on accepted=false.
+  string current  = 4;
 }
 
 // ── Chart history ─────────────────────────────────────────────────────────────
