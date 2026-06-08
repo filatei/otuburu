@@ -51,6 +51,11 @@ services:
       ENGINE_ADDR:     "engine:9090"
       JWT_SECRET:      ${JWT_SECRET:-change-me-in-production}
       INTERNAL_SECRET: ${INTERNAL_SECRET:-}
+      # Gates POST /api/admin/* (Sprint 5.5e adds account routing-mode
+      # flip). Same secret rotates across gateway + wallet services.
+      # If unset, adminMiddleware returns 503 to fail closed rather
+      # than allow unrestricted admin.
+      ADMIN_SECRET:    ${ADMIN_SECRET:-}
     ports:
       - "127.0.0.1:8082:8082"
     networks:
