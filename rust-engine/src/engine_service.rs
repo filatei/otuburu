@@ -16,8 +16,9 @@ use crate::pb::{
     GetStateRequest, GetSymbolsRequest, GetSymbolsResponse, GetTradeHistoryRequest,
     GetTradeHistoryResponse, HouseStats, ListAccountsRequest, ListAccountsResponse,
     PlaceBinaryRequest, PlaceBinaryResponse, PlaceOrderRequest, PlaceOrderResponse,
-    PlaceSpotRequest, PlaceSpotResponse, Position as PbPosition, SettledTrade as PbSettledTrade,
-    SpotPosition as PbSpot, StateSnapshot, SubscribeTicksRequest, SymbolInfo, Tick as PbTick,
+    PlaceSpotRequest, PlaceSpotResponse, Position as PbPosition, SetAccountRoutingModeRequest,
+    SetAccountRoutingModeResponse, SettledTrade as PbSettledTrade, SpotPosition as PbSpot,
+    StateSnapshot, SubscribeTicksRequest, SymbolInfo, Tick as PbTick,
 };
 use crate::state::SharedState;
 
@@ -791,6 +792,70 @@ impl EngineService for EngineServiceImpl {
             reject_reason: String::new(),
             new_balance,
             new_free_margin,
+        }))
+    }
+
+    // ── Admin: set account routing mode ──────────────────────────────────────
+    //
+    // Sprint 5.5e. Auth is the caller's responsibility — the gateway gates
+    // this RPC by ADMIN_SECRET. Engine treats every call as authenticated.
+    // Persisted via the periodic snapshot (no immediate flush; the v4
+    // snapshot includes routing_mode and the 60s save catches the change).
+    async fn set_account_routing_mode(
+        &self,
+        req: Request<SetAccountRoutingModeRequest>,
+    ) -> Result<Response<SetAccountRoutingModeResponse>, Status> {
+        let r = req.into_inner();
+        let account_id = parse_account_id(&r.account_id)?;
+
+        let new_mode = match r.routing_mode.as_str() {
+            "synthetic" => RoutingMode::Synthetic,
+            "passthrough" => RoutingMode::Passthrough,
+            other => {
+                return Ok(Response::new(SetAccountRoutingModeResponse {
+                    result: Some(crate::pb::set_account_routing_mode_response::Result::Error(
+                        format!(
+                            "invalid routing_mode: {other:?}; expected 'synthetic' or 'passthrough'"
+                        ),
+                    )),
+                }));
+            }
+        };
+
+        let mut inner = self.state.inner.write().await;
+        let book = match inner.books.get_mut(&account_id) {
+            Some(b) => b,
+            None => {
+                return Ok(Response::new(SetAccountRoutingModeResponse {
+                    result: Some(crate::pb::set_account_routing_mode_response::Result::Error(
+                        format!("account {account_id} not found in engine"),
+                    )),
+                }));
+            }
+        };
+
+        let prev = book.account.routing_mode;
+        book.account.routing_mode = new_mode;
+
+        // Warn-level so the change shows up in monitor.sh's `errors` and
+        // `status` tails — this is a security-sensitive admin action and
+        // we want it loud in logs.
+        tracing::warn!(
+            %account_id,
+            previous = ?prev,
+            new = ?new_mode,
+            lp = self.state.lp_adapter.name(),
+            "admin: account routing_mode changed"
+        );
+
+        let current = match new_mode {
+            RoutingMode::Synthetic => "synthetic",
+            RoutingMode::Passthrough => "passthrough",
+        };
+        Ok(Response::new(SetAccountRoutingModeResponse {
+            result: Some(
+                crate::pb::set_account_routing_mode_response::Result::Current(current.to_string()),
+            ),
         }))
     }
 

@@ -155,6 +155,12 @@ service EngineService {
 
   // Trade history (settled binary options)
   rpc GetTradeHistory (GetTradeHistoryRequest) returns (GetTradeHistoryResponse);
+
+  // Admin — flip an account between Synthetic and Passthrough routing.
+  // Sprint 5.5e. Gated at the gateway by ADMIN_SECRET (Bearer); the
+  // engine itself doesn't re-check auth, so this RPC must NEVER be
+  // exposed without a trusted edge in front of it.
+  rpc SetAccountRoutingMode (SetAccountRoutingModeRequest) returns (SetAccountRoutingModeResponse);
 }
 
 // ─── Request / Response messages ─────────────────────────────────────────────
@@ -318,6 +324,20 @@ message AdjustBalanceResponse {
   string reject_reason   = 2;  // empty when accepted=true
   double new_balance     = 3;
   double new_free_margin = 4;
+}
+
+// ── Admin: account routing mode ───────────────────────────────────────────────
+
+message SetAccountRoutingModeRequest {
+  string account_id   = 1;
+  string routing_mode = 2;  // "synthetic" | "passthrough"
+}
+
+message SetAccountRoutingModeResponse {
+  oneof result {
+    string current = 1;  // echoes the value now set on the book
+    string error   = 2;
+  }
 }
 
 // ── Chart history ─────────────────────────────────────────────────────────────

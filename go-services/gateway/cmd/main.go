@@ -101,6 +101,11 @@ func main() {
 
 	rest.RegisterRoutes(r.Group("/api"))
 	rest.RegisterInternalRoutes(r.Group("/internal"), internalSecret)
+	// Admin endpoints (Bearer ADMIN_SECRET). Sprint 5.5e added the
+	// account routing_mode flip; expand here as more admin actions
+	// land. Mounted at /api/admin so Apache's existing reverse-proxy
+	// rule for /api/* covers it without a new vhost block.
+	rest.RegisterAdminRoutes(r.Group("/api"))
 
 	srv := &http.Server{
 		Addr:         ":" + port,
