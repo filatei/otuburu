@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import type { SymbolInfo } from '@/types'
+import { isTradeable } from '@/types'
 import { authFetch } from '@/lib/api'
 import { useTicks }   from '@/hooks/useTicks'
 import { useAccount } from '@/hooks/useAccount'
@@ -215,7 +216,10 @@ export default function TradingPage() {
   //   3. fall back to legacy user.account_id (single-account JWTs)
   const realAccountId: string | null = (() => {
     if (!user) return null
-    const owned = (user.accounts ?? []).filter(a => a.type === 'real').map(a => a.id)
+    // Sprint 5.9d — broker accounts are tradeable too. The "real account
+    // id" name predates broker accounts; semantically this is now
+    // "selected non-demo account id" and may resolve to a broker.
+    const owned = (user.accounts ?? []).filter(isTradeable).map(a => a.id)
     if (selectedRealId && owned.includes(selectedRealId)) return selectedRealId
     return owned[0] ?? user.account_id ?? null
   })()
@@ -228,7 +232,9 @@ export default function TradingPage() {
     if (!user) return
     const key = `otuburu.selected_real:${user.user_id}`
     const stored = localStorage.getItem(key)
-    if (stored && user.accounts?.some(a => a.id === stored && a.type === 'real')) {
+    // Sprint 5.9d — allow restoring a broker account as the active
+    // non-demo selection too, not just synthetic real accounts.
+    if (stored && user.accounts?.some(a => a.id === stored && isTradeable(a))) {
       setSelectedRealId(stored)
     }
   }, [user?.user_id, user?.accounts])
@@ -285,12 +291,18 @@ export default function TradingPage() {
       provisionAccount(user.demo_id, 'Demo', true, 10_000),
     ]
     for (const a of user.accounts ?? []) {
-      if (a.type === 'real') {
+      // Sprint 5.9d — provision broker accounts too. The gateway already
+      // calls engine.CreateAccount on POST /api/lp-links, so this is
+      // idempotent and mostly belt-and-suspenders for session-restore
+      // after an engine restart.
+      if (isTradeable(a)) {
         calls.push(provisionAccount(a.id, a.label || 'Real', false, a.balance ?? 0))
       }
     }
     // Fallback for older tokens whose /auth/me didn't return accounts[] yet.
-    if (!user.accounts?.some(a => a.type === 'real') && user.account_id) {
+    // Tradeable check kept the same — broker accounts only ever come through
+    // the new accounts[] shape, never the legacy single-account_id payload.
+    if (!user.accounts?.some(isTradeable) && user.account_id) {
       calls.push(provisionAccount(user.account_id, 'Real', false, user.real_balance ?? 0))
     }
     Promise.allSettled(calls)
@@ -428,7 +440,11 @@ export default function TradingPage() {
         onWithdraw={() => setWithdrawOpen(true)}
         onHistory={() => {}}
         onSwitchAccount={
-          (user?.accounts?.filter(a => a.type === 'real').length ?? 0) >= 1
+          // Sprint 5.9d — show the switcher whenever the user has any
+          // tradeable non-demo account (synthetic real OR broker).
+          // Previously a broker-only user (no synthetic real yet) would
+          // never see the switcher and couldn't reach their broker.
+          (user?.accounts?.filter(isTradeable).length ?? 0) >= 1
             ? () => setAccountSheetOpen(true)
             : undefined
         }

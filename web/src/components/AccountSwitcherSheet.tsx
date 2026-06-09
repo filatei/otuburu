@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import clsx from 'clsx'
 import type { UserAccount } from '@/types'
-import { kindLabel } from '@/types'
+import { accountTypeBadge, isTradeable } from '@/types'
 import { createAccountApi } from '@/lib/api'
 import BottomSheet from './BottomSheet'
 
@@ -31,6 +31,24 @@ interface Props {
 export default function AccountSwitcherSheet({
   open, onClose, accounts, selectedId, onSelect, onCreated,
 }: Props) {
+  // Tradeable = synthetic real + broker (Sprint 5.9d). Demo lives behind
+  // the header's DEMO/REAL toggle; this sheet is for picking which
+  // *non-demo* account is active. Broker accounts appear interleaved with
+  // a BROKER badge — for v1 users typically have 0-1 brokers, so a
+  // separate "Linked brokers" section would be more chrome than signal.
+  // Sort: synthetic real first, then broker, then by creation order
+  // (input order). Keeps the most-used accounts at the top while still
+  // exposing brokers prominently.
+  const tradeable = accounts
+    .filter(isTradeable)
+    .slice()
+    .sort((a, b) => {
+      if (a.type === b.type) return 0
+      return a.type === 'real' ? -1 : 1
+    })
+  // 'reals' is preserved as the count for the "n/10" indicator on the
+  // create button — broker accounts don't count against the cap because
+  // they're external-broker-backed, not synthetic.
   const reals = accounts.filter(a => a.type === 'real')
 
   const [creating, setCreating]   = useState(false)
@@ -67,35 +85,57 @@ export default function AccountSwitcherSheet({
   return (
     <BottomSheet open={open} onClose={() => { reset(); onClose() }} title="Accounts">
       <ul className="divide-y divide-border">
-        {reals.map(a => (
-          <li key={a.id}>
-            <button
-              type="button"
-              onClick={() => { onSelect(a.id); onClose() }}
-              className="w-full flex items-center gap-3 px-5 py-3 active:bg-surface/70 hover:bg-surface/40 text-left"
-            >
-              <span className={clsx(
-                'w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
-                a.id === selectedId ? 'bg-brand text-black' : 'bg-surface text-dim border border-border',
-              )}>
-                {a.id === selectedId ? '✓' : a.label[0]?.toUpperCase()}
-              </span>
-              <span className="flex-1 min-w-0">
-                <span className="flex items-center gap-1.5">
-                  <span className="text-text text-sm font-semibold truncate">{a.label}</span>
-                  {kindLabel(a.kind) && (
-                    <span className="text-[8px] font-bold tracking-wider px-1 py-0.5 rounded bg-brand/15 text-brand">
-                      {kindLabel(a.kind)}
-                    </span>
-                  )}
+        {tradeable.map(a => {
+          const isBroker = a.type === 'broker'
+          const badge    = accountTypeBadge(a)
+          // Broker initial = 🔗 instead of the first letter — instantly
+          // distinguishes it in the list even before the user reads the
+          // BROKER pill. Selected state still overrides with ✓ as for
+          // synthetic accounts. Keeps single-glance scanability.
+          const avatar = a.id === selectedId
+            ? '✓'
+            : isBroker ? '🔗' : a.label[0]?.toUpperCase()
+          return (
+            <li key={a.id}>
+              <button
+                type="button"
+                onClick={() => { onSelect(a.id); onClose() }}
+                className="w-full flex items-center gap-3 px-5 py-3 active:bg-surface/70 hover:bg-surface/40 text-left"
+              >
+                <span className={clsx(
+                  'w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0',
+                  a.id === selectedId ? 'bg-brand text-black'
+                    : isBroker      ? 'bg-up/10 text-up border border-up/30'
+                    :                 'bg-surface text-dim border border-border',
+                )}>
+                  {avatar}
                 </span>
-                <span className="block text-dim text-[11px] num">
-                  ${a.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                <span className="flex-1 min-w-0">
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-text text-sm font-semibold truncate">{a.label}</span>
+                    {badge && (
+                      <span className={clsx(
+                        'text-[8px] font-bold tracking-wider px-1 py-0.5 rounded',
+                        // BROKER uses up-coloured (green) pill so it reads as
+                        // "live broker" not "synthetic scaling". CENT/MICRO
+                        // keep the brand-yellow they had pre-5.9d.
+                        isBroker ? 'bg-up/15 text-up' : 'bg-brand/15 text-brand',
+                      )}>
+                        {badge}
+                      </span>
+                    )}
+                  </span>
+                  <span className="block text-dim text-[11px] num">
+                    ${a.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {isBroker && a.balance === 0 && (
+                      <span className="text-dim/60 ml-1.5 italic">syncing…</span>
+                    )}
+                  </span>
                 </span>
-              </span>
-            </button>
-          </li>
-        ))}
+              </button>
+            </li>
+          )
+        })}
       </ul>
 
       {/* Create section — collapsed as a single tappable row by default;

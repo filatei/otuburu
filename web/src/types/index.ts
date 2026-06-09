@@ -8,18 +8,42 @@ export interface Tick {
 }
 
 /** One of the user's accounts as returned by /auth/me and /wallet/accounts.
- *  Phase 2 multi-account model: 1 demo + N real per user, each with a
- *  user-visible label and an independent USD balance. */
+ *  Phase 2 multi-account model: 1 demo + N real + N broker per user, each
+ *  with a user-visible label and an independent USD balance.
+ *  Sprint 5.9: 'broker' is a third type — an Otuburu-side mirror of a linked
+ *  external broker account (Exness MT5 via MetaApi, cTrader, OANDA).
+ *  Broker accounts route orders through the user's broker via Sprint 5.8's
+ *  per-user LP cache; their balance is polled from the LP, not deposited to. */
 export interface UserAccount {
   id:      string
   label:   string
-  type:    'demo' | 'real'
+  type:    'demo' | 'real' | 'broker'
   balance: number
   /** Phase-4 scaling kind. 'real_standard' (1×), 'real_cent' (100×), or
    *  'real_micro' (1000×) — applied to deposits + savings/account transfers.
    *  Demo accounts always carry 'demo'. Optional on the type for back-compat
-   *  with older /auth/me payloads that pre-date this field. */
+   *  with older /auth/me payloads that pre-date this field. Broker accounts
+   *  carry 'real_standard' by default (kind is meaningless for them — they
+   *  reflect the broker's actual money, not a scaled Otuburu balance). */
   kind?:   AccountKind
+}
+
+/** isTradeable — true for accounts the user can place orders against. Used
+ *  by the picker, state-subscription, and engine-provision loops.
+ *  Synthetic real + broker are tradeable; demo is tradeable but excluded
+ *  from this helper because demo lives behind the demo/real mode toggle,
+ *  not the multi-account picker. */
+export function isTradeable(a: UserAccount): boolean {
+  return a.type === 'real' || a.type === 'broker'
+}
+
+/** accountTypeBadge — short user-facing badge for a non-standard account.
+ *  Returns 'BROKER' for linked broker accounts; otherwise delegates to
+ *  kindLabel for 'CENT' / 'MICRO' / '' (synthetic real). Centralised so
+ *  every surface (picker, drawer, header) shows the same string. */
+export function accountTypeBadge(a: UserAccount): string {
+  if (a.type === 'broker') return 'BROKER'
+  return kindLabel(a.kind)
 }
 
 export type AccountKind = 'real_standard' | 'real_cent' | 'real_micro' | 'demo'
