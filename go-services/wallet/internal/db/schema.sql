@@ -444,10 +444,12 @@ CREATE INDEX IF NOT EXISTS idx_user_lp_links_user ON user_lp_links(user_id);
 --
 -- Semantics
 -- ---------
---   type='broker'  ⇔  lp_link_id IS NOT NULL
--- A broker account ALWAYS has an LP link; an LP link MAY have at most one
--- broker account (enforced by idx_accounts_one_broker_per_link). Synthetic
--- accounts (demo/real) MUST have lp_link_id = NULL.
+--   lp_link_id IS NOT NULL → type='broker'   (one-way; see CHECK below)
+--   lp_link_id IS NULL     → any type allowed (incl. orphaned broker)
+-- An LP link MAY have at most one broker account (enforced by
+-- idx_accounts_one_broker_per_link). Synthetic accounts (demo/real)
+-- MUST have lp_link_id = NULL. Broker accounts USUALLY have an LP link
+-- but may be orphaned after DELETE FROM user_lp_links.
 --
 -- ON DELETE SET NULL on the FK — deleting an LP link must not cascade
 -- and lose the broker account's ledger history. Instead the row goes
@@ -465,13 +467,20 @@ DO $$ BEGIN
     ALTER TABLE accounts ADD  CONSTRAINT accounts_lp_link_id_fkey
         FOREIGN KEY (lp_link_id) REFERENCES user_lp_links(id) ON DELETE SET NULL;
 
-    -- Bi-implication CHECK: broker ⇔ has lp_link_id. Catches the two
-    -- failure modes early: (1) a 'real' account gets an lp_link_id
-    -- assigned by accident, (2) a 'broker' account is created without
-    -- an LP link (which would have no way to route orders).
+    -- One-way implication CHECK: lp_link_id NOT NULL → type='broker'.
+    -- (Equivalently: lp_link_id IS NULL OR type='broker'.)
+    -- Catches the high-value failure mode (a 'real'/'demo' account
+    -- accidentally gets an lp_link_id assigned and silently passthroughs
+    -- to a broker). We deliberately DO NOT enforce the converse
+    -- ("broker → lp_link_id NOT NULL") because of the link-delete path:
+    -- on DELETE FROM user_lp_links the FK's ON DELETE SET NULL nulls
+    -- accounts.lp_link_id, which would violate a bi-implication CHECK
+    -- and roll back the link delete — leaving links un-deletable.
+    -- Sprint 5.9c's engine routing handles the orphaned-broker case by
+    -- rejecting orders with 'broker link removed'.
     ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_broker_link_check;
     ALTER TABLE accounts ADD  CONSTRAINT accounts_broker_link_check
-        CHECK ((type = 'broker') = (lp_link_id IS NOT NULL));
+        CHECK (lp_link_id IS NULL OR type = 'broker');
 END $$;
 
 -- One broker Otuburu account per LP link. Re-linking the same broker

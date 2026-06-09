@@ -34,6 +34,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"otuburu.money/gateway/internal/auth"
+	"otuburu.money/gateway/internal/enginepb"
 )
 
 // lpLinksDB is wired at boot from cmd/main.go via InitLpLinks. Same
@@ -77,6 +78,19 @@ type lpLinkResp struct {
 	Label      string  `json:"label"`
 	CreatedAt  string  `json:"created_at"`
 	LastUsedAt *string `json:"last_used_at,omitempty"`
+	// Sprint 5.9b — the Otuburu-side broker account auto-provisioned
+	// on first link. Empty on GET (not joined for performance and to
+	// keep the list response lean); always populated on POST so the
+	// frontend can immediately switch the account picker to the new
+	// broker account.
+	BrokerAccountID string `json:"broker_account_id,omitempty"`
+	// EngineMirrored is false when Postgres committed but the engine
+	// gRPC CreateAccount call failed (network blip, engine restart).
+	// The reconcile cron (Sprint 5.6) will pick it up on next pass,
+	// but the frontend should surface a "broker mirror delayed"
+	// toast so the user doesn't try to trade against a half-provisioned
+	// account in the meantime. Omitted from JSON when true (default).
+	EngineMirrored bool `json:"engine_mirrored"`
 	// Token NEVER returned to clients — we don't want it in browser
 	// memory or copy-paste-ready in the network tab. The user already
 	// has it (they just submitted it); the API surface is write-only
@@ -122,11 +136,27 @@ func handleLpLinkCreate(c *gin.Context) {
 	// tokens copied from MetaApi UI.
 	req.Token = strings.TrimSpace(req.Token)
 
+	// Sprint 5.9b — link + broker account creation must be atomic.
+	// If the accounts INSERT fails (e.g. partial-unique conflict on
+	// re-paste with an already-deleted-then-recreated link), we want
+	// to roll back the user_lp_links INSERT too rather than leave a
+	// dangling encrypted token with no account to route through.
+	ctx := c.Request.Context()
+	tx, err := lpLinksDB.Begin(ctx)
+	if err != nil {
+		slog.Error("lp_links: tx begin", "err", err, "user_id", claims.UserID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save broker link"})
+		return
+	}
+	// Safe to defer Rollback even after Commit — pgx makes the second
+	// call a no-op. Avoids the if/else error path duplication.
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var (
 		id        string
 		createdAt string
 	)
-	err := lpLinksDB.QueryRow(c.Request.Context(), `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO user_lp_links (user_id, kind, account_id, region, token_enc, label)
 		VALUES ($1, $2, $3, NULLIF($4, ''), pgp_sym_encrypt($5, $6), $7)
 		ON CONFLICT (user_id, kind, account_id) DO UPDATE
@@ -142,14 +172,73 @@ func handleLpLinkCreate(c *gin.Context) {
 		return
 	}
 
+	// Auto-provision the Otuburu-side broker account that mirrors this
+	// link. Idempotent via partial-unique idx_accounts_one_broker_per_link
+	// (Sprint 5.9a) — re-paste of an existing link reuses the same
+	// accounts row instead of failing or duplicating. Label is
+	// "<user-label> · <kind>" so the account picker reads naturally
+	// next to demo/real accounts. Initial balance is 0; Sprint 5.9f's
+	// 60s LP-poll loop will populate the real broker-side balance.
+	brokerLabel := req.Label + " · " + req.Kind
+	var brokerAccountID string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO accounts (user_id, type, label, currency, balance, lp_link_id)
+		VALUES ($1, 'broker', $2, 'USDT', 0, $3)
+		ON CONFLICT (lp_link_id) WHERE type = 'broker' DO UPDATE
+		  SET label = EXCLUDED.label
+		RETURNING id::text`,
+		claims.UserID, brokerLabel, id,
+	).Scan(&brokerAccountID)
+	if err != nil {
+		slog.Error("lp_links: broker account provision", "err", err,
+			"user_id", claims.UserID, "link_id", id)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "could not provision broker account",
+		})
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		slog.Error("lp_links: tx commit", "err", err, "user_id", claims.UserID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save broker link"})
+		return
+	}
+
+	// Mirror the broker account into the engine's in-memory book.
+	// Synchronous and best-effort: if it fails, Postgres state is
+	// authoritative and the nightly reconcile (Sprint 5.6) will sync.
+	// We still return 200 because the link itself is saved — the user
+	// just has to wait a bit for trading to be available. The
+	// EngineMirrored flag in the response tells the frontend whether
+	// to show "ready to trade" or "broker mirror delayed".
+	mirrored := true
+	{
+		rpcC, cancel := rpcCtx()
+		defer cancel()
+		if _, mirrorErr := engineClient.Service().CreateAccount(rpcC, &enginepb.CreateAccountRequest{
+			AccountId:      brokerAccountID,
+			Label:          brokerLabel,
+			IsDemo:         false,
+			InitialBalance: 0,
+		}); mirrorErr != nil {
+			mirrored = false
+			slog.Error("lp_links: engine mirror failed — will reconcile",
+				"err", mirrorErr,
+				"broker_account_id", brokerAccountID,
+				"link_id", id)
+		}
+	}
+
 	region := req.Region
 	resp := lpLinkResp{
-		ID:        id,
-		Kind:      req.Kind,
-		AccountID: req.AccountID,
-		Region:    nullable(&region),
-		Label:     req.Label,
-		CreatedAt: createdAt,
+		ID:              id,
+		Kind:            req.Kind,
+		AccountID:       req.AccountID,
+		Region:          nullable(&region),
+		Label:           req.Label,
+		CreatedAt:       createdAt,
+		BrokerAccountID: brokerAccountID,
+		EngineMirrored:  mirrored,
 	}
 	c.JSON(http.StatusOK, resp)
 }
