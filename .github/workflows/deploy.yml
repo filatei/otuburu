@@ -277,6 +277,9 @@ jobs:
             # (decrypts in user_lp.rs on every Passthrough place_order
             # cache miss). Both services must see the same value.
             LP_LINK_KEY=${{ secrets.LP_LINK_KEY }}
+            # Exness cent variants suffix symbol names ('m' or 'c' or
+            # '.cent'). Discoverable from MetaApi /symbols listing.
+            METAAPI_SYMBOL_SUFFIX=${{ secrets.METAAPI_SYMBOL_SUFFIX }}
             # ── Alpaca real-time market data (engine) ─────────────────────────
             APCA_API_KEY_ID=${{ secrets.APCA_API_KEY_ID }}
             APCA_API_SECRET_KEY=${{ secrets.APCA_API_SECRET_KEY }}

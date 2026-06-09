@@ -43,6 +43,11 @@ services:
       # routing falls back to the global LP. Set in deploy.yml from
       # GitHub Secrets.
       LP_LINK_KEY:          ${LP_LINK_KEY:-}
+      # Exness cent accounts (USC currency) suffix instrument names —
+      # e.g. EURUSD -> EURUSDm. Empty = no suffix (standard MT5 accounts).
+      # Discoverable via GET /users/current/accounts/<id>/symbols on
+      # the MetaApi REST API.
+      METAAPI_SYMBOL_SUFFIX: ${METAAPI_SYMBOL_SUFFIX:-}
     volumes:
       - enginedata:/data
     expose:
