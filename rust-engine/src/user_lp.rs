@@ -187,6 +187,15 @@ impl UserLpCache {
     pub async fn invalidate(&self, otuburu_account_id: Uuid) {
         self.map.write().await.remove(&otuburu_account_id);
     }
+
+    /// Borrowed access to the shared Postgres pool. Returns None when
+    /// the engine is running in synthetic-only mode (no Postgres).
+    /// Used by the broker-balance poll loop (Sprint 5.9f) so it can
+    /// reuse the same connection pool the per-user LP cache is built
+    /// on, instead of opening a second one.
+    pub fn pg(&self) -> Option<&PgPool> {
+        self.pg.as_ref()
+    }
 }
 
 /// Build a concrete LpAdapter from a decrypted user link. Returns

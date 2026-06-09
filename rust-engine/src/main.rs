@@ -12,6 +12,7 @@
 mod db;
 mod engine_service;
 mod live_feed;
+mod broker_balance;
 mod lp_symbols;
 mod market_hours;
 mod ohlc;
@@ -60,6 +61,14 @@ async fn main() -> anyhow::Result<()> {
     // monitor.sh errors picks them up. No-op (or near no-op) for
     // engines with zero Passthrough accounts.
     reconcile::start(shared.clone());
+
+    // ── Broker balance poll (Sprint 5.9f) ────────────────────────────────────
+    // Every 60s, for each broker-type account, calls the LP adapter's
+    // account_summary() and overwrites the engine's in-memory balance +
+    // Postgres accounts.balance. This is what makes broker accounts
+    // actually tradeable: without it, balance stays at 0 and the engine
+    // rejects every order for insufficient margin.
+    broker_balance::start(shared.clone());
 
     // ── gRPC server ──────────────────────────────────────────────────────────
     let svc = engine_service::EngineServiceImpl::new(shared);
