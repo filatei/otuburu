@@ -1,4 +1,5 @@
 'use client'
+import { useEffect, useRef, useState } from 'react'
 import type { AuthUser } from '@/hooks/useAuth'
 import { useT } from '@/lib/i18n/provider'
 
@@ -22,6 +23,24 @@ interface Props {
 
 export default function Header({ user, connected, mode, engineBalance, routingMode, onModeToggle, onMenuOpen }: Props) {
   const { t } = useT()
+
+  // ── LP routing popover ─────────────────────────────────────────────
+  // Sprint 5.5g v2. Clicking the LP badge opens a small info panel
+  // explaining where orders go. Dismisses on outside click OR the
+  // explicit X button — same UX pattern as UserMenu so users learn
+  // the dismiss gesture once and it applies everywhere.
+  const [routingPopoverOpen, setRoutingPopoverOpen] = useState(false)
+  const routingRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!routingPopoverOpen) return
+    function onClick(e: MouseEvent) {
+      if (routingRef.current && !routingRef.current.contains(e.target as Node)) {
+        setRoutingPopoverOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [routingPopoverOpen])
   // Prefer the live engine balance (updates as trades settle) over the static
   // wallet balance. The double-null fallback handles two distinct
   // "missing" states: (a) engineBalance not yet pushed (null) — fall through
@@ -63,18 +82,56 @@ export default function Header({ user, connected, mode, engineBalance, routingMo
         <span className="text-dim text-[10px] hidden md:block">{connected ? 'Live' : 'Reconnecting…'}</span>
       </div>
 
-      {/* LP routing badge — Sprint 5.5g. Only visible when the active
-          account is in passthrough mode (admin-flagged via
-          /api/admin/accounts/:id/routing-mode). Yellow on black to
-          match the brand-ribbon style; text-black mandatory on
-          bg-brand per the Tailwind theme memory. */}
+      {/* LP routing badge + info popover — Sprint 5.5g v2.
+          Only visible when the active account is in passthrough
+          mode (admin-flagged via /api/admin/accounts/:id/routing-mode).
+          Clicking the badge toggles a small info panel; click
+          outside or the X to dismiss. text-black on bg-brand per
+          the Tailwind theme memory. */}
       {routingMode === 'passthrough' && (
-        <span
-          className="text-black bg-brand text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase tracking-wider"
-          title="Orders on this account are routed to a real liquidity provider (Exness MT5 via MetaApi)"
-        >
-          LP&nbsp;→&nbsp;Exness
-        </span>
+        <div className="relative" ref={routingRef}>
+          <button
+            type="button"
+            onClick={() => setRoutingPopoverOpen(o => !o)}
+            className="text-black bg-brand text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase tracking-wider hover:opacity-90"
+            aria-label="Show LP routing details"
+            aria-expanded={routingPopoverOpen}
+          >
+            LP&nbsp;→&nbsp;Exness
+          </button>
+
+          {routingPopoverOpen && (
+            <div
+              role="dialog"
+              aria-label="LP routing details"
+              className="absolute left-0 top-full mt-1 w-64 bg-panel border border-border rounded-md shadow-lg z-30 text-text"
+            >
+              <div className="flex items-start justify-between px-3 py-2 border-b border-border">
+                <span className="text-[11px] uppercase tracking-wider text-dim font-semibold">
+                  Live routing
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setRoutingPopoverOpen(false)}
+                  className="text-dim hover:text-text text-base leading-none px-1 -mt-0.5"
+                  aria-label="Close routing details"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="px-3 py-2 space-y-1.5 text-[11px]">
+                <p>
+                  This account is in <strong className="text-brand">passthrough</strong>{' '}
+                  mode. CFD orders are forwarded to your Exness MT5
+                  account via MetaApi.
+                </p>
+                <p className="text-dim">
+                  Disable from the terminal: <code className="text-text">otu-lp-off</code>
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       <div className="flex-1" />
