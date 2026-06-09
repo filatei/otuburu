@@ -477,6 +477,7 @@ export default function TradingPage() {
         connected={connected}
         mode={mode}
         engineBalance={account?.balance ?? null}
+        routingMode={account?.routing_mode}
         onModeToggle={() => setMode(m => m === 'demo' ? 'real' : 'demo')}
         onMenuOpen={() => setDrawerOpen(true)}
       />

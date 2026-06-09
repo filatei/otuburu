@@ -7,11 +7,20 @@ interface Props {
   connected:      boolean
   mode:           'demo' | 'real'
   engineBalance:  number | null   // live balance from engine, overrides static auth balance
+  /**
+   * Sprint 5.5g. When the active account's routing_mode is
+   * 'passthrough' the engine forwards CFD orders to the configured
+   * LP (MetaApi/Exness today; cTrader/IC Markets when Spotware
+   * recovers). Render a small badge so the trader can see at a
+   * glance that orders aren't synthetic. `undefined` / `''` /
+   * `'synthetic'` all hide the badge.
+   */
+  routingMode?:   string
   onModeToggle:   () => void
   onMenuOpen:     () => void
 }
 
-export default function Header({ user, connected, mode, engineBalance, onModeToggle, onMenuOpen }: Props) {
+export default function Header({ user, connected, mode, engineBalance, routingMode, onModeToggle, onMenuOpen }: Props) {
   const { t } = useT()
   // Prefer the live engine balance (updates as trades settle) over the static
   // wallet balance. The double-null fallback handles two distinct
@@ -53,6 +62,20 @@ export default function Header({ user, connected, mode, engineBalance, onModeTog
         <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-up' : 'bg-down'} transition-colors`} />
         <span className="text-dim text-[10px] hidden md:block">{connected ? 'Live' : 'Reconnecting…'}</span>
       </div>
+
+      {/* LP routing badge — Sprint 5.5g. Only visible when the active
+          account is in passthrough mode (admin-flagged via
+          /api/admin/accounts/:id/routing-mode). Yellow on black to
+          match the brand-ribbon style; text-black mandatory on
+          bg-brand per the Tailwind theme memory. */}
+      {routingMode === 'passthrough' && (
+        <span
+          className="text-black bg-brand text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase tracking-wider"
+          title="Orders on this account are routed to a real liquidity provider (Exness MT5 via MetaApi)"
+        >
+          LP&nbsp;→&nbsp;Exness
+        </span>
+      )}
 
       <div className="flex-1" />
 

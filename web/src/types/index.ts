@@ -112,6 +112,17 @@ export interface AccountState {
   realised_pnl: number
   label?:       string
   is_demo?:     boolean
+  /**
+   * Order routing target. `'synthetic'` (default) means the engine
+   * fills against its in-process synthetic book. `'passthrough'`
+   * means the engine forwards orders to an external LP
+   * (MetaApi/Exness, cTrader/IC Markets). Empty string from older
+   * engine snapshots is treated as synthetic by callers.
+   *
+   * Sprint 5.5g uses this to render a "LP → Exness MT5" badge in
+   * the Header when the user's account is in passthrough mode.
+   */
+  routing_mode?: 'synthetic' | 'passthrough' | ''
 }
 
 export interface Candle {

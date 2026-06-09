@@ -106,6 +106,10 @@ fn to_pb_account(book: &order_book::Book) -> AccountState {
         realised_pnl: book.account.realised_pnl,
         label: book.account.label.clone(),
         is_demo: book.account.is_demo,
+        routing_mode: match book.account.routing_mode {
+            RoutingMode::Synthetic => "synthetic".to_string(),
+            RoutingMode::Passthrough => "passthrough".to_string(),
+        },
     }
 }
 

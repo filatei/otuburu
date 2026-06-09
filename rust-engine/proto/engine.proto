@@ -69,6 +69,11 @@ message AccountState {
   double realised_pnl = 8;
   string label        = 9;   // "Demo" | user-defined name
   bool   is_demo      = 10;
+  // Order routing target — "synthetic" or "passthrough". Sprint
+  // 5.5g exposes this to the frontend so the Header can render a
+  // badge when the user's account is routing through an LP. Empty
+  // for backward compat with older engine snapshots.
+  string routing_mode = 11;
 }
 
 message HouseStats {
