@@ -271,6 +271,12 @@ jobs:
             TRONGRID_API_KEY=${{ secrets.TRONGRID_API_KEY }}
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             ADMIN_SECRET=${{ secrets.ADMIN_SECRET }}
+            # ── Per-user LP broker linking (Sprint 5.8) ───────────────────────
+            # pgcrypto symmetric key for user_lp_links.token_enc. Read by
+            # gateway (encrypts on POST /api/lp-links) and engine
+            # (decrypts in user_lp.rs on every Passthrough place_order
+            # cache miss). Both services must see the same value.
+            LP_LINK_KEY=${{ secrets.LP_LINK_KEY }}
             # ── Alpaca real-time market data (engine) ─────────────────────────
             APCA_API_KEY_ID=${{ secrets.APCA_API_KEY_ID }}
             APCA_API_SECRET_KEY=${{ secrets.APCA_API_SECRET_KEY }}
