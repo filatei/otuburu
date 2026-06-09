@@ -437,6 +437,9 @@ export default function TradingPage() {
         onKyc={user ? () => setKycOpen(true) : undefined}
         onGetApp={() => setGetAppOpen(true)}
         onContact={user ? () => setContactOpen(true) : undefined}
+        // Static export → /research/index.html. window.location avoids
+        // pulling next/navigation into this already-large component.
+        onResearch={() => { window.location.href = '/research/' }}
       />
 
       {/* "Get the App" sheet — Android APK + iOS PWA card. Always mounted

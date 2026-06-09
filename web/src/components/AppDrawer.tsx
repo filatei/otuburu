@@ -46,12 +46,17 @@ interface Props {
   onGetApp?:      () => void
   /** Open the "Contact support" sheet — message form that emails admin. */
   onContact?:     () => void
+  /** Navigate to /research — TORAMA Capital Research landing page
+   *  (Sprint 5.10). Optional so older callers compile; when undefined,
+   *  the Research item is hidden. */
+  onResearch?:    () => void
 }
 
 export default function AppDrawer({
   open, onClose, user, mode, activeAccountLabel, activeAccountKind,
   engineBalance, onModeToggle, onLogout, onEditProfile, onDeposit,
   onWithdraw, onHistory, onSwitchAccount, onTransfer, onAffiliate, onKyc, onGetApp, onContact,
+  onResearch,
 }: Props) {
   const drawerRef = useRef<HTMLDivElement>(null)
   const { t } = useT()
@@ -274,6 +279,15 @@ export default function AppDrawer({
           <Section title="Help">
             {onContact && (
               <Item icon="✉️" label="Contact us" sub="Email support directly" badge="live" onClick={() => { onContact(); onClose() }} />
+            )}
+            {onResearch && (
+              <Item
+                icon="📚"
+                label="Research"
+                sub="TORAMA Capital · Mathematics of small accounts"
+                badge="new"
+                onClick={() => { onResearch(); onClose() }}
+              />
             )}
             <Item icon="❓" label="Help Center" sub="How contracts work · FAQ" badge="soon" />
             <Item icon="📜" label="Terms & Legal" sub="Risk disclosure · privacy"   badge="soon" />
