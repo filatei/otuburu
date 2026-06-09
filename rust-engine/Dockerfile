@@ -1,5 +1,9 @@
 # ── Stage 1: build ───────────────────────────────────────────────────────────
-FROM rust:1.86-slim-bookworm AS builder
+# Rust 1.89 — bumped from 1.86 because home@0.5.12 (transitive dep,
+# pulled in by sqlx-postgres → ... → home) requires >= 1.88. Picked
+# 1.89 for headroom; bookworm slim still tracks 1.86 in apt so we
+# rely on the published rust image rather than the distro.
+FROM rust:1.89-slim-bookworm AS builder
 
 # protoc is required by tonic-build at compile time
 RUN apt-get update \
