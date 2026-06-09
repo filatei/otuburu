@@ -353,8 +353,29 @@ impl EngineService for EngineServiceImpl {
             .map(|b| b.account.routing_mode)
             .unwrap_or(RoutingMode::Synthetic);
 
+        // Sprint 5.8 — resolve the actual LP adapter for THIS account.
+        // Order of preference:
+        //   1. User's linked broker (from user_lp_links via Postgres) —
+        //      so a Passthrough order on Torama's account routes to
+        //      Torama's Exness MT5, and likewise for other users.
+        //   2. The engine-wide adapter from env (5.5c default) —
+        //      acts as the fallback when a user hasn't linked their
+        //      own broker, when Postgres is unreachable, or when the
+        //      user's link uses a kind we don't yet support
+        //      (cTrader/OANDA pending).
+        // For Synthetic accounts the resolved value is unused but we
+        // resolve eagerly to keep the code symmetric.
+        let lp_adapter = if matches!(routing_mode, RoutingMode::Passthrough) {
+            match self.state.user_lp_cache.get_or_build(account_id).await {
+                Some(user_adapter) => user_adapter,
+                None => self.state.lp_adapter.clone(),
+            }
+        } else {
+            self.state.lp_adapter.clone()
+        };
+
         let lp_symbol_opt = if matches!(routing_mode, RoutingMode::Passthrough) {
-            crate::lp_symbols::translate_for_lp(&r.symbol, self.state.lp_adapter.name())
+            crate::lp_symbols::translate_for_lp(&r.symbol, lp_adapter.name())
         } else {
             None
         };
@@ -382,10 +403,10 @@ impl EngineService for EngineServiceImpl {
             // place_order RPCs for OTHER users will block until this
             // resolves. Acceptable at Otuburu's scale; revisit if we
             // ever see queue depth issues in monitor.sh.
-            match self.state.lp_adapter.place_market(lp_req).await {
+            match lp_adapter.place_market(lp_req).await {
                 Ok(fill) => {
                     tracing::info!(
-                        lp = self.state.lp_adapter.name(),
+                        lp = lp_adapter.name(),
                         instrument = %fill.instrument,
                         lp_price = fill.price,
                         lp_order_id = %fill.lp_order_id,
@@ -418,7 +439,7 @@ impl EngineService for EngineServiceImpl {
                     // a synthetic position behind their back; the user
                     // explicitly opted in to LP routing.
                     tracing::warn!(
-                        lp = self.state.lp_adapter.name(),
+                        lp = lp_adapter.name(),
                         error = %e,
                         otuburu_symbol = %r.symbol,
                         lp_symbol = %lp_symbol,

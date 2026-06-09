@@ -15,6 +15,7 @@ use order_book::{Account, Book, ContractSpec, RoutingMode};
 use risk_engine::{RiskConfig, RiskEngine};
 
 use crate::ohlc::OhlcStore;
+use crate::user_lp::UserLpCache;
 
 /// Tick broadcast channel capacity — 1024 ticks before slow subscribers are dropped.
 pub const TICK_CHANNEL_CAP: usize = 1024;
@@ -223,6 +224,16 @@ pub struct SharedState {
     /// their own connection/token state. Sprint 5.5c uses this from
     /// the `place_order` RPC's passthrough branch.
     pub lp_adapter: Arc<dyn LpAdapter>,
+    /// Per-user LP adapter cache. Sprint 5.8 — when a user has
+    /// linked their own broker via POST /api/lp-links, this cache
+    /// resolves Otuburu account UUID → user's broker adapter. Falls
+    /// back to `lp_adapter` (the engine-wide one) when:
+    ///   - Postgres isn't reachable at boot
+    ///   - LP_LINK_KEY env isn't set
+    ///   - the account's owner has no linked broker yet
+    ///
+    /// All four cases are silently observable via tracing logs.
+    pub user_lp_cache: Arc<UserLpCache>,
 }
 
 impl SharedState {
@@ -274,6 +285,28 @@ impl SharedState {
         // visible in monitor.sh.
         let lp_adapter = liquidity_bridge::from_env();
 
+        // ── Postgres pool for per-user LP routing (Sprint 5.8) ──
+        // Best-effort: if unreachable at boot, the cache is built
+        // with pg=None and per-user routing silently disables
+        // (place_order falls back to lp_adapter). Failing here would
+        // take down the whole engine for a soft dependency, which
+        // is the worse failure mode.
+        let pg_pool = match crate::pg_db::connect().await {
+            Ok(p) => {
+                tracing::info!("user-lp postgres pool connected");
+                Some(p)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "user-lp postgres unreachable — per-user routing disabled, \
+                     engine falls back to global LP adapter for Passthrough orders"
+                );
+                None
+            }
+        };
+        let user_lp_cache = Arc::new(UserLpCache::new(pg_pool));
+
         SharedState {
             inner: Arc::new(RwLock::new(Inner {
                 books,
@@ -285,6 +318,7 @@ impl SharedState {
             tick_tx,
             db,
             lp_adapter,
+            user_lp_cache,
         }
     }
 }
