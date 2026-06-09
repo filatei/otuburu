@@ -180,6 +180,17 @@ export default function AuthModal({ onSuccess, error: externalError, onClose }: 
               24/7 markets
             </span>
           </div>
+          {/* Research discoverability — pre-login is the highest-value
+              surface for academic credibility (Sprint 5.10b). Plain text
+              link, not a pill, so it reads as navigation rather than a
+              value prop. target="_self" — we want the same tab so users
+              can come back via the back button. */}
+          <a
+            href="/research/"
+            className="mt-2 inline-block text-[11px] text-dim hover:text-text transition-colors underline decoration-dotted underline-offset-2"
+          >
+            Backed by original research &rarr;
+          </a>
         </div>
 
         {/* Error banner */}
