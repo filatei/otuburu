@@ -16,6 +16,7 @@ mod lp_symbols;
 mod market_hours;
 mod ohlc;
 mod persistence;
+mod reconcile;
 mod state;
 mod tick_loop;
 
@@ -50,6 +51,13 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Tick loop (one task per symbol) ──────────────────────────────────────
     tick_loop::start(shared.clone());
+
+    // ── LP reconciliation cron (Sprint 5.6) ──────────────────────────────────
+    // Nightly job that compares engine state vs LP state for
+    // Passthrough-flagged accounts. Divergences log at ERROR level so
+    // monitor.sh errors picks them up. No-op (or near no-op) for
+    // engines with zero Passthrough accounts.
+    reconcile::start(shared.clone());
 
     // ── gRPC server ──────────────────────────────────────────────────────────
     let svc = engine_service::EngineServiceImpl::new(shared);
