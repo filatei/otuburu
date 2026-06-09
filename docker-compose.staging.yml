@@ -56,6 +56,12 @@ services:
       # If unset, adminMiddleware returns 503 to fail closed rather
       # than allow unrestricted admin.
       ADMIN_SECRET:    ${ADMIN_SECRET:-}
+      # Sprint 5.8 — symmetric encryption key for user broker
+      # credentials (user_lp_links.token_enc). pgcrypto's
+      # pgp_sym_encrypt/decrypt key. If unset, the broker-linking
+      # endpoints return 503 — fails closed so tokens never land in
+      # DB cleartext. Generate with `openssl rand -hex 48`.
+      LP_LINK_KEY:     ${LP_LINK_KEY:-}
       # Postgres connection for admin_audit_log (Sprint 5.5f). Same DB
       # instance as wallet — gateway gets its own pool. If postgres
       # is unreachable on boot, gateway logs a warn and continues

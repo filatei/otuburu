@@ -364,6 +364,63 @@ CREATE TABLE IF NOT EXISTS referrals (
 );
 CREATE INDEX IF NOT EXISTS idx_referrals_introducer ON referrals(introducer_user_id);
 
+-- ── User LP links (broker account credentials) ───────────────────────────────
+-- Sprint 5.8. Each row links a user to one of their external broker
+-- accounts (Exness MT5 via MetaApi today; cTrader/IC Markets when
+-- Spotware recovers). When the user's Otuburu account is in
+-- passthrough routing mode, the engine routes CFD orders through
+-- THIS user's broker, not the engine-wide LP.
+--
+-- Token storage
+-- -------------
+-- The broker API token is stored encrypted with pgcrypto symmetric
+-- AES. The key (LP_LINK_KEY env var) flows through the application
+-- layer at query time — never stored in DB. Key rotation: swap the
+-- env var and re-encrypt all rows in a migration script (out of
+-- scope for v1; we cycle the key once a year max).
+--
+-- Why bytea + pgp_sym_encrypt vs TEXT + app-side AES
+-- --------------------------------------------------
+-- pgcrypto is built into Postgres 16; no new deps. App-side AES
+-- would require pinning the Go crypto API + key management code in
+-- both gateway (writer) and engine (reader) — duplicates the surface
+-- area and adds two places to get wrong. pgcrypto pushes the
+-- crypto into a battle-tested C extension.
+--
+-- One row per (user, kind, account_id) — a user can link multiple
+-- broker accounts of the same kind (e.g. two Exness MT5s, one for
+-- aggressive strategies, one for conservative).
+CREATE TABLE IF NOT EXISTS user_lp_links (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- Adapter kind. Must match liquidity-bridge::LpAdapter::name() prefix
+    -- so the engine knows which adapter to instantiate.
+    kind         TEXT NOT NULL CHECK (kind IN ('metaapi','ctrader','oanda')),
+    -- Broker-side account id. For metaapi: the MetaApi account UUID.
+    -- For ctrader: ctidTraderAccountId (numeric, stored as text).
+    -- For oanda: account number like '001-001-1234567-001'.
+    -- Not encrypted — useful for support and isn't sensitive alone.
+    account_id   TEXT NOT NULL,
+    -- For metaapi: cluster (london | new-york | singapore | etc).
+    -- For ctrader: env (demo | live).
+    -- For oanda: env (practice | live).
+    -- NULL is acceptable; adapter falls back to its own default.
+    region       TEXT,
+    -- Encrypted broker API token. Decrypt at query time via
+    --   pgp_sym_decrypt(token_enc, $LP_LINK_KEY).
+    -- See header comment for rationale.
+    token_enc    BYTEA NOT NULL,
+    -- User-visible name, e.g. "My Exness Pro account", "Demo Sandbox".
+    label        TEXT NOT NULL DEFAULT 'My broker',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Touched every time the engine fetches this link for a route.
+    -- Useful for "which broker links haven't been used in 90 days?"
+    -- cleanup queries.
+    last_used_at TIMESTAMPTZ,
+    UNIQUE (user_id, kind, account_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_lp_links_user ON user_lp_links(user_id);
+
 -- ── Admin audit log ───────────────────────────────────────────────────────────
 -- Sprint 5.5f. Records every call to /api/admin/* on the gateway so we
 -- have a forensic trail of who flipped what when. Append-only — never

@@ -24,6 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"otuburu.money/gateway/internal/audit"
+	"otuburu.money/gateway/internal/auth"
 	"otuburu.money/gateway/internal/db"
 	"otuburu.money/gateway/internal/engine"
 	"otuburu.money/gateway/internal/rest"
@@ -82,6 +83,12 @@ func main() {
 	// Wire the engine client + audit logger into the REST handlers.
 	rest.Init(engineClient)
 	rest.InitAudit(auditLogger)
+	// Sprint 5.8 — broker linking endpoints share the same pool as
+	// the audit logger. If auditPool is nil (boot-time Postgres
+	// unreachable), the lp-links handlers will return 503 to users
+	// with a clean "broker linking unavailable" message instead of
+	// panicking.
+	rest.InitLpLinks(auditPool)
 
 	// ── WebSocket hub ─────────────────────────────────────────────────────────
 	hub := ws.NewHub()
@@ -130,6 +137,10 @@ func main() {
 	// land. Mounted at /api/admin so Apache's existing reverse-proxy
 	// rule for /api/* covers it without a new vhost block.
 	rest.RegisterAdminRoutes(r.Group("/api"))
+	// Sprint 5.8 — user-facing broker linking endpoints
+	// (/api/lp-links). JWT-authed; users only see their own links.
+	// Tokens encrypted at rest via Postgres pgcrypto using LP_LINK_KEY.
+	rest.RegisterLpLinksRoutes(r.Group("/api", auth.Middleware()))
 
 	srv := &http.Server{
 		Addr:         ":" + port,
