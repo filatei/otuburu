@@ -13,15 +13,22 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── Accounts (one demo + N labelled real per user) ────────────────────────────
+-- ── Accounts (one demo + N labelled real + N broker per user) ────────────────
 -- The old UNIQUE(user_id, type) limited users to exactly one real account.
 -- Phase 2 of the deposit refactor lifts that: a user can now have multiple
 -- real accounts (e.g. "Main", "Strategy A", "Experiment"), each USD-denominated.
 -- Demo stays singleton — there's no value in multiple demos for retail.
+--
+-- Sprint 5.9a adds a third type — 'broker'. A broker account is an
+-- Otuburu-side mirror of an external broker account (Exness MT5, cTrader,
+-- OANDA) reached via user_lp_links. The lp_link_id column (added below
+-- in a migration block once user_lp_links is declared) ties the two
+-- together. Orders placed against a broker account passthrough to the
+-- LP unconditionally — no routing_mode flag, no global LP fallback.
 CREATE TABLE IF NOT EXISTS accounts (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    type       TEXT NOT NULL CHECK (type IN ('demo','real')),
+    type       TEXT NOT NULL CHECK (type IN ('demo','real','broker')),
     label      TEXT NOT NULL DEFAULT 'Account',  -- user-visible name e.g. "Main"
     currency   TEXT NOT NULL DEFAULT 'USDT',
     balance    NUMERIC(20,6) NOT NULL DEFAULT 0 CHECK (balance >= 0),
@@ -46,6 +53,15 @@ END $$;
 -- Drop the old uniqueness that limited each user to one real account. Name is
 -- the Postgres-generated default for `UNIQUE (user_id, type)`.
 ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_user_id_type_key;
+
+-- Sprint 5.9a — widen the type CHECK to allow 'broker' on already-deployed
+-- DBs. Same drop-and-readd pattern as ledger_type_check further down. Safe
+-- to re-run: idempotent on the constraint set.
+DO $$ BEGIN
+    ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_type_check;
+    ALTER TABLE accounts ADD  CONSTRAINT accounts_type_check
+        CHECK (type IN ('demo','real','broker'));
+END $$;
 
 -- Keep demo singleton via a partial unique index. Real accounts are now N:1.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_one_demo_per_user
@@ -420,6 +436,55 @@ CREATE TABLE IF NOT EXISTS user_lp_links (
     UNIQUE (user_id, kind, account_id)
 );
 CREATE INDEX IF NOT EXISTS idx_user_lp_links_user ON user_lp_links(user_id);
+
+-- ── Broker accounts (Sprint 5.9a) ────────────────────────────────────────────
+-- Links accounts.lp_link_id → user_lp_links.id. Declared HERE (not in the
+-- accounts block above) because the FK target needs user_lp_links to exist
+-- first. Migration is idempotent: re-running schema.sql is a no-op.
+--
+-- Semantics
+-- ---------
+--   type='broker'  ⇔  lp_link_id IS NOT NULL
+-- A broker account ALWAYS has an LP link; an LP link MAY have at most one
+-- broker account (enforced by idx_accounts_one_broker_per_link). Synthetic
+-- accounts (demo/real) MUST have lp_link_id = NULL.
+--
+-- ON DELETE SET NULL on the FK — deleting an LP link must not cascade
+-- and lose the broker account's ledger history. Instead the row goes
+-- orphan; admin can decide whether to archive or re-link.
+DO $$ BEGIN
+    -- Column add: NULL-able UUID, no default. Re-runs are no-ops because
+    -- of IF NOT EXISTS on ADD COLUMN.
+    ALTER TABLE accounts ADD COLUMN IF NOT EXISTS lp_link_id UUID;
+
+    -- FK to user_lp_links. Drop-and-readd makes the block idempotent
+    -- and lets us change ON DELETE behavior later without manual
+    -- intervention. Constraint name is explicit (vs PG-generated)
+    -- so the DROP is deterministic.
+    ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_lp_link_id_fkey;
+    ALTER TABLE accounts ADD  CONSTRAINT accounts_lp_link_id_fkey
+        FOREIGN KEY (lp_link_id) REFERENCES user_lp_links(id) ON DELETE SET NULL;
+
+    -- Bi-implication CHECK: broker ⇔ has lp_link_id. Catches the two
+    -- failure modes early: (1) a 'real' account gets an lp_link_id
+    -- assigned by accident, (2) a 'broker' account is created without
+    -- an LP link (which would have no way to route orders).
+    ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_broker_link_check;
+    ALTER TABLE accounts ADD  CONSTRAINT accounts_broker_link_check
+        CHECK ((type = 'broker') = (lp_link_id IS NOT NULL));
+END $$;
+
+-- One broker Otuburu account per LP link. Re-linking the same broker
+-- via POST /api/lp-links should reuse the existing account, not create
+-- a duplicate (5.9b enforces this on the wallet side too). Partial
+-- index — NULL lp_link_id (synthetic accounts) is exempt.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_one_broker_per_link
+    ON accounts (lp_link_id) WHERE type = 'broker';
+
+-- Fast lookup for engine's place_order path — "given otuburu_account_id,
+-- is it a broker mirror, and if so which LP link?" — uses this index.
+CREATE INDEX IF NOT EXISTS idx_accounts_lp_link
+    ON accounts (lp_link_id) WHERE lp_link_id IS NOT NULL;
 
 -- ── Admin audit log ───────────────────────────────────────────────────────────
 -- Sprint 5.5f. Records every call to /api/admin/* on the gateway so we
