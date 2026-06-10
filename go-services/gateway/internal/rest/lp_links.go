@@ -175,11 +175,13 @@ func handleLpLinkCreate(c *gin.Context) {
 	// Auto-provision the Otuburu-side broker account that mirrors this
 	// link. Idempotent via partial-unique idx_accounts_one_broker_per_link
 	// (Sprint 5.9a) — re-paste of an existing link reuses the same
-	// accounts row instead of failing or duplicating. Label is
-	// "<user-label> · <kind>" so the account picker reads naturally
-	// next to demo/real accounts. Initial balance is 0; Sprint 5.9f's
+	// accounts row instead of failing or duplicating. Label is exactly
+	// what the user typed — the BROKER pill in the picker already
+	// indicates this is an external broker account; appending the
+	// adapter kind (metaapi/ctrader/oanda) is implementation noise the
+	// user shouldn't have to see. Initial balance is 0; Sprint 5.9f's
 	// 60s LP-poll loop will populate the real broker-side balance.
-	brokerLabel := req.Label + " · " + req.Kind
+	brokerLabel := req.Label
 	var brokerAccountID string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO accounts (user_id, type, label, currency, balance, lp_link_id)
