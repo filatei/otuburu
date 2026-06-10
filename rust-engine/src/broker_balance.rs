@@ -141,7 +141,9 @@ async fn poll_one(state: &SharedState, account_id: Uuid) -> anyhow::Result<()> {
         .user_lp_cache
         .get_or_build(account_id)
         .await
-        .ok_or_else(|| anyhow::anyhow!("no LP adapter for broker account (link missing or kind unsupported)"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("no LP adapter for broker account (link missing or kind unsupported)")
+        })?;
 
     let summary = adapter.account_summary().await?;
     let lp_balance = summary.balance;

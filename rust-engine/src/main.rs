@@ -9,10 +9,10 @@
 //! Exposes a tonic gRPC server on `ENGINE_GRPC_ADDR` (default 0.0.0.0:9090)
 //! implementing `EngineService` as defined in `proto/engine.proto`.
 
+mod broker_balance;
 mod db;
 mod engine_service;
 mod live_feed;
-mod broker_balance;
 mod lp_symbols;
 mod market_hours;
 mod ohlc;
