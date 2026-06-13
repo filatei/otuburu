@@ -248,15 +248,8 @@ func (m *MonnifyProvider) EnsureVirtualAccount(ctx context.Context, accountID, u
 // monnify-signature HMAC over the raw body, then extracts the credited account
 // and amount from a SUCCESSFUL_TRANSACTION event.
 func (m *MonnifyProvider) ParseDepositWebhook(r *http.Request, body []byte) (*DepositEvent, error) {
-	sig := r.Header.Get("monnify-signature")
-	if sig == "" {
-		return nil, fmt.Errorf("monnify webhook: missing signature")
-	}
-	mac := hmac.New(sha512.New, []byte(m.secretKey))
-	mac.Write(body)
-	expected := hex.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(expected), []byte(sig)) {
-		return nil, fmt.Errorf("monnify webhook: bad signature")
+	if err := m.verifySig(r, body); err != nil {
+		return nil, err
 	}
 
 	var ev struct {
@@ -368,4 +361,75 @@ func normalizeMonnifyStatus(s string) string {
 	default:
 		return "pending" // PENDING, AWAITING_PROCESSING, etc.
 	}
+}
+
+// ── Webhook signature + disbursement events ───────────────────────────────────
+
+// verifySig recomputes the HMAC-SHA512 of the raw body keyed by the client
+// secret and constant-time compares it against the monnify-signature header.
+// Shared by the deposit and disbursement webhook parsers.
+func (m *MonnifyProvider) verifySig(r *http.Request, body []byte) error {
+	sig := r.Header.Get("monnify-signature")
+	if sig == "" {
+		return fmt.Errorf("monnify webhook: missing signature")
+	}
+	mac := hmac.New(sha512.New, []byte(m.secretKey))
+	mac.Write(body)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(expected), []byte(sig)) {
+		return fmt.Errorf("monnify webhook: bad signature")
+	}
+	return nil
+}
+
+// IsDisbursementEvent peeks the eventType (no signature check) to decide whether
+// an inbound webhook is a payout settlement vs a deposit. Monnify delivers all
+// events to the same URL, so the handler routes on this before parsing. The
+// chosen parser re-verifies the signature, so peeking unverified is safe.
+func (m *MonnifyProvider) IsDisbursementEvent(body []byte) bool {
+	var probe struct {
+		EventType string `json:"eventType"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToUpper(probe.EventType), "DISBURSEMENT") ||
+		strings.Contains(strings.ToUpper(probe.EventType), "TRANSFER")
+}
+
+// ParseDisbursementWebhook verifies the signature and parses a payout settlement
+// event into a DisbursementEvent. Reference is the value WE sent on the payout
+// (the withdrawal id), so the caller can settle the matching withdrawals row.
+func (m *MonnifyProvider) ParseDisbursementWebhook(r *http.Request, body []byte) (*DisbursementEvent, error) {
+	if err := m.verifySig(r, body); err != nil {
+		return nil, err
+	}
+	var ev struct {
+		EventType string `json:"eventType"`
+		EventData struct {
+			Reference            string `json:"reference"`
+			TransactionReference string `json:"transactionReference"`
+			Status               string `json:"status"`
+		} `json:"eventData"`
+	}
+	if err := json.Unmarshal(body, &ev); err != nil {
+		return nil, fmt.Errorf("monnify disbursement webhook: decode: %w", err)
+	}
+
+	// Status can arrive either in eventData.status or be implied by eventType
+	// (SUCCESSFUL_DISBURSEMENT / FAILED_DISBURSEMENT / REVERSED_DISBURSEMENT).
+	status := normalizeMonnifyStatus(ev.EventData.Status)
+	upper := strings.ToUpper(ev.EventType)
+	switch {
+	case strings.HasPrefix(upper, "SUCCESSFUL"):
+		status = "sent"
+	case strings.HasPrefix(upper, "FAILED"), strings.HasPrefix(upper, "REVERSED"):
+		status = "failed"
+	}
+
+	return &DisbursementEvent{
+		Provider:  monnifyName,
+		Reference: ev.EventData.Reference,
+		Status:    status,
+	}, nil
 }

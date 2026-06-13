@@ -61,41 +61,43 @@ In `DepositModal.tsx`, add an "NGN bank transfer" tab that calls
 balance updates silently via the existing tick/state push (no spinner — matches the
 MT5 silent-UX rule). The NUBAN is permanent, so you can cache and re-show it.
 
-## Withdrawals — one-line swap to gain failover
+## Withdrawals — router failover (implemented)
 
-`monnify.go` + `paystack_adapter.go` already make both providers satisfy
-`PayoutProvider`. To route NGN withdrawals through the Router (Monnify first,
-Paystack fallback) instead of calling Paystack directly, inject `*payments.Router`
-into the wallet handler and replace the direct `ResolveAccount` / `CreateRecipient`
-+ `InitiateTransfer` calls in `wallet.WithdrawNGN` with:
+`wallet.WithdrawNGN` and `ResolveNGNAccount` now route through `*payments.Router`,
+which tries Monnify first and fails over to Paystack. The wallet `Handler` takes
+`router` + `rates` instead of a direct `*payments.Handler`. The payout sends
+`Reference = withdrawal.id`, so the provider's settlement webhook maps back to the
+exact row. On success the withdrawal goes `approved`; the final `sent`/`failed`
+transition arrives via the disbursement webhook below.
 
-```go
-name, err := router.ResolveAccount(ctx, bankCode, acctNo)  // first healthy provider
-res,  err := router.Payout(ctx, payments.PayoutRequest{
-    AccountName: name, AccountNumber: acctNo, BankCode: bankCode,
-    NGNAmount: ngn, Reference: ref, Narration: "Otuburu withdrawal",
-})
-// store res.Reference in withdrawals.txid, res.Status in withdrawals.status
-```
+## Disbursement webhook (implemented)
 
-This file deliberately does **not** modify `wallet/internal/payments/ngn_withdraw.go`
-or the wallet handler, so the working Paystack payout path is untouched until you
-choose to flip it.
+Monnify delivers funding **and** payout-settlement events to the same URL
+(`/payments/monnify/webhook`), so the handler branches on `eventType`
+(`MonnifyProvider.IsDisbursementEvent`). Settlement events are parsed by
+`ParseDisbursementWebhook` and applied by `Crediter.SettleDisbursement`:
+
+- `SUCCESSFUL_*` → withdrawal `sent`.
+- `FAILED_*` / `REVERSED_*` → withdrawal `failed` **and** the debited USD is
+  refunded to the user's Savings wallet (idempotent — the refund only fires from a
+  non-terminal status, so replays are no-ops).
+
+> **Sandbox-verify:** confirm Monnify's disbursement webhook carries our reference
+> in `eventData.reference` (the field `SettleDisbursement` matches on). If your
+> tenant uses `transactionReference` instead, adjust `ParseDisbursementWebhook`.
 
 ## Known gaps / follow-ups
 
-- **Disbursement webhook.** Monnify confirms payouts asynchronously. A
-  `POST /payments/monnify/disbursement-webhook` handler to flip
-  `withdrawals.status` `pending → sent/failed` (and refund on failure) is not yet
-  written — payouts will sit `pending` until added. Paystack's existing transfer
-  webhook already does this for the Paystack path.
 - **KYC deposit cap.** Checkout deposits reject *before* charging. Virtual-account
   deposits arrive as inbound bank transfers we can't pre-reject, so the cap can't
   gate them the same way. `Crediter.Credit` currently credits regardless; add a
   post-credit check that flags/holds over-cap VA deposits for manual review.
-- **Run `gofmt -w ./internal/payments` and `go vet ./...`** before committing. The
-  wallet module is not in the CI vet matrix (`ci.yml` covers account/gateway/
-  risk-monitor only), so nothing else will catch a formatting or vet issue.
+- **Paystack transfer webhook.** The Paystack payout path still relies on its own
+  `transfer.success`/`failed` webhook to reach a terminal state; the Monnify
+  settlement handler does not cover Paystack references.
+- **CI now covers wallet.** `ci.yml` runs `go vet` + `go test` on the wallet
+  module (Go bumped to 1.25). Still run `gofmt -w ./internal/payments` locally —
+  Go CI doesn't gofmt-check.
 
 ## Regulatory note
 

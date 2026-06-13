@@ -56,6 +56,16 @@ type DepositEvent struct {
 	Successful bool
 }
 
+// DisbursementEvent is the normalised result of parsing a payout settlement
+// webhook. Reference is the value WE sent on the payout (the withdrawal id), so
+// the caller can settle the matching withdrawals row. Status is our vocabulary:
+// "sent" (paid), "failed" (refund), or "pending" (no-op, await final event).
+type DisbursementEvent struct {
+	Provider  string
+	Reference string
+	Status    string
+}
+
 // PayoutRequest is a normalised NGN bank disbursement (a withdrawal leg).
 type PayoutRequest struct {
 	AccountName   string

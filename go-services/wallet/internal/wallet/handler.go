@@ -18,15 +18,18 @@ type Handler struct {
 	db             *pgxpool.Pool
 	hd             *HDWallet
 	mailer         *email.Mailer
-	paystack       *payments.Handler // optional, may be nil if Paystack disabled
-	kyc            kyc.Provider      // Smile Identity client (stub when env unset)
-	gatewayURL     string            // wallet→gateway URL for /internal/*
-	internalSecret string            // shared with gateway for X-Internal-Secret
-	httpClient     *http.Client      // reused across transfer + balance-sync calls
+	router         *payments.Router      // multi-PSP payout router (Monnify→Paystack failover)
+	rates          *payments.RateFetcher // live USD→NGN for withdrawal payout quotes
+	kyc            kyc.Provider          // Smile Identity client (stub when env unset)
+	gatewayURL     string                // wallet→gateway URL for /internal/*
+	internalSecret string                // shared with gateway for X-Internal-Secret
+	httpClient     *http.Client          // reused across transfer + balance-sync calls
 }
 
-// NewHandler builds the wallet HTTP handler. `mailer` and `paystack` may be
-// nil — emails / NGN withdrawal just become no-op endpoints in that case.
+// NewHandler builds the wallet HTTP handler. `mailer` may be nil (emails become
+// no-ops). `router` drives NGN withdrawals via the multi-PSP payout chain
+// (Monnify→Paystack failover); when it has no payout provider the NGN endpoints
+// 503 cleanly. `rates` supplies the live USD→NGN used to quote payouts.
 // `gatewayURL` + `internalSecret` are required for transfers (POST
 // /wallet/transfers calls gateway's /internal/adjust-balance to move funds
 // in/out of trading accounts).
@@ -34,7 +37,8 @@ func NewHandler(
 	db *pgxpool.Pool,
 	hd *HDWallet,
 	mailer *email.Mailer,
-	paystack *payments.Handler,
+	router *payments.Router,
+	rates *payments.RateFetcher,
 	gatewayURL string,
 	internalSecret string,
 ) *Handler {
@@ -42,12 +46,19 @@ func NewHandler(
 		db:             db,
 		hd:             hd,
 		mailer:         mailer,
-		paystack:       paystack,
+		router:         router,
+		rates:          rates,
 		kyc:            kyc.NewProvider(),
 		gatewayURL:     gatewayURL,
 		internalSecret: internalSecret,
 		httpClient:     &http.Client{Timeout: 10 * time.Second},
 	}
+}
+
+// ngnPayoutAvailable reports whether NGN bank payouts can be served right now —
+// a payout provider must be registered. Used by the NGN endpoints to 503 early.
+func (h *Handler) ngnPayoutAvailable() bool {
+	return h.router != nil && h.router.HasPayout()
 }
 
 // GET /wallet/deposit-address — returns (or creates) the user's TRC20 deposit address.
@@ -139,7 +150,7 @@ func (h *Handler) Balance(c *gin.Context) {
 
 	var realBal, demoBal float64
 	h.db.QueryRow(ctx, `SELECT balance FROM accounts WHERE id=$1`, claims.AccountID).Scan(&realBal) //nolint:errcheck
-	h.db.QueryRow(ctx, `SELECT balance FROM accounts WHERE id=$1`, claims.DemoID).Scan(&demoBal)   //nolint:errcheck
+	h.db.QueryRow(ctx, `SELECT balance FROM accounts WHERE id=$1`, claims.DemoID).Scan(&demoBal)    //nolint:errcheck
 
 	// KYC tier + deposit-cap headroom so the frontend can render a
 	// "$X of $Y used" hint in the deposit modal. Best-effort: any DB
@@ -162,12 +173,12 @@ func (h *Handler) Balance(c *gin.Context) {
 	savingsBal, _ := ensureSavingsBalance(ctx, h.db, claims.UserID)
 
 	c.JSON(http.StatusOK, gin.H{
-		"real":                    realBal,
-		"demo":                    demoBal,
-		"savings":                 savingsBal,
-		"kyc_tier":                tier,
-		"deposit_cap_usd":         depositCap,
-		"cumulative_deposit_usd":  cumulativeDeposit,
+		"real":                   realBal,
+		"demo":                   demoBal,
+		"savings":                savingsBal,
+		"kyc_tier":               tier,
+		"deposit_cap_usd":        depositCap,
+		"cumulative_deposit_usd": cumulativeDeposit,
 	})
 }
 
@@ -324,7 +335,7 @@ func (h *Handler) Withdraw(c *gin.Context) {
 // frontend WithdrawSheet NGN tab so the user sees "Account: ADAMU BELLO"
 // before confirming the transfer.
 func (h *Handler) ResolveNGNAccount(c *gin.Context) {
-	if h.paystack == nil {
+	if !h.ngnPayoutAvailable() {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "NGN payouts not configured"})
 		return
 	}
@@ -334,7 +345,7 @@ func (h *Handler) ResolveNGNAccount(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bank_code and account_number required"})
 		return
 	}
-	name, err := h.paystack.ResolveAccount(c.Request.Context(), bankCode, accountNumber)
+	name, err := h.router.ResolveAccount(c.Request.Context(), bankCode, accountNumber)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -361,7 +372,7 @@ func (h *Handler) ResolveNGNAccount(c *gin.Context) {
 // + /transfer calls run after commit so a Paystack failure rolls back to a
 // pending withdrawal an admin can retry from the dashboard.
 func (h *Handler) WithdrawNGN(c *gin.Context) {
-	if h.paystack == nil {
+	if !h.ngnPayoutAvailable() {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "NGN payouts not configured"})
 		return
 	}
@@ -381,7 +392,7 @@ func (h *Handler) WithdrawNGN(c *gin.Context) {
 	// Compute NGN payout at the customer rate. Lock the rate at request
 	// time and store it on the withdrawal so the admin sees exactly what
 	// the user was quoted, regardless of subsequent rate moves.
-	custRate := h.paystack.CurrentNGNCustomerRate()
+	custRate := payments.CustomerWithdrawRate(h.rates.GetUSDToNGN())
 	if custRate <= 0 {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "NGN rate unavailable"})
 		return
@@ -441,16 +452,23 @@ func (h *Handler) WithdrawNGN(c *gin.Context) {
 		return
 	}
 
-	// Now talk to Paystack. We do this AFTER commit because Paystack's
-	// /transferrecipient + /transfer is a multi-second external call; we
-	// don't want to hold a db tx open during it. If either call fails the
-	// withdrawal stays at status='pending' for an admin to retry — same
-	// as if the USDT broadcast failed mid-approval.
-	recipientCode, err := h.paystack.CreateRecipient(ctx,
-		req.BankAccountName, req.BankAccountNumber, req.BankCode)
+	// Now disburse. AFTER commit because the payout is a multi-second external
+	// call; we don't hold a db tx open across it. The Router tries the
+	// highest-priority healthy provider first (Monnify), then fails over to
+	// Paystack. On a provider error the withdrawal stays 'pending' for an admin
+	// retry — funds are already reserved from Savings. Reference = wID so the
+	// provider's disbursement webhook can settle THIS withdrawal row.
+	payRes, err := h.router.Payout(ctx, payments.PayoutRequest{
+		AccountName:   req.BankAccountName,
+		AccountNumber: req.BankAccountNumber,
+		BankCode:      req.BankCode,
+		NGNAmount:     ngnPayout,
+		Reference:     wID,
+		Narration:     fmt.Sprintf("Otuburu withdrawal %s", wID[:8]),
+	})
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{
-			"error":         "recipient create failed: " + err.Error(),
+			"error":         "payout failed: " + err.Error(),
 			"withdrawal_id": wID,
 			"status":        "pending",
 			"note":          "Funds reserved. Admin will retry the transfer.",
@@ -458,30 +476,13 @@ func (h *Handler) WithdrawNGN(c *gin.Context) {
 		return
 	}
 
-	// Persist the recipient code so admin retries can skip the lookup.
-	h.db.Exec(ctx, //nolint:errcheck
-		`UPDATE withdrawals SET paystack_recipient=$1 WHERE id=$2`,
-		recipientCode, wID,
-	)
-
-	transferCode, err := h.paystack.InitiateTransfer(ctx, recipientCode, ngnPayout,
-		fmt.Sprintf("Otuburu withdrawal %s", wID[:8]))
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{
-			"error":         "transfer init failed: " + err.Error(),
-			"withdrawal_id": wID,
-			"status":        "pending",
-			"note":          "Funds reserved. Admin will retry the transfer.",
-		})
-		return
-	}
-
-	// Transfer initiated successfully → status='approved', txid=transferCode.
-	// Final 'sent' status comes from the Paystack webhook when the bank
-	// confirms credit (transfer.success).
+	// Payout accepted → status='approved', txid=provider reference. The final
+	// 'sent'/'failed' transition (and refund-on-failure) comes from the
+	// provider's disbursement webhook — Monnify's settlement event hits
+	// /payments/monnify/webhook and is settled by Crediter.SettleDisbursement.
 	h.db.Exec(ctx, //nolint:errcheck
 		`UPDATE withdrawals SET status='approved', txid=$1 WHERE id=$2`,
-		transferCode, wID,
+		payRes.Reference, wID,
 	)
 
 	// Notify user — best-effort.
@@ -511,4 +512,3 @@ func (h *Handler) WithdrawNGN(c *gin.Context) {
 		"note":          "Bank credit usually arrives within minutes. We'll email you on confirmation.",
 	})
 }
-

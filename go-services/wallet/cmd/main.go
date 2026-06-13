@@ -139,10 +139,12 @@ func main() {
 		slog.Info("multi-PSP virtual-account rail enabled")
 	}
 
-	// Now that paystackH exists, build the wallet handler and register routes.
-	// gatewayURL + INTERNAL_SECRET drive the engine-side legs of transfers;
-	// without them, /wallet/transfers fails fast at the first AdjustBalance call.
-	walletH := wallet.NewHandler(pool, hd, mailer, paystackH,
+	// Build the wallet handler and register routes. NGN withdrawals now flow
+	// through the multi-PSP payRouter (Monnify→Paystack failover) with rates
+	// from rateFetcher. gatewayURL + INTERNAL_SECRET drive the engine-side legs
+	// of transfers; without them, /wallet/transfers fails fast at the first
+	// AdjustBalance call.
+	walletH := wallet.NewHandler(pool, hd, mailer, payRouter, rateFetcher,
 		os.Getenv("GATEWAY_URL"), os.Getenv("INTERNAL_SECRET"))
 	protected.GET("/wallet/deposit-address", walletH.DepositAddress)
 	protected.GET("/wallet/balance", walletH.Balance)

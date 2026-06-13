@@ -106,8 +106,10 @@ func (ph *ProviderHandler) VirtualAccount(c *gin.Context) {
 // and credits the account. Always 200 on a well-formed, authentic event so
 // Monnify stops retrying; only signature/parse failures return non-200.
 func (ph *ProviderHandler) MonnifyWebhook(c *gin.Context) {
-	provider := ph.router.VAProviderByName(monnifyName)
-	if provider == nil {
+	// Monnify delivers all event types (funding + disbursement) to one URL, so
+	// we resolve the concrete provider and branch on the event class.
+	mp, _ := ph.router.VAProviderByName(monnifyName).(*MonnifyProvider)
+	if mp == nil {
 		c.Status(http.StatusNotFound)
 		return
 	}
@@ -116,7 +118,26 @@ func (ph *ProviderHandler) MonnifyWebhook(c *gin.Context) {
 		c.Status(http.StatusBadRequest)
 		return
 	}
-	ev, err := provider.ParseDepositWebhook(c.Request, body)
+
+	// ── Payout settlement (withdrawal) ─────────────────────────────────────────
+	if mp.IsDisbursementEvent(body) {
+		dev, err := mp.ParseDisbursementWebhook(c.Request, body)
+		if err != nil {
+			slog.Warn("monnify disbursement webhook rejected", "err", err)
+			c.Status(http.StatusUnauthorized)
+			return
+		}
+		if err := ph.crediter.SettleDisbursement(context.Background(), dev); err != nil {
+			slog.Error("monnify disbursement settle failed", "ref", dev.Reference, "err", err)
+			c.Status(http.StatusInternalServerError) // let Monnify retry
+			return
+		}
+		c.Status(http.StatusOK)
+		return
+	}
+
+	// ── Deposit funding ────────────────────────────────────────────────────────
+	ev, err := mp.ParseDepositWebhook(c.Request, body)
 	if err != nil {
 		slog.Warn("monnify webhook rejected", "err", err)
 		c.Status(http.StatusUnauthorized)

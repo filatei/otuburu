@@ -186,6 +186,82 @@ func (c *Crediter) Credit(ctx context.Context, ev *DepositEvent) error {
 	return nil
 }
 
+// SettleDisbursement applies a payout settlement webhook to the matching
+// withdrawals row (keyed by id == ev.Reference, the reference we sent at payout
+// time). Idempotent: a flip only happens from a non-terminal status, so replays
+// are no-ops.
+//
+//   - "sent":   mark the withdrawal sent (terminal success).
+//   - "failed": mark failed AND refund the debited USD back to the user's
+//     Savings wallet (NGN withdrawals always source from savings).
+//   - "pending": no-op — await the final event.
+func (c *Crediter) SettleDisbursement(ctx context.Context, ev *DisbursementEvent) error {
+	if ev == nil || ev.Reference == "" {
+		return fmt.Errorf("settle: empty reference")
+	}
+	switch ev.Status {
+	case "sent":
+		_, err := c.db.Exec(ctx,
+			`UPDATE withdrawals SET status='sent'
+			 WHERE id=$1 AND status IN ('approved','pending')`,
+			ev.Reference,
+		)
+		if err == nil {
+			slog.Info("disbursement settled", "provider", ev.Provider, "withdrawal", ev.Reference, "status", "sent")
+		}
+		return err
+
+	case "failed":
+		tx, err := c.db.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx) //nolint:errcheck
+
+		// Gate the refund: only fires when the row is still non-terminal, so a
+		// duplicate FAILED webhook can't refund twice.
+		var userID, source string
+		var amount float64
+		err = tx.QueryRow(ctx,
+			`UPDATE withdrawals SET status='failed'
+			 WHERE id=$1 AND status IN ('approved','pending')
+			 RETURNING user_id, amount, source`,
+			ev.Reference,
+		).Scan(&userID, &amount, &source)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil // already terminal — idempotent no-op
+			}
+			return err
+		}
+
+		if source == "savings" {
+			if _, err = tx.Exec(ctx,
+				`UPDATE savings_wallets SET balance = balance + $1, updated_at = NOW()
+				 WHERE user_id = $2`,
+				amount, userID,
+			); err != nil {
+				return err
+			}
+		} else {
+			// NGN withdrawals are expected to source from savings; if a legacy
+			// row sourced from a trading account, we can't safely auto-refund
+			// here (engine-side balance). Flag for manual handling.
+			slog.Warn("disbursement failed for non-savings withdrawal — manual refund needed",
+				"withdrawal", ev.Reference, "source", source, "amount", amount)
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return err
+		}
+		slog.Info("disbursement failed + refunded to savings",
+			"provider", ev.Provider, "withdrawal", ev.Reference, "usd", amount)
+		return nil
+
+	default:
+		return nil // pending — nothing to do yet
+	}
+}
+
 // syncEngineBalance pushes the new balance into the engine book via the gateway,
 // identical to the Paystack handler's leg. Best-effort.
 func (c *Crediter) syncEngineBalance(ctx context.Context, accountID string) {
