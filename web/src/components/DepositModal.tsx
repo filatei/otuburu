@@ -18,7 +18,7 @@ interface Props {
 type Tab = 'usdt' | 'va' | 'ngn'
 
 export default function DepositModal({ user: _user, onClose, open = true }: Props) {
-  const [tab,        setTab]        = useState<Tab>('usdt')
+  const [tab,        setTab]        = useState<Tab>('va')
   const [address,    setAddress]    = useState<string | null>(null)
   const [addrLoading, setAddrLoading] = useState(false)
   const [addrErr,    setAddrErr]    = useState<string | null>(null)

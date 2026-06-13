@@ -205,9 +205,16 @@ func (m *MonnifyProvider) EnsureVirtualAccount(ctx context.Context, accountID, u
 	if custEmail == "" {
 		custEmail = userID + "@users.otuburu.money"
 	}
+	// Branded account label shown on the NUBAN (and in the user's bank app when
+	// they transfer). "Otuburu / <Name>" reads cleanly and reassures the user
+	// the destination is us. customerName stays the raw name for Monnify's KYC.
+	accountName := "Otuburu"
+	if name != "" && name != "Otuburu User" {
+		accountName = "Otuburu / " + name
+	}
 	reqBody := map[string]any{
 		"accountReference":     accountID,
-		"accountName":          name,
+		"accountName":          accountName,
 		"currencyCode":         "NGN",
 		"contractCode":         m.contractCode,
 		"customerEmail":        custEmail,
