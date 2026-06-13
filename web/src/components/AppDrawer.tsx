@@ -50,13 +50,17 @@ interface Props {
    *  (Sprint 5.10). Optional so older callers compile; when undefined,
    *  the Research item is hidden. */
   onResearch?:    () => void
+  /** Open the Connect Broker sheet (Sprint 5.9e) — list + add user's
+   *  external broker links (MetaApi / cTrader / OANDA). Optional;
+   *  hidden when undefined so unauthenticated drawers stay clean. */
+  onConnectBroker?: () => void
 }
 
 export default function AppDrawer({
   open, onClose, user, mode, activeAccountLabel, activeAccountKind,
   engineBalance, onModeToggle, onLogout, onEditProfile, onDeposit,
   onWithdraw, onHistory, onSwitchAccount, onTransfer, onAffiliate, onKyc, onGetApp, onContact,
-  onResearch,
+  onResearch, onConnectBroker,
 }: Props) {
   const drawerRef = useRef<HTMLDivElement>(null)
   const { t } = useT()
@@ -246,6 +250,9 @@ export default function AppDrawer({
           <Section title="Account">
             {onSwitchAccount && (
               <Item icon="🔁" label="Switch account" sub="Manage real accounts" badge="live" onClick={() => { onSwitchAccount(); onClose() }} />
+            )}
+            {onConnectBroker && (
+              <Item icon="🔗" label="Connect broker" sub="Link Exness MT5 / cTrader / OANDA" badge="new" onClick={() => { onConnectBroker(); onClose() }} />
             )}
             {onKyc && (
               <Item icon="🪪" label="Verify identity" sub="Unlock higher deposit limits" badge="new" onClick={() => { onKyc(); onClose() }} />
