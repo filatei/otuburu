@@ -5,6 +5,7 @@ import clsx from 'clsx'
 import type { Tick, SymbolInfo, AccountState } from '@/types'
 import { placeCFD, placeBinary, placeSpot } from '@/hooks/useAccount'
 import { displayNameOf, divisorOf, priceDecimals } from '@/lib/symbols'
+import type { PendingIntent } from '@/lib/pendingIntent'
 
 /**
  * MobileTradeForm — MT5-style order entry as the entire Trade tab.
@@ -47,10 +48,13 @@ interface Props {
   accountId:   string
   floatingPnl: number
   onTraded:    () => void
+  /** When set (real mode), an insufficient-balance trade is captured as a
+   *  pending intent and routed to the deposit flow instead of erroring. */
+  onNeedDeposit?: (intent: PendingIntent) => void
 }
 
 export default function MobileTradeForm({
-  symbol, info, lastTick, account, accountId, floatingPnl, onTraded,
+  symbol, info, lastTick, account, accountId, floatingPnl, onTraded, onNeedDeposit,
 }: Props) {
   const [stake,    setStake]    = useState(50)
   // Default to Spot — that's the primary retail product (fractional spot
@@ -88,12 +92,33 @@ export default function MobileTradeForm({
 
   const doTrade = async (dir: Direction) => {
     if (busy || !lastTick || stake <= 0) return
-    if (stake > balance) { notify('Insufficient balance', false); return }
+
+    const tpVal = parseFloat(tp) > 0 ? parseFloat(tp) : undefined
+    const slVal = parseFloat(sl) > 0 ? parseFloat(sl) : undefined
+
+    // Insufficient balance: in real mode capture the intent + route to deposit;
+    // otherwise (demo) keep the simple inline warning.
+    if (stake > balance) {
+      if (onNeedDeposit) {
+        let intent: PendingIntent
+        if (activeMode === 'binary') {
+          intent = { kind: 'binary', accountId, symbol, displaySym, dir: dir as 'UP' | 'DOWN', stake, ticks, requiredUSD: stake }
+        } else if (activeMode === 'cfd') {
+          const contractSize = info?.contract_size ?? 1
+          const lots = +(stake / (contractSize * lastTick.mid)).toFixed(4)
+          intent = { kind: 'cfd', accountId, symbol, displaySym, side: dir as 'BUY' | 'SELL', lots: lots || 0.01, tp: tpVal, sl: slVal, requiredUSD: stake }
+        } else {
+          intent = { kind: 'spot', accountId, symbol, displaySym, side: 'BUY', stake, tp: tpVal, sl: slVal, requiredUSD: stake }
+        }
+        onNeedDeposit(intent)
+        return
+      }
+      notify('Insufficient balance', false)
+      return
+    }
+
     setBusy(true)
     try {
-      const tpVal = parseFloat(tp) > 0 ? parseFloat(tp) : undefined
-      const slVal = parseFloat(sl) > 0 ? parseFloat(sl) : undefined
-
       let res: { error?: string }
       if (activeMode === 'binary') {
         res = await placeBinary(accountId, symbol, dir as 'UP' | 'DOWN', stake, ticks)

@@ -5,6 +5,7 @@ import type { Tick, SymbolInfo, AccountState } from '@/types'
 import { placeCFD, placeBinary, placeSpot } from '@/hooks/useAccount'
 import { displayNameOf, divisorOf, formatPrice, priceDecimals, MIN_SPOT_STAKE_USD } from '@/lib/symbols'
 import { isMarketOpen } from '@/lib/marketHours'
+import type { PendingIntent } from '@/lib/pendingIntent'
 
 interface Props {
   symbol:    string
@@ -14,6 +15,9 @@ interface Props {
   accountId: string
   onTraded:  () => void
   mobile?:   boolean
+  /** When set (real mode), an insufficient-balance trade is captured as a
+   *  pending intent and routed to the deposit flow instead of erroring. */
+  onNeedDeposit?: (intent: PendingIntent) => void
 }
 
 /** Quick-stake chip values in USD. MAX is computed from balance. */
@@ -23,7 +27,7 @@ type Mode = 'binary' | 'cfd' | 'spot'
 
 const PAYOUT = 0.85  // house pays 85 % on binary wins
 
-export default function TradePanel({ symbol, info, lastTick, account, accountId, onTraded, mobile }: Props) {
+export default function TradePanel({ symbol, info, lastTick, account, accountId, onTraded, mobile, onNeedDeposit }: Props) {
   const [mode,      setMode]      = useState<Mode>('binary')
   const [stake,     setStake]     = useState('10')
   const [lots,      setLots]      = useState('0.01')
@@ -50,11 +54,36 @@ export default function TradePanel({ symbol, info, lastTick, account, accountId,
 
   const doTrade = async (dir: 'UP' | 'DOWN' | 'BUY' | 'SELL') => {
     if (busy || !lastTick) return
+
+    const tpVal = parseFloat(tp) > 0 ? parseFloat(tp) : undefined
+    const slVal = parseFloat(sl) > 0 ? parseFloat(sl) : undefined
+
+    // Insufficient-balance capture: in real mode (onNeedDeposit provided), if
+    // the order can't be afforded, remember it and route to the deposit flow
+    // instead of letting the engine reject it. The page resurfaces it for a
+    // one-tap confirm once the deposit credits.
+    if (onNeedDeposit && account) {
+      let intent: PendingIntent
+      if (mode === 'binary') {
+        const s = parseFloat(stake) || 10
+        intent = { kind: 'binary', accountId, symbol, displaySym, dir: dir as 'UP' | 'DOWN', stake: s, ticks, requiredUSD: s }
+      } else if (mode === 'cfd') {
+        const l = parseFloat(lots) || 0.01
+        const margin = info ? (l * info.contract_size * lastTick.mid) / info.leverage : l
+        intent = { kind: 'cfd', accountId, symbol, displaySym, side: dir as 'BUY' | 'SELL', lots: l, tp: tpVal, sl: slVal, requiredUSD: margin }
+      } else {
+        const s = parseFloat(spotStake) || 50
+        intent = { kind: 'spot', accountId, symbol, displaySym, side: dir as 'BUY' | 'SELL', stake: s, tp: tpVal, sl: slVal, requiredUSD: s }
+      }
+      if (intent.requiredUSD > account.balance + 1e-9) {
+        onNeedDeposit(intent)
+        return
+      }
+    }
+
     setBusy(true)
     try {
       let res: { error?: string }
-      const tpVal = parseFloat(tp) > 0 ? parseFloat(tp) : undefined
-      const slVal = parseFloat(sl) > 0 ? parseFloat(sl) : undefined
 
       if (mode === 'binary') {
         res = await placeBinary(accountId, symbol, dir as 'UP' | 'DOWN', parseFloat(stake) || 10, ticks)

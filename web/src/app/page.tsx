@@ -19,11 +19,13 @@ import AuthModal           from '@/components/AuthModal'
 import ProfileModal        from '@/components/ProfileModal'
 import AppDrawer           from '@/components/AppDrawer'
 import DepositModal        from '@/components/DepositModal'
+import PendingTradeSheet    from '@/components/PendingTradeSheet'
 import TransferModal       from '@/components/TransferModal'
 import MT5TradeTicket      from '@/components/MT5TradeTicket'
 import ManageSymbolsSheet  from '@/components/ManageSymbolsSheet'
 import AffiliateSheet      from '@/components/AffiliateSheet'
 import KycSheet            from '@/components/KycSheet'
+import ConnectBrokerSheet  from '@/components/ConnectBrokerSheet'
 import GetAppModal         from '@/components/GetAppModal'
 import ContactModal        from '@/components/ContactModal'
 import SymbolActionsSheet     from '@/components/SymbolActionsSheet'
@@ -39,6 +41,7 @@ import { useDailyPnLBySymbol } from '@/hooks/useDailyPnL'
 import { useWatchlist } from '@/hooks/useWatchlist'
 import { getWatchlist } from '@/lib/watchlist'
 import { captureRefFromUrl } from '@/lib/affiliate'
+import type { PendingIntent } from '@/lib/pendingIntent'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://otuburu.torama.money'
 
@@ -114,6 +117,8 @@ export default function TradingPage() {
   const [affiliateOpen, setAffiliateOpen] = useState(false)
   /** KYC / Verify-identity sheet open state. */
   const [kycOpen,       setKycOpen]       = useState(false)
+  /** Connect Broker sheet open state (Sprint 5.9e). */
+  const [connectBrokerOpen, setConnectBrokerOpen] = useState(false)
   /** Phase 2 multi-account: when in real mode, which real account is active.
    *  Persisted per-user in localStorage so a session restore picks up where
    *  the user left off. Falls back to the first real account on first session. */
@@ -324,6 +329,22 @@ export default function TradingPage() {
     refreshBalances()
   }, [refresh, refreshBalances])
 
+  // ── Pending trade intent (deposit → auto-resume) ──────────────────────────
+  // When a real-mode trade can't be afforded, the trade panels hand us the
+  // captured intent and we open the deposit flow. The engine balance updates
+  // over the existing WebSocket state pump when the deposit credits; once it
+  // covers the order we close the deposit sheet and surface a one-tap confirm.
+  const [pendingIntent, setPendingIntent] = useState<PendingIntent | null>(null)
+  const handleNeedDeposit = useCallback((intent: PendingIntent) => {
+    setPendingIntent(intent)
+    setDepositOpen(true)
+  }, [])
+  const intentFunded =
+    !!pendingIntent && !!account && account.balance + 1e-9 >= pendingIntent.requiredUSD
+  useEffect(() => {
+    if (intentFunded) setDepositOpen(false)
+  }, [intentFunded])
+
   const openCount = positions.length + binaries.length + spots.length
 
   // Aggregate floating P&L across all open positions and spots — drives the
@@ -345,6 +366,18 @@ export default function TradingPage() {
       {/* DepositModal stays mounted while `user` is present so BottomSheet
           can play its exit animation when `open` flips back to false. */}
       {user && <DepositModal open={depositOpen} user={user} onClose={() => setDepositOpen(false)} />}
+      {/* Deposit → auto-resume: once a pending trade is funded, surface it for
+          a one-tap confirm. onDone clears the intent (and places, if confirmed). */}
+      {user && (
+        <PendingTradeSheet
+          open={intentFunded}
+          intent={pendingIntent}
+          onDone={(placed) => {
+            setPendingIntent(null)
+            if (placed) { handleTraded(); setMobileTab('positions') }
+          }}
+        />
+      )}
       {/* Transfer between Savings + trading accounts. onTransferred fires
           refreshBalances() so the drawer Savings card + Header balance
           update immediately without a page reload. */}
@@ -411,6 +444,27 @@ export default function TradingPage() {
         />
       )}
 
+      {/* Connect Broker sheet (Sprint 5.9e) — list + add user_lp_links.
+          Authed-only. On successful create, refresh /auth/me so the new
+          broker account flows into user.accounts (so the picker sees
+          it) and auto-switch to the new broker so the user can trade
+          immediately without an extra picker step. */}
+      {user && (
+        <ConnectBrokerSheet
+          open={connectBrokerOpen}
+          onClose={() => setConnectBrokerOpen(false)}
+          onCreated={(brokerAccountId) => {
+            // refreshBalances re-runs /auth/me; the next render's
+            // user.accounts will include the broker row.
+            refreshBalances()
+            // selectRealAccount sets the active non-demo account and
+            // flips mode to 'real'. From the user's POV: broker is
+            // selected, trade panel is now wired to it.
+            selectRealAccount(brokerAccountId)
+          }}
+        />
+      )}
+
       {/* MT5-style full-screen trade ticket — mounted on demand from
           SymbolActionsSheet → New Order. The ticket subscribes to the
           symbol's live tick via the allTicks map so BID/ASK refresh
@@ -456,6 +510,9 @@ export default function TradingPage() {
         // Static export → /research/index.html. window.location avoids
         // pulling next/navigation into this already-large component.
         onResearch={() => { window.location.href = '/research/' }}
+        // Sprint 5.9e — Connect Broker sheet. Authed-only because
+        // /api/lp-links is JWT-gated; unauthed users can't link.
+        onConnectBroker={user ? () => setConnectBrokerOpen(true) : undefined}
       />
 
       {/* "Get the App" sheet — Android APK + iOS PWA card. Always mounted
@@ -542,6 +599,7 @@ export default function TradingPage() {
           account={account}
           accountId={accountId}
           onTraded={handleTraded}
+          onNeedDeposit={mode === 'real' ? handleNeedDeposit : undefined}
         />
       </div>
 
@@ -588,6 +646,7 @@ export default function TradingPage() {
                 accountId={accountId}
                 floatingPnl={floatingPnl}
                 onTraded={() => { handleTraded(); setMobileTab('positions') }}
+                onNeedDeposit={mode === 'real' ? handleNeedDeposit : undefined}
               />
             </div>
           )}
