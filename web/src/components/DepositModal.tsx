@@ -15,7 +15,7 @@ interface Props {
   open?:   boolean
 }
 
-type Tab = 'usdt' | 'ngn'
+type Tab = 'usdt' | 'va' | 'ngn'
 
 export default function DepositModal({ user: _user, onClose, open = true }: Props) {
   const [tab,        setTab]        = useState<Tab>('usdt')
@@ -31,6 +31,14 @@ export default function DepositModal({ user: _user, onClose, open = true }: Prop
   const [ngnRate,      setNgnRate]      = useState<number | null>(null) // NGN per 1 USD (customer rate, includes 2% spread)
   const [psLoading,    setPsLoading]    = useState(false)
   const [psErr,        setPsErr]        = useState<string | null>(null)
+
+  // Instant NGN bank-transfer tab — a static virtual account (NUBAN) the user
+  // funds from any banking app; credited automatically via the Monnify webhook.
+  // The number is permanent, so one fetch per modal-open (or cache) is plenty.
+  const [va,        setVa]        = useState<{ bank_name: string; account_number: string; account_name: string } | null>(null)
+  const [vaLoading, setVaLoading] = useState(false)
+  const [vaErr,     setVaErr]     = useState<string | null>(null)
+  const [vaCopied,  setVaCopied]  = useState(false)
 
   // Load deposit address when USDT tab is shown
   useEffect(() => {
@@ -61,11 +69,33 @@ export default function DepositModal({ user: _user, onClose, open = true }: Prop
     return () => { cancelled = true }
   }, [tab, ngnRate])
 
+  // Provision / load the user's virtual account when the transfer tab opens.
+  // Mirrors the USDT address pattern: foreground fetch with a spinner, then
+  // the NUBAN is shown and reusable.
+  useEffect(() => {
+    if (tab !== 'va' || va) return
+    setVaLoading(true)
+    setVaErr(null)
+    authFetch(`${API_BASE}/wallet/ngn/virtual-account`)
+      .then(r => r.ok ? r.json() : Promise.reject(r))
+      .then(d => setVa({ bank_name: d.bank_name, account_number: d.account_number, account_name: d.account_name }))
+      .catch(() => setVaErr('Could not load your transfer account. Please try again in a moment.'))
+      .finally(() => setVaLoading(false))
+  }, [tab, va])
+
   const handleCopy = () => {
     if (!address) return
     navigator.clipboard.writeText(address).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  const handleCopyVA = () => {
+    if (!va) return
+    navigator.clipboard.writeText(va.account_number).then(() => {
+      setVaCopied(true)
+      setTimeout(() => setVaCopied(false), 2000)
     })
   }
 
@@ -130,7 +160,8 @@ export default function DepositModal({ user: _user, onClose, open = true }: Prop
         {/* Tabs — pinned at the top of the scrollable content area */}
         <div className="flex border-b border-border sticky top-0 bg-panel z-10">
           <TabBtn label="USDT (TRC20)" active={tab === 'usdt'} onClick={() => setTab('usdt')} />
-          <TabBtn label="NGN (Paystack)" active={tab === 'ngn'}  onClick={() => setTab('ngn')}  />
+          <TabBtn label="Bank Transfer" active={tab === 'va'}  onClick={() => setTab('va')}  />
+          <TabBtn label="Card / USSD"  active={tab === 'ngn'}  onClick={() => setTab('ngn')}  />
         </div>
 
         {/* Content */}
@@ -187,6 +218,56 @@ export default function DepositModal({ user: _user, onClose, open = true }: Prop
                     <p>⚠️ Only send <strong>USDT on the TRON (TRC20) network</strong>.</p>
                     <p>⚠️ Sending other tokens or on other networks will result in permanent loss.</p>
                     <p>⚠️ Minimum deposit: <strong>$1 USDT</strong>.</p>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── Instant NGN bank-transfer tab (virtual account) ───────────── */}
+          {tab === 'va' && (
+            <div className="space-y-4">
+              <p className="text-dim text-sm leading-relaxed">
+                Transfer <span className="text-text font-semibold">any amount in Naira</span> to your
+                personal account below from any bank app. Your balance is credited automatically,
+                usually within a minute.
+              </p>
+
+              {vaLoading && (
+                <div className="flex items-center justify-center py-8">
+                  <span className="animate-spin text-brand text-2xl">⟳</span>
+                </div>
+              )}
+
+              {vaErr && (
+                <div className="bg-down/10 border border-down/30 rounded-xl px-4 py-3 text-down text-sm">
+                  {vaErr}
+                </div>
+              )}
+
+              {va && !vaLoading && (
+                <>
+                  <div className="bg-surface rounded-xl px-4 py-3 space-y-3">
+                    <Row label="Bank" value={va.bank_name} />
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1">
+                        <p className="text-dim text-[11px] uppercase tracking-wider">Account Number</p>
+                        <p className="font-mono text-lg text-text tracking-wide">{va.account_number}</p>
+                      </div>
+                      <button
+                        onClick={handleCopyVA}
+                        className="shrink-0 px-3 py-1.5 bg-brand/10 hover:bg-brand/20 text-brand text-xs font-semibold rounded-lg border border-brand/30 transition-colors"
+                      >
+                        {vaCopied ? '✓ Copied' : 'Copy'}
+                      </button>
+                    </div>
+                    <Row label="Account Name" value={va.account_name} />
+                  </div>
+
+                  <div className="text-[11px] text-dim space-y-1">
+                    <p>✓ Reusable — this account is permanently yours.</p>
+                    <p>✓ A 2% spread over the interbank NGN/USD rate is applied on credit.</p>
+                    <p>⚠️ Send only Naira bank transfers to this account.</p>
                   </div>
                 </>
               )}
@@ -292,6 +373,15 @@ export default function DepositModal({ user: _user, onClose, open = true }: Prop
         </div>
       </div>
     </BottomSheet>
+  )
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-dim text-[11px] uppercase tracking-wider">{label}</span>
+      <span className="text-text text-sm font-semibold text-right">{value}</span>
+    </div>
   )
 }
 
