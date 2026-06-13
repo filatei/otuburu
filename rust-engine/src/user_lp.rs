@@ -178,12 +178,13 @@ impl UserLpCache {
         Some(adapter)
     }
 
-    /// Drop the cached adapter for an account. Called after admin
-    /// flips routing_mode OFF or user deletes their link, so the
-    /// next Passthrough order re-fetches credentials. v1 doesn't
-    /// wire this in yet — the engine just runs with the stale
-    /// adapter until restart. Documented limitation.
-    #[allow(dead_code)] // wired in v2
+    /// Drop the cached adapter for an account so the next
+    /// `get_or_build` re-fetches credentials from Postgres. Wired into
+    /// the broker-balance poll loop (Sprint 5.9g): when an LP call
+    /// returns 401, the poll invalidates here so a freshly re-linked
+    /// token takes effect on the following pass without an engine
+    /// restart. Also intended for the admin "flip routing OFF" / link-
+    /// delete paths.
     pub async fn invalidate(&self, otuburu_account_id: Uuid) {
         self.map.write().await.remove(&otuburu_account_id);
     }

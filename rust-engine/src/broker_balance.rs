@@ -145,7 +145,27 @@ async fn poll_one(state: &SharedState, account_id: Uuid) -> anyhow::Result<()> {
             anyhow::anyhow!("no LP adapter for broker account (link missing or kind unsupported)")
         })?;
 
-    let summary = adapter.account_summary().await?;
+    let summary = match adapter.account_summary().await {
+        Ok(s) => s,
+        Err(e) => {
+            // If the LP rejected our credentials, the cached adapter is
+            // holding a stale token — drop it so the next poll rebuilds
+            // from Postgres and picks up a freshly re-linked token
+            // WITHOUT an engine restart. This is what makes token
+            // rotation self-healing (Sprint 5.9g); before it, a 401 here
+            // would loop forever against the dead cached adapter because
+            // UserLpCache had no automatic invalidation.
+            if is_auth_error(&e) {
+                state.user_lp_cache.invalidate(account_id).await;
+                tracing::info!(
+                    %account_id,
+                    "broker balance: LP auth rejected — dropped cached adapter, \
+                     will rebuild from Postgres on next poll"
+                );
+            }
+            return Err(e);
+        }
+    };
     let lp_balance = summary.balance;
 
     // ── In-memory engine update ───────────────────────────────────────
@@ -207,4 +227,42 @@ async fn poll_one(state: &SharedState, account_id: Uuid) -> anyhow::Result<()> {
         "broker balance synced"
     );
     Ok(())
+}
+
+/// True when an LP error looks like an authentication/authorization
+/// failure — i.e. an expired or revoked broker token. The liquidity-
+/// bridge adapters surface HTTP failures as opaque `anyhow` errors
+/// carrying the status line (e.g. MetaApi returns
+/// `metaapi 401 Unauthorized: {...}`), so we match on the rendered
+/// chain rather than a typed variant. `{:#}` flattens the full error
+/// chain in case a future adapter wraps the status in extra context.
+fn is_auth_error(e: &anyhow::Error) -> bool {
+    let msg = format!("{e:#}");
+    msg.contains("401") || msg.contains("Unauthorized")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_auth_error;
+
+    #[test]
+    fn detects_metaapi_401() {
+        // Shape of the real error seen in production logs.
+        let e = anyhow::anyhow!("metaapi 401 Unauthorized: invalid auth-token header");
+        assert!(is_auth_error(&e));
+    }
+
+    #[test]
+    fn detects_bare_unauthorized() {
+        let e = anyhow::anyhow!("UnauthorizedError");
+        assert!(is_auth_error(&e));
+    }
+
+    #[test]
+    fn ignores_transient_failures() {
+        // 5xx / timeouts must NOT invalidate the adapter — the token is
+        // fine, the LP is just briefly unreachable.
+        let e = anyhow::anyhow!("metaapi 503 Service Unavailable");
+        assert!(!is_auth_error(&e));
+    }
 }
