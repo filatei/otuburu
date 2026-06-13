@@ -29,7 +29,7 @@ func main() {
 	// exist purely to make the dependency visible and to crash cleanly here.
 	// See feedback_otuburu_env_passthrough.md.
 	mustEnv("INTERNAL_SECRET", "wallet→gateway server-to-server auth")
-	mustEnv("JWT_SECRET",      "HS256 user JWT signing key")
+	mustEnv("JWT_SECRET", "HS256 user JWT signing key")
 
 	// ── Database ──────────────────────────────────────────────────────────────
 	pool, err := db.Connect(ctx)
@@ -114,6 +114,31 @@ func main() {
 	paystackH := payments.New(pool, rateFetcher, mailer)
 	paystackH.RegisterRoutes(protected, r.Group("/"))
 
+	// ── Multi-PSP router ──────────────────────────────────────────────────────
+	// Provider-agnostic payment layer so we are not blocked on a single PSP's
+	// approval/uptime. Register providers in priority order (cheapest/most
+	// reliable first). Monnify is the default instant NGN deposit rail via
+	// reserved virtual accounts; nil providers (unconfigured) are skipped.
+	// See payments/provider.go + README_PAYMENTS_MULTIPSP.md.
+	payRouter := payments.NewRouter()
+	// Guard against the typed-nil-interface trap: only register Monnify when it
+	// is actually configured, so the Router never holds a non-nil interface
+	// wrapping a nil *MonnifyProvider.
+	if monnifyP := payments.NewMonnify(); monnifyP != nil { // nil unless MONNIFY_* env is set
+		payRouter.RegisterVA(monnifyP)
+		payRouter.RegisterPayout(monnifyP)
+	}
+	if paystackPayout := payments.NewPaystackProvider(paystackH); paystackPayout != nil {
+		payRouter.RegisterPayout(paystackPayout) // fail-over payout
+	}
+
+	crediter := payments.NewCrediter(pool, rateFetcher,
+		os.Getenv("GATEWAY_URL"), os.Getenv("INTERNAL_SECRET"), mailer)
+	if provH := payments.NewProviderHandler(pool, payRouter, crediter); provH != nil {
+		provH.RegisterRoutes(protected, r.Group("/"))
+		slog.Info("multi-PSP virtual-account rail enabled")
+	}
+
 	// Now that paystackH exists, build the wallet handler and register routes.
 	// gatewayURL + INTERNAL_SECRET drive the engine-side legs of transfers;
 	// without them, /wallet/transfers fails fast at the first AdjustBalance call.
@@ -151,16 +176,16 @@ func main() {
 	// Note: avoid r.Group("/admin") alongside r.GET("/admin") — Gin's router
 	// tree treats the group prefix as a node and drops the exact-match handler.
 	// Apply the auth middleware inline per route instead.
-	adminH   := admin.New(pool, hd, sw, mailer)
+	adminH := admin.New(pool, hd, sw, mailer)
 	adminAuth := admin.Middleware()
-	r.GET("/admin",                        adminH.UI) // HTML — no auth (JS handles it)
-	r.GET("/admin/dashboard",              adminAuth, adminH.Dashboard)
-	r.GET("/admin/users",                  adminAuth, adminH.Users)
-	r.GET("/admin/deposits",               adminAuth, adminH.Deposits)
-	r.GET("/admin/withdrawals",            adminAuth, adminH.Withdrawals)
+	r.GET("/admin", adminH.UI) // HTML — no auth (JS handles it)
+	r.GET("/admin/dashboard", adminAuth, adminH.Dashboard)
+	r.GET("/admin/users", adminAuth, adminH.Users)
+	r.GET("/admin/deposits", adminAuth, adminH.Deposits)
+	r.GET("/admin/withdrawals", adminAuth, adminH.Withdrawals)
 	r.POST("/admin/withdrawals/:id/approve", adminAuth, adminH.ApproveWithdrawal)
-	r.POST("/admin/withdrawals/:id/reject",  adminAuth, adminH.RejectWithdrawal)
-	r.POST("/admin/sweep",                 adminAuth, adminH.ManualSweep)
+	r.POST("/admin/withdrawals/:id/reject", adminAuth, adminH.RejectWithdrawal)
+	r.POST("/admin/sweep", adminAuth, adminH.ManualSweep)
 
 	port := os.Getenv("PORT")
 	if port == "" {

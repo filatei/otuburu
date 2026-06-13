@@ -219,6 +219,52 @@ CREATE TABLE IF NOT EXISTS fx_quotes (
 
 CREATE INDEX IF NOT EXISTS idx_fx_quotes_created ON fx_quotes(created_at DESC);
 
+-- ── Multi-PSP virtual accounts (instant NGN deposit rail) ────────────────────
+-- Static NUBANs issued per account by a virtual-account provider (Monnify,
+-- Flutterwave, ...). The user funds it with an ordinary bank transfer; the
+-- provider webhook maps back to us via `reference` (= account_id). One row per
+-- (provider, account_id): a user keeps the same number forever, even if we add
+-- providers later. Provider-agnostic by design — see payments/provider.go.
+CREATE TABLE IF NOT EXISTS virtual_accounts (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id     UUID NOT NULL REFERENCES accounts(id),
+    user_id        UUID NOT NULL REFERENCES users(id),
+    provider       TEXT NOT NULL,            -- 'monnify','flutterwave',...
+    account_number TEXT NOT NULL,            -- the NUBAN the user transfers to
+    bank_name      TEXT,
+    bank_code      TEXT,
+    account_name   TEXT,
+    reference      TEXT NOT NULL,            -- provider-side account reference (= account_id)
+    created_at     TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (provider, account_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_virtual_accounts_account ON virtual_accounts(account_id);
+
+-- ── Provider deposits (generic NGN credit ledger, idempotency + FX audit) ────
+-- The provider-agnostic analogue of paystack_payments + fx_quotes combined.
+-- Every inbound virtual-account funding lands here exactly once — UNIQUE
+-- (provider, reference) is the idempotency key against webhook replays. Also
+-- the FX audit trail: interbank rate, spread, customer rate, NGN in, USD out.
+CREATE TABLE IF NOT EXISTS provider_deposits (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider       TEXT NOT NULL,
+    reference      TEXT NOT NULL,            -- provider transaction reference
+    account_id     UUID NOT NULL REFERENCES accounts(id),
+    ngn_amount     NUMERIC(20,2) NOT NULL,   -- gross naira received
+    usd_credited   NUMERIC(20,6),            -- USD posted (ngn / customer_rate)
+    interbank_rate NUMERIC(20,6),            -- NGN per 1 USD at credit time
+    spread_pct     NUMERIC(8,4),             -- e.g. 0.0200 = 2%
+    customer_rate  NUMERIC(20,6),            -- interbank * (1 + spread_pct)
+    status         TEXT NOT NULL DEFAULT 'pending'
+                   CHECK (status IN ('pending','processing','confirmed','failed')),
+    created_at     TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (provider, reference)
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_deposits_account ON provider_deposits(account_id);
+CREATE INDEX IF NOT EXISTS idx_provider_deposits_created ON provider_deposits(created_at DESC);
+
 -- ── Savings wallet (one per user, USD-denominated, no positions) ─────────────
 -- The SOLE origin for withdrawals. Users transfer profits + idle balance
 -- from trading accounts into Savings, then withdraw from there. This forces

@@ -66,7 +66,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.25"
           cache-dependency-path: "go-services/**/go.sum"
 
       - name: Install protoc-gen-go tools
@@ -80,14 +80,14 @@ jobs:
 
       - name: Vet
         run: |
-          for mod in account gateway risk-monitor; do
+          for mod in account gateway risk-monitor wallet; do
             echo "--- go vet $mod ---"
             (cd $mod && go vet ./...)
           done
 
       - name: Test
         run: |
-          for mod in account gateway risk-monitor; do
+          for mod in account gateway risk-monitor wallet; do
             echo "--- go test $mod ---"
             (cd $mod && go test ./... -race -timeout 60s)
           done
