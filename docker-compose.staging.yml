@@ -142,6 +142,19 @@ services:
       # 'Unexpected non-whitespace character after JSON at position 4'.
       PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
       PAYSTACK_PUBLIC_KEY: ${PAYSTACK_PUBLIC_KEY:-}
+      # Monnify — instant NGN deposits (reserved virtual accounts) + NGN
+      # disbursements (withdrawal fail-over). If API key / secret / contract
+      # are unset, NewMonnify() returns nil and the virtual-account rail is
+      # simply disabled — same nil-safe pattern as Paystack above.
+      # MONNIFY_SECRET_KEY also keys the webhook HMAC-SHA512 verification.
+      # MONNIFY_WALLET_ACCOUNT is optional: omit to run deposits only (no
+      # payouts). MONNIFY_BASE_URL defaults to live; set the sandbox URL to
+      # test. See payments/README_PAYMENTS_MULTIPSP.md.
+      MONNIFY_API_KEY:        ${MONNIFY_API_KEY:-}
+      MONNIFY_SECRET_KEY:     ${MONNIFY_SECRET_KEY:-}
+      MONNIFY_CONTRACT_CODE:  ${MONNIFY_CONTRACT_CODE:-}
+      MONNIFY_WALLET_ACCOUNT: ${MONNIFY_WALLET_ACCOUNT:-}
+      MONNIFY_BASE_URL:       ${MONNIFY_BASE_URL:-https://api.monnify.com}
       # Frontend redirect target for Paystack's success callback URL.
       APP_URL:           ${APP_URL:-https://otuburu.torama.money}
       # Smile Identity — KYC tier 1 (NIN/BVN/passport verification).

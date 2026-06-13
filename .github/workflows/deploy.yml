@@ -286,6 +286,12 @@ jobs:
             # ── Paystack (NGN deposits + NGN withdrawals via Transfer API) ────
             PAYSTACK_SECRET_KEY=${{ secrets.PAYSTACK_SECRET_KEY }}
             PAYSTACK_PUBLIC_KEY=${{ secrets.PAYSTACK_PUBLIC_KEY }}
+            # ── Monnify (instant NGN virtual-account deposits + disbursements) ─
+            MONNIFY_API_KEY=${{ secrets.MONNIFY_API_KEY }}
+            MONNIFY_SECRET_KEY=${{ secrets.MONNIFY_SECRET_KEY }}
+            MONNIFY_CONTRACT_CODE=${{ secrets.MONNIFY_CONTRACT_CODE }}
+            MONNIFY_WALLET_ACCOUNT=${{ secrets.MONNIFY_WALLET_ACCOUNT }}
+            MONNIFY_BASE_URL=${{ secrets.MONNIFY_BASE_URL || 'https://api.monnify.com' }}
             # Paystack success-callback base. Without this, Paystack returns
             # users to a bare '?deposit=success' (relative) on their hosted
             # page which is rejected as an invalid redirect.
