@@ -507,7 +507,8 @@ func (h *Handler) WithdrawNGN(c *gin.Context) {
 		"usd_debited":   req.Amount,
 		"ngn_payout":    ngnPayout,
 		"rate":          custRate,
-		"transfer_code": transferCode,
+		"payout_ref":    payRes.Reference,
+		"payout_via":    payRes.Provider,
 		"status":        "approved",
 		"note":          "Bank credit usually arrives within minutes. We'll email you on confirmation.",
 	})
