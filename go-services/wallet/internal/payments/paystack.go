@@ -1,8 +1,9 @@
 // Package payments handles fiat and crypto payment channel integrations.
 //
 // Paystack (NGN):
-//   POST /payments/paystack/initiate  — create a Paystack payment link
-//   POST /payments/paystack/webhook   — receive confirmed payment events
+//
+//	POST /payments/paystack/initiate  — create a Paystack payment link
+//	POST /payments/paystack/webhook   — receive confirmed payment events
 //
 // The webhook verifies Paystack's HMAC-SHA512 signature before crediting any account.
 // Paystack sends NGN; we convert to USD at USD_TO_NGN_RATE (env) for the account credit.
@@ -143,10 +144,10 @@ func (h *Handler) Initiate(c *gin.Context) {
 	// Charge customer at customer_rate (interbank + 2% spread). The user
 	// gets credited their requested USD; we pocket the spread to cover the
 	// real bank FX cost when we settle out plus a small protective buffer.
-	interbank   := h.rates.GetUSDToNGN()
-	custRate    := customerRate(interbank)
-	amountKobo  := int64(req.AmountUSD * custRate * 100) // Paystack uses kobo (1/100 NGN)
-	ref         := fmt.Sprintf("OTU-%d-%x", time.Now().UnixMilli(), rand.Int31()) //nolint:gosec
+	interbank := h.rates.GetUSDToNGN()
+	custRate := customerRate(interbank)
+	amountKobo := int64(req.AmountUSD * custRate * 100)                   // Paystack uses kobo (1/100 NGN)
+	ref := fmt.Sprintf("OTU-%d-%x", time.Now().UnixMilli(), rand.Int31()) //nolint:gosec
 
 	callbackURL := os.Getenv("APP_URL") // e.g. https://otuburu.torama.money
 	if callbackURL == "" {
@@ -239,10 +240,10 @@ func (h *Handler) Webhook(c *gin.Context) {
 	var event struct {
 		Event string `json:"event"`
 		Data  struct {
-			Reference string  `json:"reference"`
-			Status    string  `json:"status"`
-			Amount    int64   `json:"amount"` // kobo
-			Currency  string  `json:"currency"`
+			Reference string `json:"reference"`
+			Status    string `json:"status"`
+			Amount    int64  `json:"amount"` // kobo
+			Currency  string `json:"currency"`
 			Metadata  struct {
 				AccountID string  `json:"account_id"`
 				UserID    string  `json:"user_id"`
@@ -281,12 +282,13 @@ func (h *Handler) Webhook(c *gin.Context) {
 // Body: { "reference": "OTU-..." }
 //
 // Response:
-//   200 + { "status": "confirmed", "amount_usd": 12.34 } — credit applied
-//        OR { "status": "already_confirmed" }            — webhook beat us to it
-//   400 + { "error": "..." } — bad input
-//   402 + { "error": "payment not successful" } — Paystack says not paid
-//   404 + { "error": "reference not found" } — never seen this ref
-//   500 + { "error": "..." } — internal
+//
+//	200 + { "status": "confirmed", "amount_usd": 12.34 } — credit applied
+//	     OR { "status": "already_confirmed" }            — webhook beat us to it
+//	400 + { "error": "..." } — bad input
+//	402 + { "error": "payment not successful" } — Paystack says not paid
+//	404 + { "error": "reference not found" } — never seen this ref
+//	500 + { "error": "..." } — internal
 func (h *Handler) Verify(c *gin.Context) {
 	claims := c.MustGet("claims").(*auth.Claims)
 	var req struct {
@@ -334,7 +336,7 @@ func (h *Handler) Verify(c *gin.Context) {
 	if psResp.Status != "success" {
 		// Could be 'failed', 'abandoned', 'pending'. None of these credit.
 		c.JSON(http.StatusPaymentRequired, gin.H{
-			"error":          "payment not successful",
+			"error":           "payment not successful",
 			"paystack_status": psResp.Status,
 		})
 		return
@@ -358,9 +360,9 @@ func (h *Handler) Verify(c *gin.Context) {
 // response we actually use. Full doc:
 // https://paystack.com/docs/api/transaction/#verify
 type paystackVerifyResp struct {
-	Status   string `json:"status"`  // 'success', 'failed', 'abandoned', 'pending'
-	Amount   int64  `json:"amount"`  // kobo
-	Currency string `json:"currency"`
+	Status    string `json:"status"` // 'success', 'failed', 'abandoned', 'pending'
+	Amount    int64  `json:"amount"` // kobo
+	Currency  string `json:"currency"`
 	Reference string `json:"reference"`
 }
 
@@ -383,9 +385,9 @@ func (h *Handler) paystackVerify(ctx context.Context, reference string) (*paysta
 		return nil, fmt.Errorf("paystack verify HTTP %d", resp.StatusCode)
 	}
 	var envelope struct {
-		Status  bool                `json:"status"`  // true on success
-		Message string              `json:"message"`
-		Data    paystackVerifyResp  `json:"data"`
+		Status  bool               `json:"status"` // true on success
+		Message string             `json:"message"`
+		Data    paystackVerifyResp `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		return nil, err
@@ -416,9 +418,9 @@ func (h *Handler) creditPaystack(ctx context.Context, ref, accountID string, amo
 	// If the kobo metadata was tampered we'd detect it via the amount-vs-kobo
 	// audit row in fx_quotes (admin can spot inconsistencies post-hoc).
 	usdCredited := amountUSD
-	ngnCharged  := float64(amountKobo) / 100.0
-	interbank   := h.rates.GetUSDToNGN()
-	custRate    := customerRate(interbank)
+	ngnCharged := float64(amountKobo) / 100.0
+	interbank := h.rates.GetUSDToNGN()
+	custRate := customerRate(interbank)
 
 	// Apply the account's kind multiplier so a $10 deposit into a cent
 	// account credits $1,000 cent-units. Fetched outside the tx — kind is

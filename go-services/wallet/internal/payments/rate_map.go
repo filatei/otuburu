@@ -72,7 +72,7 @@ type RateMap struct {
 func NewRateMap() *RateMap {
 	return &RateMap{
 		rates: map[string]float64{
-			CcyNGN: 1600,  // seed; will be overwritten on first fetch
+			CcyNGN: 1600, // seed; will be overwritten on first fetch
 			CcyGHS: 14.0,
 			CcyKES: 130.0,
 			CcyZAR: 18.5,

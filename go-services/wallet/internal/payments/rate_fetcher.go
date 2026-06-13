@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	erAPIURL        = "https://open.er-api.com/v6/latest/USD"
+	erAPIURL         = "https://open.er-api.com/v6/latest/USD"
 	ratePollInterval = time.Hour
 	rateHTTPTimeout  = 10 * time.Second
 	defaultUSDToNGN  = 1600.0 // fallback if API unreachable on first boot

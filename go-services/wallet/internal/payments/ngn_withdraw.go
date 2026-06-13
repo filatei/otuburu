@@ -186,4 +186,3 @@ func (h *Handler) CurrentNGNCustomerRate() float64 {
 	}
 	return CustomerWithdrawRate(h.rates.GetUSDToNGN())
 }
-
