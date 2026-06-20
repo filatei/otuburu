@@ -46,6 +46,17 @@ func NewSquad() *SquadHandler {
 	return &SquadHandler{secretKey: secret}
 }
 
+// verifySig reports whether `header` is the valid Squad signature for `body`:
+// the uppercase-hex HMAC-SHA512 of the raw body keyed by the shared secret.
+// Case-insensitive (Squad sends uppercase; we normalise both sides).
+func (h *SquadHandler) verifySig(body []byte, header string) bool {
+	mac := hmac.New(sha512.New, []byte(h.secretKey))
+	mac.Write(body)
+	expected := strings.ToUpper(hex.EncodeToString(mac.Sum(nil)))
+	got := strings.ToUpper(header)
+	return hmac.Equal([]byte(expected), []byte(got))
+}
+
 // RegisterRoutes attaches the public, HMAC-verified webhook endpoint.
 func (h *SquadHandler) RegisterRoutes(public *gin.RouterGroup) {
 	if h == nil {
@@ -67,11 +78,7 @@ func (h *SquadHandler) Webhook(c *gin.Context) {
 	}
 
 	// ── Signature verification ─────────────────────────────────────────────
-	mac := hmac.New(sha512.New, []byte(h.secretKey))
-	mac.Write(body)
-	expected := strings.ToUpper(hex.EncodeToString(mac.Sum(nil)))
-	got := strings.ToUpper(c.GetHeader("x-squad-encrypted-body"))
-	if !hmac.Equal([]byte(expected), []byte(got)) {
+	if !h.verifySig(body, c.GetHeader("x-squad-encrypted-body")) {
 		slog.Warn("squad webhook: bad signature")
 		c.Status(http.StatusUnauthorized)
 		return
