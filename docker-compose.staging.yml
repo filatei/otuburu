@@ -211,12 +211,32 @@ services:
       timeout: 5s
       retries: 3
 
-  # NOTE: the Caddy off-Apache ingress (:2087) is intentionally NOT wired here
-  # yet. otuburu's deploy ships a curated file set, so infra/caddy/Caddyfile
-  # isn't on the server — Docker then bind-mounts an auto-created directory onto
-  # /etc/caddy/Caddyfile and the container fails. Re-add this service together
-  # with: (1) a deploy.yml step that SCPs infra/caddy/Caddyfile, and (2) the
-  # Origin cert at /opt/otuburu/origin. See VOTE repo CLOUDFLARE-INGRESS.md.
+  # Dedicated ingress — Cloudflare proxies otuburu.torama.money here on :2087
+  # (Origin Rule sets the port), bypassing the shared Apache. Replicates the
+  # Apache path routing (gateway/wallet/staking + static frontend).
+  #
+  # PREREQUISITES before the first deploy that includes this service:
+  #   1. deploy.yml SCPs infra/caddy/Caddyfile  → /opt/otuburu/backend/infra/caddy/ (done)
+  #   2. Cloudflare Origin cert present on the server at /opt/otuburu/origin/{cert,key}.pem
+  # Without (2), Caddy starts but fails to load TLS and restart-loops (trading
+  # services are unaffected). See VOTE repo CLOUDFLARE-INGRESS.md.
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    depends_on:
+      - gateway
+      - wallet
+      - staking
+    ports:
+      - "2087:2087"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/otuburu/frontend:/srv:ro
+      - /opt/otuburu/origin:/etc/caddy/origin:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
 
 networks:
   internal:
@@ -226,3 +246,5 @@ volumes:
   pgdata:
   stakingdata:
   enginedata:
+  caddy_data:
+  caddy_config:

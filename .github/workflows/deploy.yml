@@ -232,6 +232,18 @@ jobs:
           target:   "/opt/otuburu/backend/infra"
           strip_components: 2
 
+      # ── Caddy ingress config (off-Apache reverse proxy on :2087) ─────────────
+      - name: Copy Caddyfile to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host:     ${{ secrets.LINODE_HOST }}
+          username: ${{ secrets.LINODE_USER }}
+          key:      ${{ secrets.LINODE_SSH_KEY }}
+          port:     ${{ secrets.LINODE_SSH_PORT }}
+          source:   "infra/caddy/Caddyfile"
+          target:   "/opt/otuburu/backend/infra/caddy"
+          strip_components: 2
+
       # ── Write .env + pull images + restart all services ───────────────────────
       - name: SSH deploy
         uses: appleboy/ssh-action@v1.0.3
