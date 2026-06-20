@@ -1,0 +1,71 @@
+# Otuburu's own ingress. Cloudflare proxies otuburu.torama.money to this Caddy
+# on :2087 (via a Cloudflare Origin Rule that sets the origin port), so Otuburu
+# never touches the shared Apache. Caddy serves HTTPS with a Cloudflare Origin
+# Certificate and replicates the Apache path routing across the three services,
+# plus the static frontend, over the private docker network.
+#
+# 2087 is one of Cloudflare's proxy-compatible HTTPS origin ports
+# (443, 2053, 2083, 2087, 2096, 8443). neflo 8443, vote 2053, daybook 2083.
+#
+# Path map (mirrors infra/apache/otuburu.torama.money.conf):
+#   /api/stake/*, /staking*        -> staking  (8084)
+#   /api/*, /healthz, /ws          -> gateway  (8082)  (/ws is a WebSocket)
+#   /auth/*, /wallet/*, /admin*, /payments/*  -> wallet (8083)
+#   everything else                -> static frontend (SPA), /opt/otuburu/frontend
+
+{
+	admin off
+	servers {
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22
+	}
+}
+
+otuburu.torama.money:2087 {
+	tls /etc/caddy/origin/cert.pem /etc/caddy/origin/key.pem
+
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# `route` preserves directive order, so the more specific /api/stake/* is
+	# matched before the generic /api/*.
+	route {
+		@staking path /api/stake/* /staking /staking/*
+		handle @staking {
+			reverse_proxy staking:8084 {
+				header_up X-Forwarded-Proto https
+				header_up Host {host}
+			}
+		}
+
+		# /ws is a WebSocket — Caddy upgrades it transparently.
+		@gateway path /api/* /healthz /ws
+		handle @gateway {
+			reverse_proxy gateway:8082 {
+				header_up X-Forwarded-Proto https
+				header_up Host {host}
+			}
+		}
+
+		@wallet path /auth/* /wallet/* /admin* /payments/*
+		handle @wallet {
+			reverse_proxy wallet:8083 {
+				header_up X-Forwarded-Proto https
+				header_up Host {host}
+			}
+		}
+
+		# Static frontend (SPA) — mounted from the host at /opt/otuburu/frontend.
+		handle {
+			root * /srv
+			try_files {path} /index.html
+			file_server
+		}
+	}
+}
