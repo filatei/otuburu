@@ -114,6 +114,12 @@ func main() {
 	paystackH := payments.New(pool, rateFetcher, mailer)
 	paystackH.RegisterRoutes(protected, r.Group("/"))
 
+	// ── Squad downstream webhook ──────────────────────────────────────────────
+	// One Squad account is shared across the Torama apps; vote hosts the hub and
+	// forwards events here. Public + HMAC-verified. nil (route not registered)
+	// unless SQUAD_SECRET_KEY is set. See payments/squad.go.
+	payments.NewSquad().RegisterRoutes(r.Group("/"))
+
 	// ── Multi-PSP router ──────────────────────────────────────────────────────
 	// Provider-agnostic payment layer so we are not blocked on a single PSP's
 	// approval/uptime. Register providers in priority order (cheapest/most
