@@ -16,6 +16,7 @@ import MobilePositions   from '@/components/MobilePositions'
 import MobileTradeForm   from '@/components/MobileTradeForm'
 import AccountStatsPanel from '@/components/AccountStatsPanel'
 import AuthModal           from '@/components/AuthModal'
+import Landing             from '@/components/Landing'
 import ProfileModal        from '@/components/ProfileModal'
 import AppDrawer           from '@/components/AppDrawer'
 import DepositModal        from '@/components/DepositModal'
@@ -139,10 +140,12 @@ export default function TradingPage() {
   // at first user creation.
   useEffect(() => { captureRefFromUrl() }, [])
 
+  // Unauthenticated visitors land on the marketing landing page first (rendered
+  // below) — they open the sign-in sheet themselves via Get started. Only close
+  // the sheet once a user is present.
   useEffect(() => {
-    if (!authLoading && !user) setAuthOpen(true)
     if (user) setAuthOpen(false)
-  }, [authLoading, user])
+  }, [user])
 
   // Persist mode changes so a redirect (Paystack callback, OAuth return,
   // etc.) doesn't reset the user to demo. Pair with the localStorage
@@ -357,6 +360,19 @@ export default function TradingPage() {
   // today" subline under each Quotes row. Realised since UTC midnight plus
   // unrealised on open positions/spots.
   const dailyPnl = useDailyPnLBySymbol(settledHistory, positions, spots)
+
+  // Logged out → show the public landing page (not the gated trading UI). The
+  // sign-in sheet opens on top when the visitor taps Get started / Sign in.
+  if (!user) {
+    return (
+      <div className="h-[100dvh] bg-surface">
+        {authLoading
+          ? <div className="h-full grid place-items-center text-dim text-sm">Loading…</div>
+          : <Landing onGetStarted={() => setAuthOpen(true)} />}
+        {authOpen && <AuthModal onSuccess={handleGoogleLogin} error={authError} onClose={() => setAuthOpen(false)} />}
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col h-[100dvh] overflow-hidden bg-surface">
