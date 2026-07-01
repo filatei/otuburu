@@ -114,6 +114,11 @@ export default function Landing({ onGetStarted }: Props) {
         </section>
 
         <footer className="mt-10 pt-6 border-t border-border text-center text-dim text-xs">
+          <p className="max-w-2xl mx-auto mb-2">
+            Otuburu is <b className="text-text">not yet a licensed or regulated brokerage</b> — the licensing
+            process is ongoing. Until then, services are offered on that basis and you should trade
+            accordingly.
+          </p>
           © {year} Otuburu · Operated by Torama · Trading involves risk.
         </footer>
       </main>
