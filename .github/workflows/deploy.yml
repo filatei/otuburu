@@ -325,6 +325,11 @@ jobs:
             SMILE_PARTNER_ID=${{ secrets.SMILE_PARTNER_ID }}
             SMILE_API_KEY=${{ secrets.SMILE_API_KEY }}
             SMILE_ENV=${{ secrets.SMILE_ENV || 'sandbox' }}
+            # ── Broker balance poll (MetaApi) ──────────────────────────
+            # Disabled by default while the MetaApi token is revoked/expired
+            # (stops 401 log spam). Re-enable by setting the GitHub secret
+            # BROKER_BALANCE_ENABLED=true once a fresh MetaApi token is in place.
+            BROKER_BALANCE_ENABLED=${{ secrets.BROKER_BALANCE_ENABLED || 'false' }}
             ENVEOF
 
             # Login to GHCR and deploy
