@@ -51,6 +51,17 @@ const DEFAULT_INTERVAL_SECS: u64 = 60;
 /// Spawn the broker-balance poll task. Returns immediately; the task
 /// runs in the background until the engine shuts down.
 pub fn start(state: SharedState) {
+    // Kill switch: set BROKER_BALANCE_ENABLED=false to stop the poll entirely.
+    // Use this when the MetaApi token is revoked/expired so the engine stops
+    // hammering MetaApi and spamming 401 Unauthorized in the logs.
+    let enabled = std::env::var("BROKER_BALANCE_ENABLED")
+        .map(|v| !matches!(v.trim().to_ascii_lowercase().as_str(), "false" | "0" | "off" | "no"))
+        .unwrap_or(true);
+    if !enabled {
+        tracing::warn!("broker balance poll disabled (BROKER_BALANCE_ENABLED=false)");
+        return;
+    }
+
     let interval_secs = std::env::var("BROKER_BALANCE_INTERVAL_SECS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
